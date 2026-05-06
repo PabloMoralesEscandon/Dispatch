@@ -319,12 +319,12 @@
 		{
 			"id": "e649c893",
 			"type": "text",
-			"text": "## DE-04 Implement agent-safe CLI workflow\nImplement CLI commands that let agents plan, start, update, finish, pause, inspect, and coordinate without bypassing workflow rules.",
+			"text": "## DE-04 Implement agent-safe CLI workflow\nImplemented the Dispatch workflow command entry point. Added include/dispatch_cli.h and src/dispatch_cli.c with Dispatch-native help, reserved workflow command recognition, guarded not-yet-implemented failures, and a working init command that creates v1 dispatch.json. Updated main.c so Dispatch commands route through the new workflow CLI before legacy loading. Verified ./nob, ./tdl --help, guarded ./tdl list behavior, and /tmp init output with python -m json.tool.",
 			"x": 580,
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "caf7d058",

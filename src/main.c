@@ -1,14 +1,19 @@
 #include <string.h>
 
+#include "dispatch_cli.h"
 #include "parser.h"
 #include "memory.h"
 
 int main (int argc, char **argv) {
-    load(FILE_NAME);
-    if(argv[1]==NULL){
-	print_help();
-	return 0;
+    if (argc < 2) {
+        dispatch_cli_print_help();
+        return 0;
     }
+
+    if (dispatch_cli_is_command(argv[1]))
+        return dispatch_cli_dispatch(argc, argv);
+
+    load(FILE_NAME);
     char *command = argv[1];
     char *options[NUMBER_OPT] = {0};
     char *words = parse_words(argc, argv);
