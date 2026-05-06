@@ -15,9 +15,9 @@
               "state": {
                 "file": "Project.canvas",
                 "viewState": {
-                  "x": -350,
-                  "y": -415,
-                  "zoom": 0
+                  "x": 1076.9047973207394,
+                  "y": 1573.8437828954713,
+                  "zoom": -0.20102955712212453
                 }
               },
               "icon": "lucide-layout-dashboard",
@@ -184,12 +184,24 @@
       "canvas-watcher:Run Canvas Watcher": false
     }
   },
-  "active": "5c94d6816b0b06b5",
+  "active": "5c8bd66a1a47f5c0",
   "lastOpenFiles": [
+    "build/dispatch_store-c348c928.o.tmp",
+    "build/dispatch_cli-6f8d4fb5.o.tmp",
+    "build/dispatch-07d06440.o.tmp",
+    "build/utils-9bb219c3.o.tmp",
+    "build/task-268abfe4.o.tmp",
+    "build/parser-84c121b9.o.tmp",
+    "build/memory-58512b10.o.tmp",
+    "build/main-230ed201.o.tmp",
+    "build/dispatch_store-a2bc8d89.o.tmp",
+    "build/dispatch_cli-624f237c.o.tmp",
+    "build/dispatch-21893e38.o.tmp",
+    "TEST_PLAN.md",
+    "FEATURES.md",
     "Project.canvas",
     "RULES.md",
     "AGENTS.md",
-    "CLAUDE.md",
-    "canvas-tool.py"
+    "CLAUDE.md"
   ]
 }
