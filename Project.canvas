@@ -299,12 +299,12 @@
 		{
 			"id": "13511e8e",
 			"type": "text",
-			"text": "## DE-02 Strip unwanted TDL behavior\nRemove commands and data fields that do not belong in Dispatch, preserving only pieces intentionally retained by FEATURES.md.",
+			"text": "## DE-02 Strip unwanted TDL behavior\nStripped the first layer of obsolete TDL behavior while keeping the project buildable before the full Dispatch command rewrite. Removed startup recurrence updates, renamed the default storage file constant to dispatch.json, removed project commands and clear from the registered command table, removed due/recurrence/notify/category options from getopt parsing, and updated help text away from TDL/date/project behavior. Verified ./nob and ./tdl --help.",
 			"x": 580,
 			"y": 220,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "7f12da8e",

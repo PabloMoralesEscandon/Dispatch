@@ -5,7 +5,6 @@
 
 int main (int argc, char **argv) {
     load(FILE_NAME);
-    update_recurrent(FILE_NAME);
     if(argv[1]==NULL){
 	print_help();
 	return 0;

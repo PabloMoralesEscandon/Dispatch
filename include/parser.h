@@ -33,8 +33,8 @@
 /** @brief Indice de la opcion de notificacion en el array de opciones. */
 #define NOTIFY      8
 
-/** @brief Nombre del fichero JSON usado como almacenamiento. */
-#define FILE_NAME "tasks.json"
+/** @brief JSON storage file used by Dispatch. */
+#define FILE_NAME "dispatch.json"
 
 /**
  * @brief Tipo de funcion usado por cada comando del CLI.

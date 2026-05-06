@@ -13,19 +13,12 @@
 
 Command commands[] = {
     {"add", cmd_add, "Add a new task"},
-    {"add_project", cmd_add_project, "Add a new project"},
     {"show", cmd_show, "Show information of a task"},
     {"mod", cmd_mod, "Modify an existing task"},
-    {"mod_project", cmd_mod_project, "Modify an existing project"},
     {"start", cmd_start, "Mark a task as started"},
     {"done", cmd_done, "Mark a task as done"},
     {"del", cmd_del, "Delete a task"},
-    {"del_project", cmd_del_project, "Delete an empty project"},
     {"list", cmd_list, "List all tasks"},
-    {"list_projects", cmd_list_projects, "List all projects"},
-    {"show_project", cmd_proj_show, "Show information of a project"},
-    {"clear", cmd_clear,
-     "Clear all done tasks, if not part of an ongoing project"},
     {NULL, NULL, NULL} // Sentinel to mark end
 };
 
@@ -72,8 +65,8 @@ int parse_id_name(char *words) {
 }
 
 void print_help(void) {
-    puts("TDL (ToDoList): A command line to do list.");
-    puts("Usage: tdl [command] [id or name] <options>");
+    puts("Dispatch: a command line workflow board.");
+    puts("Usage: dispatch [command] [id or title] <options>");
     puts("");
     puts("Commands:");
     puts("  add            Add a new task");
@@ -82,75 +75,37 @@ void print_help(void) {
     puts("  start          Mark a task as started");
     puts("  done           Mark a task as done");
     puts("  del            Delete a task");
-    puts("  list           List tasks, or `list projects` to list projects");
-    puts("  clear          Clear done tasks that are not part of an ongoing project");
-    puts("");
-    puts("Project commands:");
-    puts("  add_project    Add a new project with its own metadata");
-    puts("  mod_project    Modify an existing project");
-    puts("  del_project    Delete an empty project");
-    puts("  list_projects  List all projects");
-    puts("  show_project   Show project details and its tasks");
+    puts("  list           List tasks");
     puts("");
     puts("Options:");
     puts("  -p, --priority <val>       Priority: low, medium, high, urgent");
-    puts("  -r, --recurrent <val>      Recurrence: daily, weekly, monthly, yearly");
-    puts("  -d, --due <val>            Due date: DD-MM-YYYY or DD-MM-YYYY HH:MM");
     puts("  -s, --status <val>         Status: todo, ongoing, done");
-    puts("  -c, --category <val>       Category");
-    puts("  -P, --project <val>        Assign task to project by name");
-    puts("  -n, --name <val>           Task or project name/title");
-    puts("  -D, --description <val>    Task or project description");
-    puts("  -N, --notify <val>         Notify bits: T=4, H=2, D=1, e.g. THD or 7");
+    puts("  -P, --project <val>        Temporary compatibility field");
+    puts("  -n, --name <val>           Task title");
+    puts("  -D, --description <val>    Task description");
     puts("  -h, --help                 Show this help and exit");
-    puts("");
-    puts("Notes:");
-    puts("  Tasks added with -P inherit the project's priority, due date,");
-    puts("  recurrence, status, category, description, and notify bits unless");
-    puts("  overridden.");
-    puts("");
-    puts("Dates and notify:");
-    puts("  Date-only:       -d 05-06-2026");
-    puts("  Date with time:  -d \"05-06-2026 14:30\"");
-    puts("  Notify letters:  -N THD  (T=4 at time, H=2 hour before, D=1 day of)");
-    puts("  Notify integer:  -N 7    (same as THD)");
-    puts("  Date-only due values with notify bits are stored at 23:59 internally");
-    puts("  but still display without a time.");
 }
 
 int parse_options(int argc, char **argv, char **options) {
     static struct option long_options[] = {
         {"priority", required_argument, 0, 'p'},
-        {"recurrent", required_argument, 0, 'r'},
-        {"due", required_argument, 0, 'd'},
         {"status", required_argument, 0, 's'},
-        {"category", required_argument, 0, 'c'},
         {"project", required_argument, 0, 'P'},
         {"name", required_argument, 0, 'n'},
         {"description", required_argument, 0, 'D'},
-        {"notify", required_argument, 0, 'N'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}};
 
     int opt;
 
-    while ((opt = getopt_long(argc, argv, "p:r:d:s:c:P:n:D:N:h", long_options,
+    while ((opt = getopt_long(argc, argv, "p:s:P:n:D:h", long_options,
                               NULL)) != -1) {
         switch (opt) {
         case 'p':
             options[PRIORITY] = strdup(optarg);
             break;
-        case 'r':
-            options[RECURRENT] = strdup(optarg);
-            break;
-        case 'd':
-            options[DUE] = strdup(optarg);
-            break;
         case 's':
             options[STATUS] = strdup(optarg);
-            break;
-        case 'c':
-            options[CATEGORY] = strdup(optarg);
             break;
         case 'P':
             options[PROJECT] = strdup(optarg);
@@ -160,9 +115,6 @@ int parse_options(int argc, char **argv, char **options) {
             break;
         case 'D':
             options[DESC] = strdup(optarg);
-            break;
-        case 'N':
-            options[NOTIFY] = strdup(optarg);
             break;
         case 'h':
             print_help();
