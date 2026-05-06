@@ -90,9 +90,17 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
                                       const char *group_id,
                                       const char *title,
                                       const char *description);
+int dispatch_task_set_title(DispatchTask *task, const char *title);
+int dispatch_task_set_description(DispatchTask *task, const char *description);
 
 const char *dispatch_state_name(DispatchState state);
 int dispatch_state_from_name(const char *name, DispatchState *state);
+int dispatch_task_set_state(DispatchTask *task, DispatchState state,
+                            const char *actor, const char *note);
+int dispatch_task_assign(DispatchTask *task, const char *actor);
+void dispatch_task_clear_assignment(DispatchTask *task);
+int dispatch_task_append_history(DispatchTask *task, const char *actor,
+                                 const char *action, const char *note);
 
 DispatchState dispatch_task_effective_state(const DispatchBoard *board,
                                             const DispatchTask *task);

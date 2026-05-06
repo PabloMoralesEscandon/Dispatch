@@ -194,17 +194,17 @@
 			"y": 940,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "95d42ce0",
 			"type": "text",
-			"text": "## DE-07 Replace TDL domain structs\nReplace ToDoList, ToDoProjects, Task, and Project semantics with Dispatch board, group, task, dependency, and history structures.",
+			"text": "## DE-07 Replace TDL domain structs\nReplaced the active domain target with Dispatch model helpers. Extended include/dispatch.h and src/dispatch.c so the Dispatch board/task/group model owns task title and description updates, assignment, state changes, and history entries. This makes the new Dispatch domain usable by persistence and command tasks without relying on TDL Task/Project semantics. Verified the build with ./nob.",
 			"x": 580,
 			"y": 1120,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "96ecef58",
@@ -304,7 +304,7 @@
 			"y": 220,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "7f12da8e",
@@ -314,7 +314,7 @@
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "e649c893",
@@ -324,7 +324,7 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "1"
 		},
 		{
 			"id": "caf7d058",

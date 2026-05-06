@@ -28,6 +28,12 @@ static void string_list_append(DispatchStringList *list, const char *value) {
     list->items[list->count++] = dispatch_strdup(value);
 }
 
+static void replace_string(char **target, const char *value) {
+    char *copy = dispatch_strdup(value);
+    free(*target);
+    *target = copy;
+}
+
 static int string_list_contains(const DispatchStringList *list,
                                 const char *value) {
     for (size_t i = 0; i < list->count; i++) {
@@ -56,6 +62,29 @@ static void history_free(DispatchHistory *history) {
     history->items = NULL;
     history->count = 0;
     history->capacity = 0;
+}
+
+int dispatch_task_append_history(DispatchTask *task, const char *actor,
+                                 const char *action, const char *note) {
+    if (!task || !action || action[0] == '\0')
+        return 0;
+
+    if (task->history.count >= task->history.capacity) {
+        task->history.capacity = task->history.capacity == 0
+                                     ? 4
+                                     : task->history.capacity * 2;
+        task->history.items = dispatch_realloc_array(
+            task->history.items, task->history.capacity,
+            sizeof(*task->history.items));
+    }
+
+    DispatchHistoryEntry *entry = &task->history.items[task->history.count++];
+    entry->actor = dispatch_strdup(actor && actor[0] ? actor : "unknown");
+    entry->action = dispatch_strdup(action);
+    entry->note = dispatch_strdup(note ? note : "");
+    entry->timestamp = time(NULL);
+    task->updated_at = entry->timestamp;
+    return 1;
 }
 
 static char *prefix_from_name(const char *name) {
@@ -232,7 +261,24 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
     task->requires_review = 1;
     task->created_at = time(NULL);
     task->updated_at = task->created_at;
+    dispatch_task_append_history(task, "system", "created", "");
     return task;
+}
+
+int dispatch_task_set_title(DispatchTask *task, const char *title) {
+    if (!task || !title || title[0] == '\0')
+        return 0;
+    replace_string(&task->title, title);
+    task->updated_at = time(NULL);
+    return 1;
+}
+
+int dispatch_task_set_description(DispatchTask *task, const char *description) {
+    if (!task)
+        return 0;
+    replace_string(&task->description, description ? description : "");
+    task->updated_at = time(NULL);
+    return 1;
 }
 
 const char *dispatch_state_name(DispatchState state) {
@@ -270,6 +316,35 @@ int dispatch_state_from_name(const char *name, DispatchState *state) {
         }
     }
     return 0;
+}
+
+int dispatch_task_set_state(DispatchTask *task, DispatchState state,
+                            const char *actor, const char *note) {
+    if (!task)
+        return 0;
+
+    task->state = state;
+    task->updated_at = time(NULL);
+    return dispatch_task_append_history(task, actor, dispatch_state_name(state),
+                                        note ? note : "");
+}
+
+int dispatch_task_assign(DispatchTask *task, const char *actor) {
+    if (!task || !actor || actor[0] == '\0')
+        return 0;
+
+    replace_string(&task->assigned_to, actor);
+    task->updated_at = time(NULL);
+    return dispatch_task_append_history(task, actor, "assigned", "");
+}
+
+void dispatch_task_clear_assignment(DispatchTask *task) {
+    if (!task)
+        return;
+
+    free(task->assigned_to);
+    task->assigned_to = NULL;
+    task->updated_at = time(NULL);
 }
 
 int dispatch_task_has_unmet_dependencies(const DispatchBoard *board,
