@@ -374,6 +374,7 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
     }
 
     json_decref(root);
+    dispatch_board_normalize_states(board);
     return 1;
 }
 

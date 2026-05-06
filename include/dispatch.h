@@ -107,11 +107,16 @@ DispatchState dispatch_task_effective_state(const DispatchBoard *board,
                                             const DispatchTask *task);
 int dispatch_task_has_unmet_dependencies(const DispatchBoard *board,
                                          const DispatchTask *task);
+size_t dispatch_task_dependent_count(const DispatchBoard *board,
+                                     const char *task_id);
 int dispatch_task_add_dependency(DispatchBoard *board, const char *from_id,
                                  const char *to_id);
+int dispatch_task_remove_dependency(DispatchBoard *board, const char *from_id,
+                                    const char *to_id);
 int dispatch_board_has_dependency_path(const DispatchBoard *board,
                                        const char *from_id,
                                        const char *to_id);
+void dispatch_board_normalize_states(DispatchBoard *board);
 
 char *dispatch_next_task_id(const DispatchBoard *board, const char *group_id);
 

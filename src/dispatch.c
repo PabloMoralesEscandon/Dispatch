@@ -43,6 +43,19 @@ static int string_list_contains(const DispatchStringList *list,
     return 0;
 }
 
+static int string_list_remove(DispatchStringList *list, const char *value) {
+    for (size_t i = 0; i < list->count; i++) {
+        if (strcmp(list->items[i], value) != 0)
+            continue;
+        free(list->items[i]);
+        for (size_t j = i + 1; j < list->count; j++)
+            list->items[j - 1] = list->items[j];
+        list->count--;
+        return 1;
+    }
+    return 0;
+}
+
 static void string_list_free(DispatchStringList *list) {
     for (size_t i = 0; i < list->count; i++)
         free(list->items[i]);
@@ -376,6 +389,18 @@ int dispatch_task_has_unmet_dependencies(const DispatchBoard *board,
     return 0;
 }
 
+size_t dispatch_task_dependent_count(const DispatchBoard *board,
+                                     const char *task_id) {
+    size_t count = 0;
+    if (!board || !task_id)
+        return 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        if (string_list_contains(&board->tasks.items[i].depends_on, task_id))
+            count++;
+    }
+    return count;
+}
+
 DispatchState dispatch_task_effective_state(const DispatchBoard *board,
                                             const DispatchTask *task) {
     if (!task)
@@ -435,5 +460,40 @@ int dispatch_task_add_dependency(DispatchBoard *board, const char *from_id,
 
     string_list_append(&to->depends_on, from_id);
     to->updated_at = time(NULL);
+    dispatch_board_normalize_states(board);
     return 1;
+}
+
+int dispatch_task_remove_dependency(DispatchBoard *board, const char *from_id,
+                                    const char *to_id) {
+    DispatchTask *to = dispatch_board_find_task(board, to_id);
+    if (!to)
+        return 0;
+    int removed = string_list_remove(&to->depends_on, from_id);
+    if (removed) {
+        to->updated_at = time(NULL);
+        dispatch_board_normalize_states(board);
+    }
+    return removed;
+}
+
+void dispatch_board_normalize_states(DispatchBoard *board) {
+    if (!board)
+        return;
+
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (task->state == DISPATCH_STATE_DONE ||
+            task->state == DISPATCH_STATE_DOING ||
+            task->state == DISPATCH_STATE_REVIEW ||
+            task->state == DISPATCH_STATE_PROPOSED) {
+            continue;
+        }
+
+        if (dispatch_task_has_unmet_dependencies(board, task)) {
+            task->state = DISPATCH_STATE_BLOCKED;
+        } else if (task->state == DISPATCH_STATE_BLOCKED) {
+            task->state = DISPATCH_STATE_READY;
+        }
+    }
 }

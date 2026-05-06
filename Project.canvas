@@ -204,17 +204,17 @@
 			"y": 1480,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "ec3ec0a3",
 			"type": "text",
-			"text": "## DE-10 Implement dependency and blocked-state engine\nStore depends_on as task ID arrays, detect missing dependencies and cycles, derive blocked/ready state, and provide reverse dependency lookup for display.",
+			"text": "## DE-10 Implement dependency and blocked-state engine\nImplemented the dependency and blocked-state engine. Added dependency add/remove APIs, dependent counting, cycle prevention, dependency removal, and board normalization of blocked/ready states. The store validates missing dependency IDs on load and normalizes loaded boards. The CLI now supports dep add, dep remove, and normalize. Verified ./nob, adding multiple dependencies to one task, JSON depends_on arrays, removing a dependency, missing dependency rejection, and cycle rejection.",
 			"x": 580,
 			"y": 1660,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "a9f38831",

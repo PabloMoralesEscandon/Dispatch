@@ -202,6 +202,63 @@ static int cmd_task(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_dep(int argc, char **argv) {
+    if (argc != 5 ||
+        (strcmp(argv[2], "add") != 0 && strcmp(argv[2], "remove") != 0)) {
+        fprintf(stderr, "Usage: dispatch dep add <from-id> <to-id>\n");
+        fprintf(stderr, "       dispatch dep remove <from-id> <to-id>\n");
+        return 1;
+    }
+
+    const char *from_id = argv[3];
+    const char *to_id = argv[4];
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    int ok;
+    if (strcmp(argv[2], "add") == 0) {
+        ok = dispatch_task_add_dependency(&board, from_id, to_id);
+    } else {
+        ok = dispatch_task_remove_dependency(&board, from_id, to_id);
+    }
+
+    if (!ok) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not %s dependency %s -> %s\n", argv[2],
+                from_id, to_id);
+        return 1;
+    }
+
+    if (!save_board_or_error(&board)) {
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("%s dependency %s -> %s\n",
+           strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
+           to_id);
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_normalize(void) {
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    dispatch_board_normalize_states(&board);
+    if (!save_board_or_error(&board)) {
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Normalized %s\n", DISPATCH_STORE_FILE);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 int dispatch_cli_dispatch(int argc, char **argv) {
     if (argc < 2 || strcmp(argv[1], "--help") == 0 ||
         strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "help") == 0) {
@@ -221,6 +278,10 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_group(argc, argv);
     if (strcmp(command->name, "task") == 0)
         return cmd_task(argc, argv);
+    if (strcmp(command->name, "dep") == 0)
+        return cmd_dep(argc, argv);
+    if (strcmp(command->name, "normalize") == 0)
+        return cmd_normalize();
 
     fprintf(stderr,
             "Command '%s' is reserved for the Dispatch workflow but is not "
