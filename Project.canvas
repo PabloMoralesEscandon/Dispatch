@@ -1,8 +1,594 @@
 {
-	"nodes":[
-		{"id":"canvas-errors","type":"text","text":"## Errors\n✓ None","x":-540,"y":-750,"width":380,"height":200,"color":"1"},
-		{"id":"legend","type":"text","text":"## Legend\n🔴 **Red** = To Do (ready)\n⬜ **Gray** = Blocked\n🟠 **Orange** = Doing\n🔵 **Cyan** = Ready to review\n🟢 **Green** = Done\n🟣 **Purple** = Proposed by agent","x":-540,"y":-310,"width":380,"height":230,"color":"0"},
-		{"id":"canvas-warnings","type":"text","text":"## Warnings\n✓ None","x":-540,"y":-530,"width":380,"height":200,"color":"3"}
+	"nodes": [
+		{
+			"id": "group-develo",
+			"type": "group",
+			"x": 560,
+			"y": 0,
+			"width": 380,
+			"height": 2740,
+			"label": "Development"
+		},
+		{
+			"id": "group-valida",
+			"type": "group",
+			"x": 1320,
+			"y": 0,
+			"width": 380,
+			"height": 1300,
+			"label": "Validation Delivery"
+		},
+		{
+			"id": "group-requir",
+			"type": "group",
+			"x": 0,
+			"y": 0,
+			"width": 380,
+			"height": 940,
+			"label": "Requirements"
+		},
+		{
+			"id": "group-agentd",
+			"type": "group",
+			"x": 1760,
+			"y": 0,
+			"width": 380,
+			"height": 700,
+			"label": "Agent Documentation"
+		},
+		{
+			"id": "canvas-errors",
+			"type": "text",
+			"text": "## Errors\n✓ None",
+			"x": -540,
+			"y": -750,
+			"width": 380,
+			"height": 200,
+			"color": "1"
+		},
+		{
+			"id": "legend",
+			"type": "text",
+			"text": "## Legend\n🔴 **Red** = To Do (ready)\n⬜ **Gray** = Blocked\n🟠 **Orange** = Doing\n🔵 **Cyan** = Ready to review\n🟢 **Green** = Done\n🟣 **Purple** = Proposed by agent",
+			"x": -540,
+			"y": -310,
+			"width": 380,
+			"height": 230,
+			"color": "0"
+		},
+		{
+			"id": "canvas-warnings",
+			"type": "text",
+			"text": "## Warnings\n✓ None",
+			"x": -540,
+			"y": -530,
+			"width": 380,
+			"height": 200,
+			"color": "3"
+		},
+		{
+			"id": "15a522ae",
+			"type": "text",
+			"text": "## RE-01 Inventory existing TDL behavior\nInventory complete. Current TDL behavior: C CLI named tdl built by nob.c into build/tdl; stores data in tasks.json using Jansson; source layout is src/main.c, parser.c, memory.c, task.c, utils.c plus include headers. Commands: add, show, mod, start, done, del, list, clear, add_project, mod_project, del_project, list_projects, show_project. Task fields: id, name, description, priority, due date/time, notify bits, recurrence, status, category, project. Project fields mirror task defaults and provide progress summaries. CLI parsing supports positional id/name plus options for priority, recurrence, due, status, category, project, name, description, notify. Existing workflow states are only todo, in progress, done. Existing behavior includes personal-task sorting by priority/due date, recurring task rollover, project inheritance, colored terminal tables, and JSON migration from old array storage. Not Dispatch yet: no board/group model, no dependency graph, no blocked state enforcement, no proposal/review lifecycle, no agent permissions, no multi-agent coordination, and no agent-safe command protocol. Cleanup noted: README still documents TDL; build output is tdl; CLAUDE.md, AGENTS.md, RULES.md, Project.canvas, and canvas-tool.py are Kanvas workflow artifacts; many source/header comments are Spanish and must be translated in the later English pass.",
+			"x": 20,
+			"y": 40,
+			"width": 280,
+			"height": 160,
+			"color": "4"
+		},
+		{
+			"id": "d73cc7cf",
+			"type": "text",
+			"text": "## RE-02 Discuss user-requested feature removals\nUser-requested removals and changes recorded. Remove as irrelevant: due dates, recurrence, notification metadata, categories, and clear behavior. Filtering is not important, but may remain if it does not complicate the program. Deleting tasks must remain. Table output can remain because it helps humans inspect current progress. Sorting by priority may remain but needs redesign for Dispatch-specific ordering. Name-based lookup must change: name should become the task title, while task IDs should become meaningful unique identifiers that include the category/group prefix, similar to Kanvas task IDs. Rename tasks.json storage to dispatch.json while preserving the same general JSON persistence role. Commands should change according to these decisions: remove commands tied only to deleted features, keep task deletion, keep useful list/show behavior, and replace TDL command semantics with Dispatch workflow semantics. Open design point for later agent proposal: whether TDL-style projects should remain, be renamed into boards/groups, or be replaced entirely by Dispatch workflow groups.",
+			"x": 20,
+			"y": 220,
+			"width": 280,
+			"height": 160,
+			"color": "4"
+		},
+		{
+			"id": "42548218",
+			"type": "text",
+			"text": "## RE-03 Discuss user-requested feature additions\nUser-requested additions recorded. Add meaningful task identifiers with a group/topic prefix instead of arbitrary numeric IDs. Add dependency tracking: each task should record which task IDs it is pending on before it can be started. Add a review/wait gate field: when active on a sequence, the agent must stop after completing a task until the user checks or approves the result; when inactive, the agent may continue to the next available task in the sequence. Add assignment tracking: when an agent or user starts a task, an Assigned field records who is responsible. Add completion ownership: when a task is finished, record who completed it. Keep the design open for later agent/user identity identifiers, but build the functionality. Humans should use the same Dispatch client/CLI as agents rather than a separate control surface. Replace or rethink categories as groups/topics for organizing tasks. Add a show/list view that is not priority-only: it should display tasks by group and make task sequences/dependency chains visible. Open naming/design points: rename Pending on to something clearer, rename Wait to something clearer, decide whether groups replace projects, decide the exact agent/user identity format, and decide how sequence-aware output should look in a terminal.",
+			"x": 20,
+			"y": 400,
+			"width": 280,
+			"height": 160,
+			"color": "4"
+		},
+		{
+			"id": "bead7577",
+			"type": "text",
+			"text": "## RE-04 Propose agent feature removals and additions\nAgent proposal complete. Additional removals: remove TDL project inheritance semantics because Dispatch projects should become boards or workspaces, not metadata templates for personal todos; remove recurrence update logic from startup; remove due-date sorting as the default ordering rule; remove notify normalization and all date/time storage fields unless a future deadline feature is explicitly added; remove default Task N / Project N naming because Dispatch tasks should require clear titles or generated IDs; remove status strings todo/ongoing/done as the only lifecycle because Dispatch needs proposed, ready, blocked, doing, review, done, and possibly paused. Recommended additions: model Boards as the top-level file/workspace concept and Groups as visual/logical lanes inside a board; use task IDs like GROUP-01 or a short stable prefix plus number, generated by Dispatch; store dependencies as explicit task ID arrays named depends_on rather than pending_on for clarity; store blocked as derived state from dependencies, not manually edited; rename Wait to review_gate or requires_review, meaning an agent must stop after finishing before proceeding in that sequence; add assigned_to, started_by, completed_by, started_at, completed_at, and updated_at fields; add notes/history entries so agents can append progress without overwriting task descriptions; add command validation for legal transitions and dependency cycles; add lock/claim behavior so two agents cannot start the same task casually; add list views for by group, by state, ready, blocked, review, and sequence/tree output; add machine-readable output, likely JSON, so agents can parse state reliably; keep human-readable table output for humans; keep delete but make it guarded, ideally refusing deletion of tasks that have dependents unless forced or explicitly confirmed; add normalize/repair command to assign missing IDs and recompute blocked state; add import/export or migration from old TDL tasks only if needed, not as core behavior. Project decision proposal: replace TDL projects with Dispatch boards/groups. A board is the file or workspace; a group is the topic/lane; task dependencies define sequences. Sorting proposal: use workflow order first, then group order, dependency depth, state, and ID; priority can become optional urgency metadata later, not the primary model.",
+			"x": 20,
+			"y": 580,
+			"width": 280,
+			"height": 160,
+			"color": "4"
+		},
+		{
+			"id": "971b66fc",
+			"type": "text",
+			"text": "## RE-05 Write FEATURES.md\nCreated FEATURES.md with the agreed Dispatch feature plan. The document records the current TDL baseline, features to remove, features to keep or adapt, new Dispatch features, proposed lifecycle states, display/ordering expectations, and open questions before implementation planning.",
+			"x": 20,
+			"y": 760,
+			"width": 280,
+			"height": 160,
+			"color": "4"
+		},
+		{
+			"id": "e6ab8abb",
+			"type": "text",
+			"text": "## VD-01 Define test plan and fixtures\nDesign CLI-level tests, fixture files, edge cases, and acceptance scenarios for the Dispatch workflow.",
+			"x": 1340,
+			"y": 40,
+			"width": 280,
+			"height": 160,
+			"color": "1"
+		},
+		{
+			"id": "258eff30",
+			"type": "text",
+			"text": "## VD-02 Implement automated tests\nAdd automated tests for command parsing, persistence, state transitions, blocked dependencies, invalid operations, and multi-agent-safe workflows.",
+			"x": 1340,
+			"y": 220,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "0980e29e",
+			"type": "text",
+			"text": "## VD-03 Update README.md\nRewrite the README for Dispatch: purpose, install/build steps, command reference, agent workflow examples, and storage behavior.",
+			"x": 1340,
+			"y": 400,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "680cf1ad",
+			"type": "text",
+			"text": "## VD-04 English-only code and comments pass\nRename Spanish identifiers if any are found, translate Spanish comments/docs in source headers, and ensure all code-facing text is English.",
+			"x": 1340,
+			"y": 580,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "4dcec8dd",
+			"type": "text",
+			"text": "## VD-05 Inventory repo cleanup candidates\nList workflow-only or Kanvas-specific files that are not part of Dispatch itself, explain why each can be removed, and ask the user before deletion.",
+			"x": 1340,
+			"y": 760,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "1886ca96",
+			"type": "text",
+			"text": "## VD-06 Run final acceptance pass\nBuild, run tests, exercise core CLI workflows manually, and verify docs match implemented behavior.",
+			"x": 1340,
+			"y": 940,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "d38f8e90",
+			"type": "text",
+			"text": "## AD-01 Create CLAUDE.md\nWrite the agent-facing CLAUDE.md instructions after the core Dispatch functionality is implemented, so the rules match the final CLI behavior and data model.",
+			"x": 1780,
+			"y": 40,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "cf1ee55d",
+			"type": "text",
+			"text": "## DE-06 Define Dispatch schema and command vocabulary\nDefined the Dispatch v1 schema and command vocabulary in FEATURES.md. The schema now specifies dispatch.json with version, board, groups, tasks, task IDs, depends_on, requires_review, ownership timestamps, and history. The command vocabulary now covers init, group add, task add/edit/delete, dependency add/remove, ready/start/pause/finish/review, list/ready/blocked/show, normalize, and JSON output mode.",
+			"x": 580,
+			"y": 940,
+			"width": 280,
+			"height": 160,
+			"color": "5"
+		},
+		{
+			"id": "95d42ce0",
+			"type": "text",
+			"text": "## DE-07 Replace TDL domain structs\nReplace ToDoList, ToDoProjects, Task, and Project semantics with Dispatch board, group, task, dependency, and history structures.",
+			"x": 580,
+			"y": 1120,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "96ecef58",
+			"type": "text",
+			"text": "## DE-08 Rewrite dispatch.json persistence\nRename storage to dispatch.json and rewrite load/save around the Dispatch schema, preserving robust creation of missing storage and validation of malformed data.",
+			"x": 580,
+			"y": 1300,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "9d7afb85",
+			"type": "text",
+			"text": "## DE-09 Implement group-prefixed task IDs\nGenerate stable task IDs from group prefixes, assign the next available number, and keep task titles separate from identifiers.",
+			"x": 580,
+			"y": 1480,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "ec3ec0a3",
+			"type": "text",
+			"text": "## DE-10 Implement dependency and blocked-state engine\nStore depends_on as task ID arrays, detect missing dependencies and cycles, derive blocked/ready state, and provide reverse dependency lookup for display.",
+			"x": 580,
+			"y": 1660,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "a9f38831",
+			"type": "text",
+			"text": "## DE-11 Implement lifecycle and ownership commands\nImplement workflow-safe commands for creating, approving or marking ready, starting, pausing, finishing, reviewing, completing, assigning, and recording started_by/completed_by metadata.",
+			"x": 580,
+			"y": 1840,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "ee104c2d",
+			"type": "text",
+			"text": "## DE-12 Implement review-gate behavior\nImplement requires_review so agents stop after a gated task reaches review, while ungated sequences can continue to the next ready task.",
+			"x": 580,
+			"y": 2020,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "78ddc276",
+			"type": "text",
+			"text": "## DE-13 Implement grouped and sequence-aware views\nReplace priority/due-date-first listing with human table views and agent-readable JSON views for group, state, ready, blocked, review, assignment, and dependency sequence output.",
+			"x": 580,
+			"y": 2200,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "903f2b77",
+			"type": "text",
+			"text": "## DE-14 Remove obsolete TDL command surface\nRemove due date, recurrence, notification, category, clear, project inheritance, and TDL-only help/options after Dispatch commands are in place.",
+			"x": 580,
+			"y": 2380,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "dec49000",
+			"type": "text",
+			"text": "## DE-15 Harden delete and repair commands\nKeep delete with dependency safeguards, add repair/normalize behavior for IDs and derived states, and make invalid operations fail clearly.",
+			"x": 580,
+			"y": 2560,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "f612d43e",
+			"type": "text",
+			"text": "## DE-01 Create implementation task breakdown\nImplementation breakdown created from FEATURES.md. Added proposed Development tasks DE-06 through DE-15: schema and command vocabulary, Dispatch domain structs, dispatch.json persistence, group-prefixed IDs, dependency/blocked-state engine, lifecycle and ownership commands, review-gate behavior, grouped/sequence-aware views, obsolete TDL command removal, and delete/repair hardening. Wired the final detailed implementation leaves DE-12, DE-13, DE-14, and DE-15 into DE-05 so the implementation checkpoint waits for the concrete core functionality before docs/tests/cleanup proceed. Existing broad tasks DE-02, DE-03, and DE-04 were left untouched as approved higher-level gates.",
+			"x": 580,
+			"y": 40,
+			"width": 280,
+			"height": 160,
+			"color": "4"
+		},
+		{
+			"id": "13511e8e",
+			"type": "text",
+			"text": "## DE-02 Strip unwanted TDL behavior\nRemove commands and data fields that do not belong in Dispatch, preserving only pieces intentionally retained by FEATURES.md.",
+			"x": 580,
+			"y": 220,
+			"width": 280,
+			"height": 160,
+			"color": "1"
+		},
+		{
+			"id": "7f12da8e",
+			"type": "text",
+			"text": "## DE-03 Implement Dispatch board model\nBuild the core data model for tasks, states, dependencies, blocked status, review status, and project board storage.",
+			"x": 580,
+			"y": 400,
+			"width": 280,
+			"height": 160,
+			"color": "1"
+		},
+		{
+			"id": "e649c893",
+			"type": "text",
+			"text": "## DE-04 Implement agent-safe CLI workflow\nImplement CLI commands that let agents plan, start, update, finish, pause, inspect, and coordinate without bypassing workflow rules.",
+			"x": 580,
+			"y": 580,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "caf7d058",
+			"type": "text",
+			"text": "## DE-05 Implementation complete checkpoint\nPlaceholder gate: this blocks docs, tests, language cleanup, and repo cleanup tasks that must wait until the new Dispatch code path is complete.",
+			"x": 580,
+			"y": 760,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		}
 	],
-	"edges":[]
+	"edges": [
+		{
+			"id": "edge-001",
+			"fromNode": "15a522ae",
+			"fromSide": "bottom",
+			"toNode": "d73cc7cf",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-002",
+			"fromNode": "15a522ae",
+			"fromSide": "bottom",
+			"toNode": "42548218",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-003",
+			"fromNode": "d73cc7cf",
+			"fromSide": "bottom",
+			"toNode": "bead7577",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-004",
+			"fromNode": "42548218",
+			"fromSide": "bottom",
+			"toNode": "bead7577",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-005",
+			"fromNode": "bead7577",
+			"fromSide": "bottom",
+			"toNode": "971b66fc",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-013",
+			"fromNode": "7f12da8e",
+			"fromSide": "bottom",
+			"toNode": "e649c893",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-014",
+			"fromNode": "13511e8e",
+			"fromSide": "bottom",
+			"toNode": "caf7d058",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-015",
+			"fromNode": "e649c893",
+			"fromSide": "bottom",
+			"toNode": "caf7d058",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-017",
+			"fromNode": "caf7d058",
+			"fromSide": "top",
+			"toNode": "258eff30",
+			"toSide": "bottom"
+		},
+		{
+			"id": "edge-018",
+			"fromNode": "e6ab8abb",
+			"fromSide": "bottom",
+			"toNode": "258eff30",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-019",
+			"fromNode": "caf7d058",
+			"fromSide": "right",
+			"toNode": "0980e29e",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-020",
+			"fromNode": "caf7d058",
+			"fromSide": "right",
+			"toNode": "680cf1ad",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-021",
+			"fromNode": "caf7d058",
+			"fromSide": "right",
+			"toNode": "4dcec8dd",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-022",
+			"fromNode": "258eff30",
+			"fromSide": "bottom",
+			"toNode": "1886ca96",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-023",
+			"fromNode": "0980e29e",
+			"fromSide": "bottom",
+			"toNode": "1886ca96",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-024",
+			"fromNode": "680cf1ad",
+			"fromSide": "bottom",
+			"toNode": "1886ca96",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-025",
+			"fromNode": "4dcec8dd",
+			"fromSide": "bottom",
+			"toNode": "1886ca96",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-026",
+			"fromNode": "caf7d058",
+			"fromSide": "right",
+			"toNode": "d38f8e90",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-028",
+			"fromNode": "cf1ee55d",
+			"fromSide": "bottom",
+			"toNode": "95d42ce0",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-029",
+			"fromNode": "95d42ce0",
+			"fromSide": "bottom",
+			"toNode": "96ecef58",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-030",
+			"fromNode": "96ecef58",
+			"fromSide": "bottom",
+			"toNode": "9d7afb85",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-031",
+			"fromNode": "9d7afb85",
+			"fromSide": "bottom",
+			"toNode": "ec3ec0a3",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-032",
+			"fromNode": "ec3ec0a3",
+			"fromSide": "bottom",
+			"toNode": "a9f38831",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-033",
+			"fromNode": "a9f38831",
+			"fromSide": "bottom",
+			"toNode": "ee104c2d",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-034",
+			"fromNode": "ec3ec0a3",
+			"fromSide": "bottom",
+			"toNode": "78ddc276",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-035",
+			"fromNode": "a9f38831",
+			"fromSide": "bottom",
+			"toNode": "903f2b77",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-036",
+			"fromNode": "ec3ec0a3",
+			"fromSide": "bottom",
+			"toNode": "dec49000",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-037",
+			"fromNode": "ee104c2d",
+			"fromSide": "top",
+			"toNode": "caf7d058",
+			"toSide": "bottom"
+		},
+		{
+			"id": "edge-038",
+			"fromNode": "78ddc276",
+			"fromSide": "top",
+			"toNode": "caf7d058",
+			"toSide": "bottom"
+		},
+		{
+			"id": "edge-039",
+			"fromNode": "903f2b77",
+			"fromSide": "top",
+			"toNode": "caf7d058",
+			"toSide": "bottom"
+		},
+		{
+			"id": "edge-040",
+			"fromNode": "dec49000",
+			"fromSide": "top",
+			"toNode": "caf7d058",
+			"toSide": "bottom"
+		},
+		{
+			"id": "edge-009",
+			"fromNode": "971b66fc",
+			"fromSide": "right",
+			"toNode": "f612d43e",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-011",
+			"fromNode": "f612d43e",
+			"fromSide": "bottom",
+			"toNode": "13511e8e",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-012",
+			"fromNode": "f612d43e",
+			"fromSide": "bottom",
+			"toNode": "7f12da8e",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-016",
+			"fromNode": "f612d43e",
+			"fromSide": "right",
+			"toNode": "e6ab8abb",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-027",
+			"fromNode": "f612d43e",
+			"fromSide": "bottom",
+			"toNode": "cf1ee55d",
+			"toSide": "top"
+		}
+	]
 }
