@@ -189,7 +189,8 @@ int dispatch_board_add_group(DispatchBoard *board, const char *name,
     for (char *p = resolved_prefix; *p; p++)
         *p = (char)toupper((unsigned char)*p);
 
-    if (dispatch_board_find_group(board, resolved_prefix)) {
+    if (!dispatch_group_prefix_is_valid(resolved_prefix) ||
+        dispatch_board_find_group(board, resolved_prefix)) {
         free(resolved_prefix);
         return 0;
     }
@@ -207,6 +208,17 @@ int dispatch_board_add_group(DispatchBoard *board, const char *name,
     group->id = dispatch_strdup(resolved_prefix);
     group->name = dispatch_strdup(name);
     group->prefix = resolved_prefix;
+    return 1;
+}
+
+int dispatch_group_prefix_is_valid(const char *prefix) {
+    size_t len = prefix ? strlen(prefix) : 0;
+    if (len < 1 || len > 3)
+        return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!isalnum((unsigned char)prefix[i]))
+            return 0;
+    }
     return 1;
 }
 
@@ -242,6 +254,8 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
     if (!board || !group || !title || title[0] == '\0')
         return NULL;
 
+    char *task_id = dispatch_next_task_id(board, group->prefix);
+
     if (board->tasks.count >= board->tasks.capacity) {
         board->tasks.capacity = board->tasks.capacity == 0
                                     ? 8
@@ -253,7 +267,7 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
 
     DispatchTask *task = &board->tasks.items[board->tasks.count++];
     memset(task, 0, sizeof(*task));
-    task->id = dispatch_next_task_id(board, group->prefix);
+    task->id = task_id;
     task->title = dispatch_strdup(title);
     task->description = dispatch_strdup(description ? description : "");
     task->group = dispatch_strdup(group->id);

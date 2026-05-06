@@ -1,8 +1,10 @@
 #include "dispatch_cli.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "dispatch.h"
 #include "dispatch_store.h"
 
 typedef struct {
@@ -88,6 +90,118 @@ static int cmd_init(void) {
     return 0;
 }
 
+static int load_board_or_error(DispatchBoard *board) {
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, error, sizeof(error))) {
+        fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
+                error);
+        return 0;
+    }
+    if (!dispatch_store_load(board, DISPATCH_STORE_FILE, error, sizeof(error))) {
+        fprintf(stderr, "Could not load %s: %s\n", DISPATCH_STORE_FILE, error);
+        return 0;
+    }
+    return 1;
+}
+
+static int save_board_or_error(DispatchBoard *board) {
+    char error[256] = {0};
+    if (!dispatch_store_save(board, DISPATCH_STORE_FILE, error, sizeof(error))) {
+        fprintf(stderr, "Could not save %s: %s\n", DISPATCH_STORE_FILE, error);
+        return 0;
+    }
+    return 1;
+}
+
+static int cmd_group(int argc, char **argv) {
+    if (argc < 4 || strcmp(argv[2], "add") != 0) {
+        fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
+        return 1;
+    }
+
+    const char *name = argv[3];
+    const char *prefix = NULL;
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--prefix") == 0 && (i + 1) < argc) {
+            prefix = argv[++i];
+        } else {
+            fprintf(stderr, "Unknown group option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    if (!dispatch_board_add_group(&board, name, prefix)) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not add group '%s'\n", name);
+        return 1;
+    }
+
+    DispatchGroup *group = dispatch_board_find_group(&board, name);
+    if (!save_board_or_error(&board)) {
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Added group %s (%s)\n", group->name, group->prefix);
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_task(int argc, char **argv) {
+    if (argc < 5 || strcmp(argv[2], "add") != 0) {
+        fprintf(stderr,
+                "Usage: dispatch task add <group> <title> [--description "
+                "text] [--no-review]\n");
+        return 1;
+    }
+
+    const char *group = argv[3];
+    const char *title = argv[4];
+    const char *description = "";
+    int requires_review = 1;
+
+    for (int i = 5; i < argc; i++) {
+        if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
+            description = argv[++i];
+        } else if (strcmp(argv[i], "--no-review") == 0) {
+            requires_review = 0;
+        } else {
+            fprintf(stderr, "Unknown task option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task =
+        dispatch_board_add_task(&board, group, title, description);
+    if (!task) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not add task '%s' to group '%s'\n", title,
+                group);
+        return 1;
+    }
+    task->requires_review = requires_review;
+
+    char *task_id = strdup(task->id);
+    if (!save_board_or_error(&board)) {
+        free(task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Added task %s\n", task_id);
+    free(task_id);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 int dispatch_cli_dispatch(int argc, char **argv) {
     if (argc < 2 || strcmp(argv[1], "--help") == 0 ||
         strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "help") == 0) {
@@ -103,6 +217,10 @@ int dispatch_cli_dispatch(int argc, char **argv) {
 
     if (strcmp(command->name, "init") == 0)
         return cmd_init();
+    if (strcmp(command->name, "group") == 0)
+        return cmd_group(argc, argv);
+    if (strcmp(command->name, "task") == 0)
+        return cmd_task(argc, argv);
 
     fprintf(stderr,
             "Command '%s' is reserved for the Dispatch workflow but is not "

@@ -194,17 +194,17 @@
 			"y": 1300,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "9d7afb85",
 			"type": "text",
-			"text": "## DE-09 Implement group-prefixed task IDs\nGenerate stable task IDs from group prefixes, assign the next available number, and keep task titles separate from identifiers.",
+			"text": "## DE-09 Implement group-prefixed task IDs\nImplemented group-prefixed task ID behavior end to end. Added prefix validation, ensured task IDs are generated before appending task slots, and added Dispatch CLI support for group add and task add. Task titles remain separate from generated IDs, IDs increment per group prefix, explicit prefixes are uppercased and limited to 1-3 alphanumeric characters, and task creation persists through dispatch.json. Verified ./nob, init, group creation, task creation producing DE-01/DE-02/RE-01, JSON validity, and invalid prefix rejection.",
 			"x": 580,
 			"y": 1480,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "ec3ec0a3",

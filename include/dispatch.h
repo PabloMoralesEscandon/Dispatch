@@ -86,6 +86,7 @@ DispatchTask *dispatch_board_find_task(DispatchBoard *board,
 
 int dispatch_board_add_group(DispatchBoard *board, const char *name,
                              const char *prefix);
+int dispatch_group_prefix_is_valid(const char *prefix);
 DispatchTask *dispatch_board_add_task(DispatchBoard *board,
                                       const char *group_id,
                                       const char *title,
