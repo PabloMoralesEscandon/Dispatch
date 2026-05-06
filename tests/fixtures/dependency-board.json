@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "board": {
+    "name": "Dispatch",
+    "groups": [
+      {
+        "id": "RE",
+        "name": "Requirements",
+        "prefix": "RE"
+      },
+      {
+        "id": "DE",
+        "name": "Development",
+        "prefix": "DE"
+      },
+      {
+        "id": "VD",
+        "name": "Validation Delivery",
+        "prefix": "VD"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "RE-01",
+        "title": "Write feature plan",
+        "description": "Capture Dispatch feature requirements.",
+        "group": "RE",
+        "state": "done",
+        "depends_on": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": "user",
+        "completed_by": "user",
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "DE-01",
+        "title": "Implement board model",
+        "description": "Build Dispatch board structures.",
+        "group": "DE",
+        "state": "done",
+        "depends_on": ["RE-01"],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": "codex",
+        "completed_by": "codex",
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "DE-02",
+        "title": "Implement dependency engine",
+        "description": "Derive blocked state from depends_on.",
+        "group": "DE",
+        "state": "ready",
+        "depends_on": ["DE-01"],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "VD-01",
+        "title": "Run workflow tests",
+        "description": "Validate dependencies and lifecycle transitions.",
+        "group": "VD",
+        "state": "ready",
+        "depends_on": ["DE-01", "DE-02"],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      }
+    ]
+  }
+}

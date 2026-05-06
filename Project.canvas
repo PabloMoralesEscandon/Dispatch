@@ -119,12 +119,12 @@
 		{
 			"id": "e6ab8abb",
 			"type": "text",
-			"text": "## VD-01 Define test plan and fixtures\nDesign CLI-level tests, fixture files, edge cases, and acceptance scenarios for the Dispatch workflow.",
+			"text": "## VD-01 Define test plan and fixtures\nDefined the Dispatch test plan and initial fixtures. Added TEST_PLAN.md with acceptance coverage for initialization, groups, tasks, dependencies, derived state, lifecycle, delete safeguards, views, and removed TDL regressions. Added tests/fixtures/empty-board.json and tests/fixtures/dependency-board.json, and validated both fixtures with python -m json.tool.",
 			"x": 1340,
 			"y": 40,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "258eff30",
