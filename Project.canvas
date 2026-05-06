@@ -309,12 +309,12 @@
 		{
 			"id": "7f12da8e",
 			"type": "text",
-			"text": "## DE-03 Implement Dispatch board model\nBuild the core data model for tasks, states, dependencies, blocked status, review status, and project board storage.",
+			"text": "## DE-03 Implement Dispatch board model\nImplemented the initial Dispatch board model alongside the existing TDL code. Added include/dispatch.h and src/dispatch.c with board, group, task, dependency list, ownership fields, history structs, workflow states, group-prefixed task ID generation, effective blocked-state calculation, dependency path detection, and dependency insertion with cycle prevention. Verified the project builds with ./nob.",
 			"x": 580,
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "e649c893",
