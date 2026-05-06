@@ -5,7 +5,7 @@
 			"type": "group",
 			"x": 560,
 			"y": 0,
-			"width": 380,
+			"width": 700,
 			"height": 2740,
 			"label": "Development"
 		},
@@ -177,26 +177,6 @@
 			"color": "0"
 		},
 		{
-			"id": "d38f8e90",
-			"type": "text",
-			"text": "## AD-01 Create CLAUDE.md\nWrite the agent-facing CLAUDE.md instructions after the core Dispatch functionality is implemented, so the rules match the final CLI behavior and data model.",
-			"x": 1780,
-			"y": 40,
-			"width": 280,
-			"height": 160,
-			"color": "6"
-		},
-		{
-			"id": "cf1ee55d",
-			"type": "text",
-			"text": "## DE-06 Define Dispatch schema and command vocabulary\nDefined the Dispatch v1 schema and command vocabulary in FEATURES.md. The schema now specifies dispatch.json with version, board, groups, tasks, task IDs, depends_on, requires_review, ownership timestamps, and history. The command vocabulary now covers init, group add, task add/edit/delete, dependency add/remove, ready/start/pause/finish/review, list/ready/blocked/show, normalize, and JSON output mode.",
-			"x": 580,
-			"y": 940,
-			"width": 280,
-			"height": 160,
-			"color": "4"
-		},
-		{
 			"id": "95d42ce0",
 			"type": "text",
 			"text": "## DE-07 Replace TDL domain structs\nReplaced the active domain target with Dispatch model helpers. Extended include/dispatch.h and src/dispatch.c so the Dispatch board/task/group model owns task title and description updates, assignment, state changes, and history entries. This makes the new Dispatch domain usable by persistence and command tasks without relying on TDL Task/Project semantics. Verified the build with ./nob.",
@@ -204,17 +184,17 @@
 			"y": 1120,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "96ecef58",
 			"type": "text",
-			"text": "## DE-08 Rewrite dispatch.json persistence\nRename storage to dispatch.json and rewrite load/save around the Dispatch schema, preserving robust creation of missing storage and validation of malformed data.",
+			"text": "## DE-08 Rewrite dispatch.json persistence\nImplemented Dispatch v1 persistence. Added include/dispatch_store.h and src/dispatch_store.c with dispatch.json save, load, initialization, group/task/history serialization, timestamp null handling, state parsing, dependency array parsing, duplicate identity validation, and missing dependency validation. Updated init to use the store layer and validate existing dispatch.json rather than overwriting malformed storage. Verified ./nob, init creation, idempotent init, fixture JSON validity, and invalid existing JSON failure.",
 			"x": 580,
 			"y": 1300,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "9d7afb85",
@@ -324,17 +304,37 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
+		},
+		{
+			"id": "cf1ee55d",
+			"type": "text",
+			"text": "## DE-06 Define Dispatch schema and command vocabulary\nDefined the Dispatch v1 schema and command vocabulary in FEATURES.md. The schema now specifies dispatch.json with version, board, groups, tasks, task IDs, depends_on, requires_review, ownership timestamps, and history. The command vocabulary now covers init, group add, task add/edit/delete, dependency add/remove, ready/start/pause/finish/review, list/ready/blocked/show, normalize, and JSON output mode.",
+			"x": 580,
+			"y": 940,
+			"width": 280,
+			"height": 160,
+			"color": "4"
 		},
 		{
 			"id": "caf7d058",
 			"type": "text",
 			"text": "## DE-05 Implementation complete checkpoint\nPlaceholder gate: this blocks docs, tests, language cleanup, and repo cleanup tasks that must wait until the new Dispatch code path is complete.",
-			"x": 580,
-			"y": 760,
+			"x": 920,
+			"y": 1000,
 			"width": 280,
 			"height": 160,
 			"color": "0"
+		},
+		{
+			"id": "d38f8e90",
+			"type": "text",
+			"text": "## AD-01 Create CLAUDE.md\nWrite the agent-facing CLAUDE.md instructions after the core Dispatch functionality is implemented, so the rules match the final CLI behavior and data model.",
+			"x": 1820,
+			"y": 160,
+			"width": 280,
+			"height": 160,
+			"color": "6"
 		}
 	],
 	"edges": [

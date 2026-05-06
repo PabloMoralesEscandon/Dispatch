@@ -1,10 +1,9 @@
 #include "dispatch_cli.h"
 
-#include <jansson.h>
 #include <stdio.h>
 #include <string.h>
 
-#define DISPATCH_STORAGE_FILE "dispatch.json"
+#include "dispatch_store.h"
 
 typedef struct {
     const char *name;
@@ -66,31 +65,26 @@ int dispatch_cli_is_command(const char *command) {
 }
 
 static int cmd_init(void) {
-    json_error_t error;
-    json_t *existing = json_load_file(DISPATCH_STORAGE_FILE, 0, &error);
-    if (existing) {
-        json_decref(existing);
-        printf("%s already exists\n", DISPATCH_STORAGE_FILE);
-        return 0;
+    char error[256] = {0};
+    int existed = 0;
+    FILE *file = fopen(DISPATCH_STORE_FILE, "r");
+    if (file) {
+        existed = 1;
+        fclose(file);
     }
 
-    json_t *root = json_object();
-    json_object_set_new(root, "version", json_integer(1));
-
-    json_t *board = json_object();
-    json_object_set_new(board, "name", json_string("Dispatch"));
-    json_object_set_new(board, "groups", json_array());
-    json_object_set_new(board, "tasks", json_array());
-    json_object_set_new(root, "board", board);
-
-    if (json_dump_file(root, DISPATCH_STORAGE_FILE, JSON_INDENT(2)) != 0) {
-        json_decref(root);
-        fprintf(stderr, "Could not write %s\n", DISPATCH_STORAGE_FILE);
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, error, sizeof(error))) {
+        fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
+                error);
         return 1;
     }
 
-    json_decref(root);
-    printf("Created %s\n", DISPATCH_STORAGE_FILE);
+    if (existed) {
+        printf("%s already exists\n", DISPATCH_STORE_FILE);
+        return 0;
+    }
+
+    printf("Created %s\n", DISPATCH_STORE_FILE);
     return 0;
 }
 
