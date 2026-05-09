@@ -224,17 +224,17 @@
 			"y": 1840,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "ee104c2d",
 			"type": "text",
-			"text": "## DE-12 Implement review-gate behavior\nImplement requires_review so agents stop after a gated task reaches review, while ungated sequences can continue to the next ready task.",
+			"text": "## DE-12 Implement review-gate behavior\nImplemented explicit review-gate finish behavior. Gated tasks now finish into review with a stop message; ungated tasks finish to done and list newly ready follow-up tasks when present. Verified with gated and ungated dependency smoke tests.",
 			"x": 580,
 			"y": 2020,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "78ddc276",
@@ -244,7 +244,7 @@
 			"y": 2200,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "903f2b77",
@@ -254,7 +254,7 @@
 			"y": 2380,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "1"
 		},
 		{
 			"id": "dec49000",
@@ -264,7 +264,7 @@
 			"y": 2560,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "f612d43e",

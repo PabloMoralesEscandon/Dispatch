@@ -336,6 +336,29 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
     printf("\n");
 }
 
+static int print_ready_tasks_from_board(const DispatchBoard *board,
+                                        const char *indent) {
+    int count = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (dispatch_task_effective_state(board, task) != DISPATCH_STATE_READY)
+            continue;
+        print_task_line(board, task, indent);
+        count++;
+    }
+    return count;
+}
+
+static int ready_task_count(const DispatchBoard *board) {
+    int count = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (dispatch_task_effective_state(board, task) == DISPATCH_STATE_READY)
+            count++;
+    }
+    return count;
+}
+
 static int cmd_list(int argc, char **argv) {
     (void)argv;
     if (argc != 2) {
@@ -442,11 +465,7 @@ static int cmd_ready_list(void) {
     if (!load_board_or_error(&board))
         return 1;
 
-    for (size_t i = 0; i < board.tasks.count; i++) {
-        DispatchTask *task = &board.tasks.items[i];
-        if (dispatch_task_effective_state(&board, task) == DISPATCH_STATE_READY)
-            print_task_line(&board, task, "");
-    }
+    print_ready_tasks_from_board(&board, "");
 
     dispatch_board_free(&board);
     return 0;
@@ -585,9 +604,24 @@ static int cmd_finish(int argc, char **argv) {
         return 1;
     }
 
-    int result = save_task_transition(&board, "Finished", task_id);
+    DispatchState finished_state = task->state;
+    dispatch_board_normalize_states(&board);
+    if (!save_board_or_error(&board)) {
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Finished %s (%s)\n", task_id, dispatch_state_name(finished_state));
+    if (finished_state == DISPATCH_STATE_REVIEW) {
+        puts("Review required before continuing this sequence.");
+    } else if (finished_state == DISPATCH_STATE_DONE &&
+               ready_task_count(&board) > 0) {
+        puts("Next ready tasks:");
+        print_ready_tasks_from_board(&board, "  ");
+    }
+
     dispatch_board_free(&board);
-    return result;
+    return 0;
 }
 
 static int cmd_review(int argc, char **argv) {
