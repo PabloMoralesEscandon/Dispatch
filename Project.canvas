@@ -329,12 +329,12 @@
 		{
 			"id": "d38f8e90",
 			"type": "text",
-			"text": "## AD-01 Create CLAUDE.md\nWrite the agent-facing CLAUDE.md instructions after the core Dispatch functionality is implemented, so the rules match the final CLI behavior and data model.",
+			"text": "## AD-01 Create CLAUDE.md\nCreated the Dispatch-specific CLAUDE.md. It now requires CLI-only Dispatch access, forbids reading or editing dispatch.json directly, explains groups/tasks/dependencies/lifecycle/review gates, requires one commit per completed task using the task name, adds parallel-agent worktree and branch rules, and includes planning plus task-execution examples.",
 			"x": 1820,
 			"y": 160,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "87362c14",
@@ -354,7 +354,7 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		}
 	],
 	"edges": [
