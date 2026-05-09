@@ -288,7 +288,174 @@ static int save_task_transition(DispatchBoard *board, const char *verb,
     return 0;
 }
 
+static void print_task_line(const DispatchBoard *board, const DispatchTask *task,
+                            const char *indent) {
+    DispatchState state = dispatch_task_effective_state(board, task);
+    printf("%s%-8s %-10s %s", indent, task->id, dispatch_state_name(state),
+           task->title);
+    if (task->assigned_to)
+        printf("  assigned:%s", task->assigned_to);
+    if (task->depends_on.count > 0) {
+        printf("  depends_on:");
+        for (size_t i = 0; i < task->depends_on.count; i++)
+            printf("%s%s", i == 0 ? "" : ",", task->depends_on.items[i]);
+    }
+    printf("\n");
+}
+
+static int cmd_list(int argc, char **argv) {
+    (void)argv;
+    if (argc != 2) {
+        fprintf(stderr, "Usage: dispatch list\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    for (size_t g = 0; g < board.groups.count; g++) {
+        DispatchGroup *group = &board.groups.items[g];
+        printf("[%s] %s\n", group->prefix, group->name);
+        int any = 0;
+        for (size_t t = 0; t < board.tasks.count; t++) {
+            DispatchTask *task = &board.tasks.items[t];
+            if (strcmp(task->group, group->id) != 0)
+                continue;
+            print_task_line(&board, task, "  ");
+            any = 1;
+        }
+        if (!any)
+            printf("  (no tasks)\n");
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_show(int argc, char **argv) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: dispatch show <id>\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&board, argv[2]);
+    if (!task) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No task with id %s\n", argv[2]);
+        return 1;
+    }
+
+    printf("ID: %s\n", task->id);
+    printf("Title: %s\n", task->title);
+    printf("Description: %s\n", task->description);
+    printf("Group: %s\n", task->group);
+    printf("State: %s\n",
+           dispatch_state_name(dispatch_task_effective_state(&board, task)));
+    printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
+    printf("Assigned to: %s\n", task->assigned_to ? task->assigned_to : "-");
+    printf("Started by: %s\n", task->started_by ? task->started_by : "-");
+    printf("Completed by: %s\n",
+           task->completed_by ? task->completed_by : "-");
+
+    printf("Depends on:");
+    if (task->depends_on.count == 0) {
+        printf(" -");
+    } else {
+        for (size_t i = 0; i < task->depends_on.count; i++)
+            printf(" %s", task->depends_on.items[i]);
+    }
+    printf("\n");
+
+    printf("Blocks:");
+    int blocks = 0;
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *candidate = &board.tasks.items[i];
+        for (size_t dep = 0; dep < candidate->depends_on.count; dep++) {
+            if (strcmp(candidate->depends_on.items[dep], task->id) == 0) {
+                printf(" %s", candidate->id);
+                blocks = 1;
+                break;
+            }
+        }
+    }
+    if (!blocks)
+        printf(" -");
+    printf("\n");
+
+    printf("History:\n");
+    if (task->history.count == 0) {
+        printf("  -\n");
+    } else {
+        for (size_t i = 0; i < task->history.count; i++) {
+            DispatchHistoryEntry *entry = &task->history.items[i];
+            printf("  %s by %s", entry->action, entry->actor);
+            if (entry->note && entry->note[0] != '\0')
+                printf(": %s", entry->note);
+            printf("\n");
+        }
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_ready_list(void) {
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        if (dispatch_task_effective_state(&board, task) == DISPATCH_STATE_READY)
+            print_task_line(&board, task, "");
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_blocked(int argc, char **argv) {
+    (void)argv;
+    if (argc != 2) {
+        fprintf(stderr, "Usage: dispatch blocked\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        if (dispatch_task_effective_state(&board, task) !=
+            DISPATCH_STATE_BLOCKED) {
+            continue;
+        }
+        printf("%-8s %s  blocked_by:", task->id, task->title);
+        for (size_t dep = 0; dep < task->depends_on.count; dep++) {
+            DispatchTask *blocker =
+                dispatch_board_find_task(&board, task->depends_on.items[dep]);
+            if (!blocker ||
+                dispatch_task_effective_state(&board, blocker) !=
+                    DISPATCH_STATE_DONE) {
+                printf(" %s", task->depends_on.items[dep]);
+            }
+        }
+        printf("\n");
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int cmd_ready(int argc, char **argv) {
+    if (argc == 2)
+        return cmd_ready_list();
     if (argc != 3 && argc != 5) {
         fprintf(stderr, "Usage: dispatch ready <id> [--actor name]\n");
         return 1;
@@ -438,6 +605,12 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_dep(argc, argv);
     if (strcmp(command->name, "normalize") == 0)
         return cmd_normalize();
+    if (strcmp(command->name, "list") == 0)
+        return cmd_list(argc, argv);
+    if (strcmp(command->name, "show") == 0)
+        return cmd_show(argc, argv);
+    if (strcmp(command->name, "blocked") == 0)
+        return cmd_blocked(argc, argv);
     if (strcmp(command->name, "ready") == 0)
         return cmd_ready(argc, argv);
     if (strcmp(command->name, "start") == 0)

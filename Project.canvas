@@ -239,12 +239,12 @@
 		{
 			"id": "78ddc276",
 			"type": "text",
-			"text": "## DE-13 Implement grouped and sequence-aware views\nReplace priority/due-date-first listing with human table views and agent-readable JSON views for group, state, ready, blocked, review, assignment, and dependency sequence output.",
+			"text": "## DE-13 Implement grouped and sequence-aware views\nImplemented grouped and sequence-aware read views. Added dispatch list grouped by group prefix/name with effective state and depends_on chains, dispatch ready as a ready-work view when called without an ID, dispatch blocked with unmet blockers, and dispatch show with title, description, group, effective state, review flag, ownership fields, dependencies, dependents, and history. Verified ./nob and fixture-based list, ready, blocked, and show output.",
 			"x": 580,
 			"y": 2200,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "903f2b77",
