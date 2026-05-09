@@ -10,24 +10,23 @@
 typedef struct {
     const char *name;
     const char *summary;
-    int implemented;
 } DispatchCliCommand;
 
 static const DispatchCliCommand commands[] = {
-    {"init", "Create dispatch.json if it does not exist", 1},
-    {"group", "Manage groups", 0},
-    {"task", "Manage tasks", 0},
-    {"dep", "Manage dependencies", 0},
-    {"ready", "List ready work or mark a task ready", 0},
-    {"blocked", "List blocked work and blockers", 0},
-    {"show", "Show one task", 0},
-    {"list", "List tasks by group and workflow order", 0},
-    {"start", "Start and assign a ready task", 0},
-    {"pause", "Pause an in-progress task", 0},
-    {"finish", "Finish a task", 0},
-    {"review", "Accept a task in review", 0},
-    {"normalize", "Repair IDs and derived state", 0},
-    {NULL, NULL, 0},
+    {"init", "Create dispatch.json if it does not exist"},
+    {"group", "Manage groups"},
+    {"task", "Manage tasks"},
+    {"dep", "Manage dependencies"},
+    {"ready", "List ready work or mark a task ready"},
+    {"blocked", "List blocked work and blockers"},
+    {"show", "Show one task"},
+    {"list", "List tasks by group and workflow order"},
+    {"start", "Start and assign a ready task"},
+    {"pause", "Pause an in-progress task"},
+    {"finish", "Finish a task"},
+    {"review", "Accept a task in review"},
+    {"normalize", "Repair IDs and derived state"},
+    {NULL, NULL},
 };
 
 static const DispatchCliCommand *find_command(const char *command) {
@@ -51,9 +50,7 @@ void dispatch_cli_print_help(void) {
     puts("");
     puts("Implemented now:");
     puts("  init, group add, task add, dep add/remove, ready, start, pause,");
-    puts("  finish, review, normalize");
-    puts("");
-    puts("View commands are still reserved and will fail clearly until implemented.");
+    puts("  finish, review, normalize, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -689,9 +686,6 @@ int dispatch_cli_dispatch(int argc, char **argv) {
     if (strcmp(command->name, "review") == 0)
         return cmd_review(argc, argv);
 
-    fprintf(stderr,
-            "Command '%s' is reserved for the Dispatch workflow but is not "
-            "implemented yet.\n",
-            command->name);
-    return command->implemented ? 0 : 2;
+    fprintf(stderr, "Command '%s' is not implemented.\n", command->name);
+    return 2;
 }

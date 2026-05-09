@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
     NOB_GO_REBUILD_URSELF(argc, argv);
     Cmd cmd = {0};
     Cmd cmd_clean = {0};
-    nob_cmd_append(&cmd_clean, "rm", "-rf", "build", "tdl");
+    nob_cmd_append(&cmd_clean, "rm", "-rf", "build", "tdl", "dispatch");
     nob_cmd_append(&cmd, "clang", "-Iinclude", "-Wall", "-Wextra");
     if (argc > 1) {
         if (!strcmp(argv[1], "clean")) {
@@ -73,14 +73,15 @@ int main(int argc, char **argv) {
         nob_cmd_append(&cmd, file);
     }
 
-    nob_cmd_append(&cmd, "-ljansson", "-o", BUILD_FOLDER "tdl");
+    nob_cmd_append(&cmd, "-ljansson", "-o", BUILD_FOLDER "dispatch");
 
     if (!cmd_run(&cmd))
         return 1;
 
     Cmd cmd_symlink = {0};
 
-    nob_cmd_append(&cmd_symlink, "ln", "-sf", BUILD_FOLDER "tdl", "tdl");
+    nob_cmd_append(&cmd_symlink, "ln", "-sf", BUILD_FOLDER "dispatch",
+                   "dispatch");
     if (!cmd_run(&cmd_symlink))
         return 1;
 

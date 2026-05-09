@@ -249,12 +249,12 @@
 		{
 			"id": "903f2b77",
 			"type": "text",
-			"text": "## DE-14 Remove obsolete TDL command surface\nRemove due date, recurrence, notification, category, clear, project inheritance, and TDL-only help/options after Dispatch commands are in place.",
+			"text": "## DE-14 Remove obsolete TDL command surface\nRemoved the obsolete TDL command surface from the active entrypoint. main now dispatches only through the Dispatch CLI, legacy commands/options such as add, clear, list projects, -d, --project, and --category are rejected, help text lists the implemented Dispatch commands, and nob now builds dispatch instead of tdl. Verified ./nob, ./dispatch --help, rejected legacy commands/options, and a valid task add smoke test.",
 			"x": 580,
 			"y": 2380,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "dec49000",
