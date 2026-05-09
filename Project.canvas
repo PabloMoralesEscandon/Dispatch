@@ -339,12 +339,12 @@
 		{
 			"id": "87362c14",
 			"type": "text",
-			"text": "## AD-02 Discuss user-requested CLAUDE.md behavior\nTalk with the user and record the agent workflow rules, constraints, command usage, review behavior, and collaboration expectations they want CLAUDE.md to enforce.",
+			"text": "## AD-02 Discuss user-requested CLAUDE.md behavior\nUser-requested CLAUDE.md behavior recorded. CLAUDE.md must clearly require an agent to commit after every completed Dispatch task, using the task name as the commit message or commit-name basis. It must clearly forbid agents from modifying the Dispatch JSON data file directly and also forbid reading it directly; every interaction with task state must go through the Dispatch console CLI. It must explain how Dispatch works: tasks, groups, identifiers, dependencies, blocked and ready states, start/finish/review behavior, and sequence continuation. It must include an example where a user asks an agent to plan work, and the agent creates Dispatch tasks for that plan. It must include an example execution sequence: user tells agent to do a task; agent checks whether the task is unblocked; agent starts the task; agent does the work; agent marks the task done or ready for review; agent checks whether another task in the sequence is available and either continues or stops when review/user input is required.",
 			"x": 1780,
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "5"
 		},
 		{
 			"id": "250e35ab",
@@ -354,7 +354,7 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		}
 	],
 	"edges": [
