@@ -77,6 +77,18 @@ static void history_free(DispatchHistory *history) {
     history->capacity = 0;
 }
 
+static void task_free_fields(DispatchTask *task) {
+    free(task->id);
+    free(task->title);
+    free(task->description);
+    free(task->group);
+    string_list_free(&task->depends_on);
+    free(task->assigned_to);
+    free(task->started_by);
+    free(task->completed_by);
+    history_free(&task->history);
+}
+
 int dispatch_task_append_history(DispatchTask *task, const char *actor,
                                  const char *action, const char *note) {
     if (!task || !action || action[0] == '\0')
@@ -151,15 +163,7 @@ void dispatch_board_free(DispatchBoard *board) {
 
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
-        free(task->id);
-        free(task->title);
-        free(task->description);
-        free(task->group);
-        string_list_free(&task->depends_on);
-        free(task->assigned_to);
-        free(task->started_by);
-        free(task->completed_by);
-        history_free(&task->history);
+        task_free_fields(task);
     }
     free(board->tasks.items);
     free(board->name);
@@ -290,6 +294,37 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
     task->updated_at = task->created_at;
     dispatch_task_append_history(task, "system", "created", "");
     return task;
+}
+
+int dispatch_board_delete_task(DispatchBoard *board, const char *task_id,
+                               int force) {
+    if (!board || !task_id)
+        return 0;
+
+    size_t index = board->tasks.count;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        if (strcmp(board->tasks.items[i].id, task_id) == 0) {
+            index = i;
+            break;
+        }
+    }
+    if (index == board->tasks.count)
+        return 0;
+
+    if (!force && dispatch_task_dependent_count(board, task_id) > 0)
+        return 0;
+
+    if (force) {
+        for (size_t i = 0; i < board->tasks.count; i++)
+            string_list_remove(&board->tasks.items[i].depends_on, task_id);
+    }
+
+    task_free_fields(&board->tasks.items[index]);
+    for (size_t i = index + 1; i < board->tasks.count; i++)
+        board->tasks.items[i - 1] = board->tasks.items[i];
+    board->tasks.count--;
+    dispatch_board_normalize_states(board);
+    return 1;
 }
 
 int dispatch_task_set_title(DispatchTask *task, const char *title) {

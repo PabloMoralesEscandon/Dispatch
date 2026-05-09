@@ -91,6 +91,8 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
                                       const char *group_id,
                                       const char *title,
                                       const char *description);
+int dispatch_board_delete_task(DispatchBoard *board, const char *task_id,
+                               int force);
 int dispatch_task_set_title(DispatchTask *task, const char *title);
 int dispatch_task_set_description(DispatchTask *task, const char *description);
 

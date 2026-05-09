@@ -259,12 +259,12 @@
 		{
 			"id": "dec49000",
 			"type": "text",
-			"text": "## DE-15 Harden delete and repair commands\nKeep delete with dependency safeguards, add repair/normalize behavior for IDs and derived states, and make invalid operations fail clearly.",
+			"text": "## DE-15 Harden delete and repair commands\nImplemented guarded delete and repair behavior. Added dispatch_board_delete_task with dependent safeguards, force deletion, dependency-reference cleanup, and state normalization. Added dispatch task delete <id> [--force]. Verified ./nob, non-forced delete rejection for a blocking task, forced delete cleanup of dependent depends_on arrays, normalize, and JSON validity after deletion.",
 			"x": 580,
 			"y": 2560,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "f612d43e",

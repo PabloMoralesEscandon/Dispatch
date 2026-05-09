@@ -172,10 +172,43 @@ static int cmd_group(int argc, char **argv) {
 }
 
 static int cmd_task(int argc, char **argv) {
+    if (argc >= 4 && strcmp(argv[2], "delete") == 0) {
+        const char *task_id = argv[3];
+        int force = 0;
+        for (int i = 4; i < argc; i++) {
+            if (strcmp(argv[i], "--force") == 0) {
+                force = 1;
+            } else {
+                fprintf(stderr, "Unknown task delete option: %s\n", argv[i]);
+                return 1;
+            }
+        }
+
+        DispatchBoard board;
+        if (!load_board_or_error(&board))
+            return 1;
+        if (!dispatch_board_delete_task(&board, task_id, force)) {
+            dispatch_board_free(&board);
+            fprintf(stderr,
+                    "Could not delete %s%s\n",
+                    task_id,
+                    force ? "" : " (task may have dependents; use --force)");
+            return 1;
+        }
+        if (!save_board_or_error(&board)) {
+            dispatch_board_free(&board);
+            return 1;
+        }
+        printf("Deleted task %s\n", task_id);
+        dispatch_board_free(&board);
+        return 0;
+    }
+
     if (argc < 5 || strcmp(argv[2], "add") != 0) {
         fprintf(stderr,
                 "Usage: dispatch task add <group> <title> [--description "
                 "text] [--no-review]\n");
+        fprintf(stderr, "       dispatch task delete <id> [--force]\n");
         return 1;
     }
 
