@@ -234,7 +234,7 @@
 			"y": 2020,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "78ddc276",
@@ -254,7 +254,7 @@
 			"y": 2380,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "dec49000",
@@ -319,12 +319,12 @@
 		{
 			"id": "caf7d058",
 			"type": "text",
-			"text": "## DE-05 Implementation complete checkpoint\nPlaceholder gate: this blocks docs, tests, language cleanup, and repo cleanup tasks that must wait until the new Dispatch code path is complete.",
+			"text": "## DE-05 Implementation complete checkpoint\nCore Dispatch implementation checkpoint passed. All dependent development tasks are complete: obsolete TDL behavior stripped, Dispatch workflow CLI in place, review gates implemented, grouped views added, delete/repair hardened, and the legacy TDL command surface removed. Verified the current dispatch binary help after the final development change.",
 			"x": 920,
 			"y": 1000,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "d38f8e90",
