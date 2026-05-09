@@ -344,17 +344,17 @@
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "250e35ab",
 			"type": "text",
-			"text": "## AD-03 Propose agent-facing CLAUDE.md guidance\nReview the user-requested CLAUDE.md behavior and propose additional agent instructions, safety rules, workflow conventions, and Dispatch usage guidance before drafting the file.",
+			"text": "## AD-03 Propose agent-facing CLAUDE.md guidance\nAgent-facing CLAUDE.md guidance proposed. Add a strict Dispatch-only workflow section: agents must use the Dispatch CLI for all task state, never read or edit dispatch.json, and never infer board state from the storage file. Add a session startup protocol: run dispatch ready, dispatch blocked, and dispatch show <id> before selecting work; if the user names a task, verify it is ready or explain the blocker. Add a lifecycle protocol: start <id> --actor <agent>, do the work, run relevant verification, finish <id> --actor <agent>, then commit with the task name. Add a review-gate rule: if finish reports review, stop that sequence and wait for user review; if finish reports done and lists next ready tasks, the agent may continue only when the user requested continuing available tasks. Add planning guidance: when asked to plan, create groups/tasks/dependencies through Dispatch commands, use meaningful titles and group-prefixed IDs, and make review-gated checkpoints for user decisions. Add multi-agent safety: do not start a task assigned to someone else, do not modify another agent's in-progress work without coordination, and prefer smaller dependent tasks over vague large tasks. Add git hygiene: stage only files relevant to the completed task, avoid unrelated generated/editor files, and use the Dispatch task title as the commit message. Add examples for planning and execution using real commands: ready, show, start, finish, blocked, and follow-up ready checks. Add failure handling: pause a task if blocked by external input or broken assumptions, record findings in the task result, and never mark review/done on behalf of the human except through the CLI states allowed by Dispatch.",
 			"x": 1780,
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		}
 	],
 	"edges": [
