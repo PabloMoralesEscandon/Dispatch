@@ -33,7 +33,7 @@
 			"x": 1760,
 			"y": 0,
 			"width": 380,
-			"height": 700,
+			"height": 760,
 			"label": "Agent Documentation"
 		},
 		{
@@ -124,7 +124,7 @@
 			"y": 40,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "258eff30",
@@ -134,7 +134,7 @@
 			"y": 220,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "1"
 		},
 		{
 			"id": "0980e29e",
@@ -144,7 +144,7 @@
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "1"
 		},
 		{
 			"id": "680cf1ad",
@@ -154,7 +154,7 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "1"
 		},
 		{
 			"id": "4dcec8dd",
@@ -164,7 +164,7 @@
 			"y": 760,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "1"
 		},
 		{
 			"id": "1886ca96",
@@ -324,7 +324,7 @@
 			"y": 1000,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "d38f8e90",
@@ -332,6 +332,26 @@
 			"text": "## AD-01 Create CLAUDE.md\nWrite the agent-facing CLAUDE.md instructions after the core Dispatch functionality is implemented, so the rules match the final CLI behavior and data model.",
 			"x": 1820,
 			"y": 160,
+			"width": 280,
+			"height": 160,
+			"color": "0"
+		},
+		{
+			"id": "87362c14",
+			"type": "text",
+			"text": "## AD-02 Discuss user-requested CLAUDE.md behavior\nTalk with the user and record the agent workflow rules, constraints, command usage, review behavior, and collaboration expectations they want CLAUDE.md to enforce.",
+			"x": 1780,
+			"y": 400,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "250e35ab",
+			"type": "text",
+			"text": "## AD-03 Propose agent-facing CLAUDE.md guidance\nReview the user-requested CLAUDE.md behavior and propose additional agent instructions, safety rules, workflow conventions, and Dispatch usage guidance before drafting the file.",
+			"x": 1780,
+			"y": 580,
 			"width": 280,
 			"height": 160,
 			"color": "6"
@@ -589,6 +609,27 @@
 			"fromSide": "bottom",
 			"toNode": "cf1ee55d",
 			"toSide": "top"
+		},
+		{
+			"id": "edge-041",
+			"fromNode": "caf7d058",
+			"fromSide": "right",
+			"toNode": "87362c14",
+			"toSide": "left"
+		},
+		{
+			"id": "edge-042",
+			"fromNode": "87362c14",
+			"fromSide": "bottom",
+			"toNode": "250e35ab",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-043",
+			"fromNode": "250e35ab",
+			"fromSide": "top",
+			"toNode": "d38f8e90",
+			"toSide": "bottom"
 		}
 	]
 }
