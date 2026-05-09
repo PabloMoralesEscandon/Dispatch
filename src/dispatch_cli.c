@@ -50,10 +50,10 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init");
+    puts("  init, group add, task add, dep add/remove, ready, start, pause,");
+    puts("  finish, review, normalize");
     puts("");
-    puts("The remaining workflow commands are reserved and will fail clearly until");
-    puts("their persistence and lifecycle implementations are complete.");
+    puts("View commands are still reserved and will fail clearly until implemented.");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -111,6 +111,26 @@ static int save_board_or_error(DispatchBoard *board) {
         return 0;
     }
     return 1;
+}
+
+static const char *parse_actor(int argc, char **argv, int start_index) {
+    for (int i = start_index; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc)
+            return argv[i + 1];
+    }
+    return NULL;
+}
+
+static int reject_unknown_actor_options(int argc, char **argv, int start_index) {
+    for (int i = start_index; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            i++;
+            continue;
+        }
+        fprintf(stderr, "Unknown option: %s\n", argv[i]);
+        return 1;
+    }
+    return 0;
 }
 
 static int cmd_group(int argc, char **argv) {
@@ -259,6 +279,142 @@ static int cmd_normalize(void) {
     return 0;
 }
 
+static int save_task_transition(DispatchBoard *board, const char *verb,
+                                const char *task_id) {
+    dispatch_board_normalize_states(board);
+    if (!save_board_or_error(board))
+        return 1;
+    printf("%s %s\n", verb, task_id);
+    return 0;
+}
+
+static int cmd_ready(int argc, char **argv) {
+    if (argc != 3 && argc != 5) {
+        fprintf(stderr, "Usage: dispatch ready <id> [--actor name]\n");
+        return 1;
+    }
+    if (reject_unknown_actor_options(argc, argv, 3))
+        return 1;
+
+    const char *task_id = argv[2];
+    const char *actor = parse_actor(argc, argv, 3);
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task || !dispatch_task_mark_ready(&board, task, actor)) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not mark %s ready\n", task_id);
+        return 1;
+    }
+
+    int result = save_task_transition(&board, "Readied", task_id);
+    dispatch_board_free(&board);
+    return result;
+}
+
+static int cmd_start(int argc, char **argv) {
+    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
+        fprintf(stderr, "Usage: dispatch start <id> --actor <name>\n");
+        return 1;
+    }
+
+    const char *task_id = argv[2];
+    const char *actor = argv[4];
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task || !dispatch_task_start(&board, task, actor)) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not start %s\n", task_id);
+        return 1;
+    }
+
+    int result = save_task_transition(&board, "Started", task_id);
+    dispatch_board_free(&board);
+    return result;
+}
+
+static int cmd_pause(int argc, char **argv) {
+    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
+        fprintf(stderr, "Usage: dispatch pause <id> --actor <name>\n");
+        return 1;
+    }
+
+    const char *task_id = argv[2];
+    const char *actor = argv[4];
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task || !dispatch_task_pause(task, actor)) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not pause %s\n", task_id);
+        return 1;
+    }
+
+    int result = save_task_transition(&board, "Paused", task_id);
+    dispatch_board_free(&board);
+    return result;
+}
+
+static int cmd_finish(int argc, char **argv) {
+    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
+        fprintf(stderr, "Usage: dispatch finish <id> --actor <name>\n");
+        return 1;
+    }
+
+    const char *task_id = argv[2];
+    const char *actor = argv[4];
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task || !dispatch_task_finish(task, actor)) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not finish %s\n", task_id);
+        return 1;
+    }
+
+    int result = save_task_transition(&board, "Finished", task_id);
+    dispatch_board_free(&board);
+    return result;
+}
+
+static int cmd_review(int argc, char **argv) {
+    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
+        fprintf(stderr, "Usage: dispatch review <id> --actor <name>\n");
+        return 1;
+    }
+
+    const char *task_id = argv[2];
+    const char *actor = argv[4];
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task || !dispatch_task_review(task, actor)) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Could not review %s\n", task_id);
+        return 1;
+    }
+
+    int result = save_task_transition(&board, "Reviewed", task_id);
+    dispatch_board_free(&board);
+    return result;
+}
+
 int dispatch_cli_dispatch(int argc, char **argv) {
     if (argc < 2 || strcmp(argv[1], "--help") == 0 ||
         strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "help") == 0) {
@@ -282,6 +438,16 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_dep(argc, argv);
     if (strcmp(command->name, "normalize") == 0)
         return cmd_normalize();
+    if (strcmp(command->name, "ready") == 0)
+        return cmd_ready(argc, argv);
+    if (strcmp(command->name, "start") == 0)
+        return cmd_start(argc, argv);
+    if (strcmp(command->name, "pause") == 0)
+        return cmd_pause(argc, argv);
+    if (strcmp(command->name, "finish") == 0)
+        return cmd_finish(argc, argv);
+    if (strcmp(command->name, "review") == 0)
+        return cmd_review(argc, argv);
 
     fprintf(stderr,
             "Command '%s' is reserved for the Dispatch workflow but is not "

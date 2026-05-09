@@ -102,6 +102,13 @@ int dispatch_task_assign(DispatchTask *task, const char *actor);
 void dispatch_task_clear_assignment(DispatchTask *task);
 int dispatch_task_append_history(DispatchTask *task, const char *actor,
                                  const char *action, const char *note);
+int dispatch_task_mark_ready(DispatchBoard *board, DispatchTask *task,
+                             const char *actor);
+int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
+                        const char *actor);
+int dispatch_task_pause(DispatchTask *task, const char *actor);
+int dispatch_task_finish(DispatchTask *task, const char *actor);
+int dispatch_task_review(DispatchTask *task, const char *actor);
 
 DispatchState dispatch_task_effective_state(const DispatchBoard *board,
                                             const DispatchTask *task);

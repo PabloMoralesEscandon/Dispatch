@@ -219,12 +219,12 @@
 		{
 			"id": "a9f38831",
 			"type": "text",
-			"text": "## DE-11 Implement lifecycle and ownership commands\nImplement workflow-safe commands for creating, approving or marking ready, starting, pausing, finishing, reviewing, completing, assigning, and recording started_by/completed_by metadata.",
+			"text": "## DE-11 Implement lifecycle and ownership commands\nImplemented lifecycle and ownership commands. Added domain transition helpers for ready, start, pause, finish, and review; these enforce legal states, assignment rules, ownership fields, timestamps, and history entries. Added CLI commands ready <id> [--actor name], start/pause/finish/review <id> --actor <name>. Verified ./nob and a temporary workflow covering ready, start, double-start rejection, finish to review, review to done, pause back to ready, and no-review finish directly to done with JSON ownership/history validation.",
 			"x": 580,
 			"y": 1840,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "ee104c2d",

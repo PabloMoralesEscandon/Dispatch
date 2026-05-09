@@ -374,6 +374,76 @@ void dispatch_task_clear_assignment(DispatchTask *task) {
     task->updated_at = time(NULL);
 }
 
+int dispatch_task_mark_ready(DispatchBoard *board, DispatchTask *task,
+                             const char *actor) {
+    if (!task)
+        return 0;
+    task->state = DISPATCH_STATE_READY;
+    task->updated_at = time(NULL);
+    dispatch_task_append_history(task, actor, "ready", "");
+    dispatch_board_normalize_states(board);
+    return 1;
+}
+
+int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
+                        const char *actor) {
+    if (!board || !task || !actor || actor[0] == '\0')
+        return 0;
+    if (dispatch_task_effective_state(board, task) != DISPATCH_STATE_READY)
+        return 0;
+    if (task->assigned_to && task->assigned_to[0] != '\0')
+        return 0;
+
+    dispatch_task_assign(task, actor);
+    replace_string(&task->started_by, actor);
+    task->started_at = time(NULL);
+    task->state = DISPATCH_STATE_DOING;
+    task->updated_at = task->started_at;
+    return dispatch_task_append_history(task, actor, "started", "");
+}
+
+int dispatch_task_pause(DispatchTask *task, const char *actor) {
+    if (!task || !actor || actor[0] == '\0')
+        return 0;
+    if (task->state != DISPATCH_STATE_DOING)
+        return 0;
+
+    dispatch_task_clear_assignment(task);
+    task->state = DISPATCH_STATE_READY;
+    task->updated_at = time(NULL);
+    return dispatch_task_append_history(task, actor, "paused", "");
+}
+
+int dispatch_task_finish(DispatchTask *task, const char *actor) {
+    if (!task || !actor || actor[0] == '\0')
+        return 0;
+    if (task->state != DISPATCH_STATE_DOING)
+        return 0;
+
+    replace_string(&task->completed_by, actor);
+    task->completed_at = time(NULL);
+    dispatch_task_clear_assignment(task);
+    task->state = task->requires_review ? DISPATCH_STATE_REVIEW
+                                        : DISPATCH_STATE_DONE;
+    task->updated_at = task->completed_at;
+    return dispatch_task_append_history(task, actor, "finished", "");
+}
+
+int dispatch_task_review(DispatchTask *task, const char *actor) {
+    if (!task || !actor || actor[0] == '\0')
+        return 0;
+    if (task->state != DISPATCH_STATE_REVIEW)
+        return 0;
+
+    if (!task->completed_by)
+        replace_string(&task->completed_by, actor);
+    if (task->completed_at == (time_t)0)
+        task->completed_at = time(NULL);
+    task->state = DISPATCH_STATE_DONE;
+    task->updated_at = time(NULL);
+    return dispatch_task_append_history(task, actor, "reviewed", "");
+}
+
 int dispatch_task_has_unmet_dependencies(const DispatchBoard *board,
                                          const DispatchTask *task) {
     if (!board || !task)
