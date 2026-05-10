@@ -19,6 +19,15 @@
 			"label": "Validation Delivery"
 		},
 		{
+			"id": "group-cleanu",
+			"type": "group",
+			"x": 2200,
+			"y": 0,
+			"width": 380,
+			"height": 1300,
+			"label": "Cleanup"
+		},
+		{
 			"id": "group-requir",
 			"type": "group",
 			"x": 0,
@@ -357,23 +366,14 @@
 			"color": "4"
 		},
 		{
-			"id": "group-cleanu",
-			"type": "group",
-			"x": 2200,
-			"y": 0,
-			"width": 380,
-			"height": 1300,
-			"label": "Cleanup"
-		},
-		{
 			"id": "5eae7dba",
 			"type": "text",
-			"text": "## CL-01 Approve cleanup deletion list\nReview CLEANUP.md and confirm the exact files to remove or untrack. This is the safety gate before deleting generated artifacts, runtime state, or Kanvas workflow files.",
+			"text": "## CL-01 Approve cleanup deletion list\nCleanup approval decision recorded. Do not delete Kanvas/Canvas information for now; keep Project.canvas and the workflow tooling available until the user explicitly says otherwise. First cleanup action is git tracking hygiene only: ignore and untrack generated build outputs, compiled binaries, local session files, runtime dispatch.json, and volatile workspace state without deleting source or the Canvas board.",
 			"x": 2220,
 			"y": 40,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "5"
 		},
 		{
 			"id": "a9dd273c",
@@ -383,7 +383,7 @@
 			"y": 220,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		},
 		{
 			"id": "4ad11481",
@@ -393,7 +393,7 @@
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		},
 		{
 			"id": "d36f0877",
@@ -403,7 +403,7 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		},
 		{
 			"id": "186682eb",
@@ -413,7 +413,7 @@
 			"y": 760,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		},
 		{
 			"id": "b719fc24",
@@ -423,7 +423,7 @@
 			"y": 940,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		},
 		{
 			"id": "ea0219ed",
@@ -433,7 +433,7 @@
 			"y": 1120,
 			"width": 280,
 			"height": 160,
-			"color": "6"
+			"color": "0"
 		}
 	],
 	"edges": [

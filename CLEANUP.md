@@ -13,11 +13,15 @@ Dispatch CLI itself:
 - `AGENTS.md`: Canvas workflow instructions for agents.
 - `RULES.md`: migration/workflow rules that are separate from Dispatch.
 - `.obsidian/`: Obsidian vault settings and Canvas watcher plugin files.
-- `.codex`: empty local agent metadata file.
 - `.session`: untracked local session metadata.
 
-Recommended action: remove after the user confirms Dispatch has replaced the
-Canvas workflow for this repository.
+Current decision: keep Kanvas/Canvas information for now so the project does not
+lose planning context. Do not remove `Project.canvas`, `canvas-tool.py`,
+`AGENTS.md`, `RULES.md`, or the Obsidian plugin files until the user explicitly
+asks for that cleanup.
+
+Local-only workflow state, such as `.codex`, `.session`, and
+`.obsidian/workspace.json`, should remain untracked.
 
 ## Generated Build Artifacts
 
@@ -31,16 +35,15 @@ tracked as source:
 - `nob`: compiled bootstrap binary.
 - `nob.old`: temporary backup created when `nob` rebuilds itself.
 
-Recommended action: remove generated artifacts from git tracking, keep
-`nob.c` and `nob.h`, and add ignore rules for generated outputs.
+Current action: generated artifacts are ignored by `.gitignore` and should not
+be tracked. Keep `nob.c` and `nob.h` tracked as source.
 
 ## Runtime State
 
 - `dispatch.json`: local Dispatch board state.
 
-Recommended action: remove the repository-root runtime board from git tracking
-unless the project intentionally wants to ship a sample board. Tests already use
-temporary boards and fixture files.
+Current action: the repository-root runtime board is ignored by `.gitignore`.
+Tests already use temporary boards and fixture files.
 
 ## Legacy TDL Source
 

@@ -1,0 +1,13 @@
+# Build outputs
+/build/
+/dispatch
+/nob
+/nob.old
+
+# Runtime board state
+/dispatch.json
+
+# Local agent/editor state
+/.session
+/.codex
+/.obsidian/workspace.json
