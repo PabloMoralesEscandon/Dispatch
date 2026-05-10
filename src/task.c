@@ -8,29 +8,29 @@ ToDoList to_do_list;
 ToDoProjects to_do_proj;
 
 static const char *dash_if_missing(const char *s) {
-    // Treat NULL, empty string, or literal "none" as missing. [web:7][web:10]
+    // Treat NULL, empty string, or literal "none" as missing.
     if (s == NULL || s[0] == '\0' || strcmp(s, "none") == 0) return "-";
     return s;
 }
 
 static void format_due_date(char *out, size_t size, time_t due,
                             int due_has_time) {
-    if (due == (time_t)0) {                      // "unset" convention
+    if (due == (time_t)0) {
         snprintf(out, size, "-");
         return;
     }
-    struct tm *tm_info = localtime(&due);        // convert to local time [web:15]
-    if (!tm_info) {                              // localtime can fail [web:6]
+    struct tm *tm_info = localtime(&due);
+    if (!tm_info) {
         snprintf(out, size, "-");
         return;
     }
-    // Solo muestra hora cuando el usuario introdujo una hora explicita.
+    // Only show a time when the user entered an explicit time.
     strftime(out, size, due_has_time ? "%d-%m-%Y %H:%M" : "%d-%m-%Y",
              tm_info);
 }
 
 static void print_label_value(const char *label, const char *value) {
-    printf(ANSI_BOLD_BLUE "%s" ANSI_RESET " %s\n", label, value); // style via ANSI [web:5][web:2]
+    printf(ANSI_BOLD_BLUE "%s" ANSI_RESET " %s\n", label, value);
 }
 
 void print_task(Task *task) {
@@ -42,8 +42,8 @@ void print_task(Task *task) {
     char due_buf[17];
     format_due_date(due_buf, sizeof(due_buf), task->due, task->due_has_time);
 
-    // Labels bold+blue, values normal.
-    printf(ANSI_BOLD_BLUE "Task ID:" ANSI_RESET " %d\n", task->id);                          // ANSI [web:5][web:2]
+    // Labels are bold blue; values use the normal terminal style.
+    printf(ANSI_BOLD_BLUE "Task ID:" ANSI_RESET " %d\n", task->id);
     print_label_value("Name:", task->name ? task->name : "-");
 
     if (task->description && task->description[0] != '\0' && strcmp(task->description, "none") != 0) {

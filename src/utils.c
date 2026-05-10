@@ -6,7 +6,7 @@
 
 void sort_list(Task *disordered, int low, int high) {
     if (low < high) {
-        // Hoare devuelve el ultimo indice de la particion izquierda.
+        // Hoare partition returns the last index of the left partition.
         int separator = partition(disordered, low, high);
         sort_list(disordered, low, separator);
         sort_list(disordered, separator + 1, high);
@@ -19,7 +19,7 @@ int partition(Task *disordered, int low, int high) {
     j = high + 1;
     int pivot = disordered[low].id;
     while (1) {
-        // Avanza desde ambos extremos hasta encontrar elementos fuera de sitio.
+        // Advance from both ends until misplaced elements are found.
         do {
             i++;
         } while (disordered[i].id < pivot);
@@ -51,7 +51,7 @@ int partition_value(Task *disordered, int low, int high) {
     if (disordered[low].due == 0)
         pivot = DBL_MAX;
     else
-        // Las tareas sin fecha se empujan al final del mismo nivel de prioridad.
+        // Tasks without due dates move to the end of the same priority level.
         pivot = second_until(disordered[low].due);
     double time_until = DBL_MAX;
     while (1) {
@@ -75,7 +75,7 @@ int partition_value(Task *disordered, int low, int high) {
                   (time_until > pivot)));
         if (i >= j)
             return j;
-        // Intercambia elementos que quedaron en la particion incorrecta.
+        // Swap elements left in the wrong partition.
         Task temp = disordered[i];
         disordered[i] = disordered[j];
         disordered[j] = temp;

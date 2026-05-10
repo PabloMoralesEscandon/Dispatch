@@ -3,143 +3,143 @@
 
 /**
  * @file parser.h
- * @brief Declaraciones del analizador de argumentos y comandos CLI.
+ * @brief Legacy argument and CLI command parser declarations.
  */
 
-/** @brief Numero total de slots usados para almacenar opciones parseadas. */
+/** @brief Total number of parsed option slots. */
 #define NUMBER_OPT 9
 
-/** @brief Prefijo base de una secuencia ANSI. */
+/** @brief Base prefix for an ANSI escape sequence. */
 #define ESC "\x1b["
-/** @brief Secuencia ANSI para restaurar estilo y colores. */
+/** @brief ANSI sequence that resets style and colors. */
 #define RESET ESC "0m"
 
-/** @brief Indice de la opcion de prioridad en el array de opciones. */
+/** @brief Priority option index in the parsed options array. */
 #define PRIORITY    0
-/** @brief Indice de la opcion de recurrencia en el array de opciones. */
+/** @brief Recurrence option index in the parsed options array. */
 #define RECURRENT   1
-/** @brief Indice de la opcion de vencimiento en el array de opciones. */
+/** @brief Due-date option index in the parsed options array. */
 #define DUE         2
-/** @brief Indice de la opcion de estado en el array de opciones. */
+/** @brief Status option index in the parsed options array. */
 #define STATUS      3
-/** @brief Indice de la opcion de categoria en el array de opciones. */
+/** @brief Category option index in the parsed options array. */
 #define CATEGORY    4
-/** @brief Indice de la opcion de proyecto en el array de opciones. */
+/** @brief Project option index in the parsed options array. */
 #define PROJECT     5
-/** @brief Indice de la opcion de nombre en el array de opciones. */
+/** @brief Name option index in the parsed options array. */
 #define NAME        6
-/** @brief Indice de la opcion de descripcion en el array de opciones. */
+/** @brief Description option index in the parsed options array. */
 #define DESC        7
-/** @brief Indice de la opcion de notificacion en el array de opciones. */
+/** @brief Notification option index in the parsed options array. */
 #define NOTIFY      8
 
 /** @brief JSON storage file used by Dispatch. */
 #define FILE_NAME "dispatch.json"
 
 /**
- * @brief Tipo de funcion usado por cada comando del CLI.
- * @param options Array de opciones parseadas.
- * @param id Identificador numerico ya resuelto, o `-1` si no aplica.
- * @return Codigo de salida del comando.
+ * @brief Function type used by each CLI command.
+ * @param options Parsed options array.
+ * @param id Already resolved numeric identifier, or `-1` when not applicable.
+ * @return Command exit code.
  */
 typedef int (*CommandHandler)(char *options[], int id);
 
 /**
  * @struct Command
- * @brief Describe un comando del CLI y su manejador asociado.
+ * @brief Describes a CLI command and its associated handler.
  */
 typedef struct {
-    const char *name;      /**< Nombre textual del comando. */
-    CommandHandler handler; /**< Funcion que implementa el comando. */
-    const char *desc;      /**< Descripcion usada en la ayuda. */
+    const char *name;       /**< Command text name. */
+    CommandHandler handler; /**< Function that implements the command. */
+    const char *desc;       /**< Description used in help output. */
 } Command;
 
 /**
- * @brief Busca y ejecuta el manejador asociado a un comando.
- * @param cmd Nombre del comando.
- * @param options Opciones parseadas.
- * @param id Identificador ya interpretado, si existe.
- * @return Codigo de salida del comando.
+ * @brief Find and execute the handler associated with a command.
+ * @param cmd Command name.
+ * @param options Parsed options.
+ * @param id Already interpreted identifier, when present.
+ * @return Command exit code.
  */
 int dispatch_command(char *cmd, char *options[], int id);
 
 /**
- * @brief Reconstruye el argumento libre situado entre el comando y las opciones.
+ * @brief Rebuild the free-form argument between the command and options.
  *
- * Se usa para aceptar nombres compuestos por varias palabras.
+ * This allows names made from multiple words.
  *
- * @param argc Numero de argumentos recibidos por `main`.
- * @param argv Vector de argumentos recibido por `main`.
- * @return Cadena reservada dinamicamente o `NULL` si no hay texto libre.
+ * @param argc Number of arguments received by `main`.
+ * @param argv Argument vector received by `main`.
+ * @return Dynamically allocated string, or `NULL` when there is no free text.
  */
 char *parse_words(int argc, char **argv);
 
 /**
- * @brief Interpreta una cadena como identificador numerico de tarea.
- * @param words Texto candidato.
- * @return ID parseado o `-1` si la cadena no es puramente numerica.
+ * @brief Interpret text as a numeric task identifier.
+ * @param words Candidate text.
+ * @return Parsed ID, or `-1` when the string is not numeric.
  */
 int parse_id_name(char *words);
 
-/** @brief Imprime la ayuda general del programa. */
+/** @brief Print the general program help. */
 void print_help(void);
 
 /**
- * @brief Parsea las opciones cortas y largas del CLI.
- * @param argc Numero de argumentos recibidos por `main`.
- * @param argv Vector de argumentos recibido por `main`.
- * @param options Array de salida indexado con las macros de opcion.
- * @return `0` tras completar el parseo.
+ * @brief Parse short and long CLI options.
+ * @param argc Number of arguments received by `main`.
+ * @param argv Argument vector received by `main`.
+ * @param options Output array indexed with option macros.
+ * @return `0` after parsing completes.
  */
 int parse_options(int argc, char **argv, char *options[]);
 
-/** @brief Implementa el comando `add`. */
+/** @brief Implement the `add` command. */
 int cmd_add(char *options[], int id);
 
-/** @brief Implementa el comando `add_project`. */
+/** @brief Implement the `add_project` command. */
 int cmd_add_project(char *options[], int id);
 
-/** @brief Implementa el comando `del`. */
+/** @brief Implement the `del` command. */
 int cmd_del(char *options[], int id);
 
-/** @brief Implementa el comando `del_project`. */
+/** @brief Implement the `del_project` command. */
 int cmd_del_project(char *options[], int id);
 
-/** @brief Implementa el comando `mod`. */
+/** @brief Implement the `mod` command. */
 int cmd_mod(char *options[], int id);
 
-/** @brief Implementa el comando `mod_project`. */
+/** @brief Implement the `mod_project` command. */
 int cmd_mod_project(char *options[], int id);
 
-/** @brief Implementa el comando `start`. */
+/** @brief Implement the `start` command. */
 int cmd_start(char *options[], int id);
 
-/** @brief Implementa el comando `done`. */
+/** @brief Implement the `done` command. */
 int cmd_done(char *options[], int id);
 
-/** @brief Implementa el comando `show`. */
+/** @brief Implement the `show` command. */
 int cmd_show(char *options[], int id);
 
-/** @brief Implementa el comando `list`. */
+/** @brief Implement the `list` command. */
 int cmd_list(char *options[], int id);
 
-/** @brief Implementa el comando `list_projects`. */
+/** @brief Implement the `list_projects` command. */
 int cmd_list_projects(char *options[], int id);
 
-/** @brief Implementa el comando `show_project`. */
+/** @brief Implement the `show_project` command. */
 int cmd_proj_show(char *options[], int id);
 
-/** @brief Implementa el comando `clear`. */
+/** @brief Implement the `clear` command. */
 int cmd_clear(char *options[], int id);
 
 
-/** @brief Establece el color de fondo del terminal usando la paleta ANSI de 256 colores. */
+/** @brief Set the terminal background color with the ANSI 256-color palette. */
 static inline void set_bg256(int n);
-/** @brief Establece el color de texto del terminal usando la paleta ANSI de 256 colores. */
+/** @brief Set the terminal text color with the ANSI 256-color palette. */
 static inline void set_fg256(int n);
-/** @brief Activa la negrita en el terminal. */
+/** @brief Enable terminal bold style. */
 static inline void term_bold_on(void);
-/** @brief Desactiva la negrita en el terminal. */
+/** @brief Disable terminal bold style. */
 static inline void term_bold_off(void);
 
 #endif

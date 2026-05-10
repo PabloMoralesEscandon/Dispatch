@@ -6,84 +6,84 @@
 
 /**
  * @file task.h
- * @brief Tipos y utilidades de dominio para tareas y proyectos.
+ * @brief Legacy task and project domain types.
  */
 
-/** @brief Longitud maxima, incluyendo el terminador nulo, para categoria/proyecto. */
+/** @brief Maximum length, including the null terminator, for category/project names. */
 #define NAME_CHARS 21
-/** @brief Longitud maxima, incluyendo el terminador nulo, para el nombre de una tarea. */
+/** @brief Maximum length, including the null terminator, for a task name. */
 #define LONG_NAME_CHARS 41
-/** @brief Longitud maxima, incluyendo el terminador nulo, para la descripcion. */
+/** @brief Maximum length, including the null terminator, for a description. */
 #define DESC_CHARS 201
 
-/** @brief Secuencia ANSI para restaurar el estilo del terminal. */
+/** @brief ANSI sequence that resets terminal style. */
 #define ANSI_RESET "\x1b[0m"
-/** @brief Secuencia ANSI para activar negrita. */
+/** @brief ANSI sequence that enables bold text. */
 #define ANSI_BOLD "\x1b[1m"
-/** @brief Secuencia ANSI para imprimir en azul. */
+/** @brief ANSI sequence that prints blue text. */
 #define ANSI_BLUE "\x1b[34m"
-/** @brief Secuencia ANSI para negrita en azul. */
+/** @brief ANSI sequence that prints bold blue text. */
 #define ANSI_BOLD_BLUE "\x1b[1;34m"
 
 /**
  * @enum Status
- * @brief Estados posibles de una tarea.
+ * @brief Possible task states.
  */
 enum Status {
-    TODO,        /**< Tarea pendiente. */
-    IN_PROGRESS, /**< Tarea en curso. */
-    DONE         /**< Tarea completada. */
+    TODO,        /**< Pending task. */
+    IN_PROGRESS, /**< Task in progress. */
+    DONE         /**< Completed task. */
 };
 
 /**
  * @enum Priority
- * @brief Niveles de prioridad soportados.
+ * @brief Supported priority levels.
  */
 enum Priority {
-    LOW,    /**< Prioridad baja. */
-    MEDIUM, /**< Prioridad media. */
-    HIGH,   /**< Prioridad alta. */
-    URGENT  /**< Prioridad urgente. */
+    LOW,    /**< Low priority. */
+    MEDIUM, /**< Medium priority. */
+    HIGH,   /**< High priority. */
+    URGENT  /**< Urgent priority. */
 };
 
 /**
  * @enum Recurrent
- * @brief Periodicidad de repeticion de una tarea.
+ * @brief Task recurrence interval.
  */
 enum Recurrent {
-    NO,      /**< Tarea no recurrente. */
-    DAILY,   /**< Repite cada dia. */
-    WEEKLY,  /**< Repite cada semana. */
-    MONTHLY, /**< Repite cada mes. */
-    YEARLY   /**< Repite cada ano. */
+    NO,      /**< Non-recurring task. */
+    DAILY,   /**< Repeats every day. */
+    WEEKLY,  /**< Repeats every week. */
+    MONTHLY, /**< Repeats every month. */
+    YEARLY   /**< Repeats every year. */
 };
 
 /**
  * @enum Due
- * @brief Clasificacion relativa del vencimiento de una tarea.
+ * @brief Relative due-date classification.
  */
 enum Due {
-    LATER, /**< Vence mas adelante o no tiene fecha. */
-    YEAR,  /**< Vence dentro del proximo ano. */
-    MONTH, /**< Vence dentro del proximo mes. */
-    WEEK,  /**< Vence dentro de la proxima semana. */
-    DAY    /**< Vence dentro del proximo dia. */
+    LATER, /**< Due later, or has no due date. */
+    YEAR,  /**< Due within the next year. */
+    MONTH, /**< Due within the next month. */
+    WEEK,  /**< Due within the next week. */
+    DAY    /**< Due within the next day. */
 };
 
-/** @brief Notificar en el momento de vencimiento. */
+/** @brief Notify at the due time. */
 #define NOTIFY_AT_TIME     4
-/** @brief Notificar una hora antes del vencimiento. */
+/** @brief Notify one hour before the due time. */
 #define NOTIFY_HOUR_BEFORE 2
-/** @brief Notificar durante el dia de vencimiento. */
+/** @brief Notify during the due day. */
 #define NOTIFY_DAY_OF      1
 
 /**
- * @brief Anade un elemento a un array dinamico basado en campos `items`, `n_items` y `size`.
+ * @brief Append an item to a dynamic array with `items`, `n_items`, and `size` fields.
  *
- * Si el buffer no tiene capacidad suficiente, se realoja duplicando su tamano.
+ * If the buffer has no remaining capacity, it is reallocated with double size.
  *
- * @param da Estructura de array dinamico.
- * @param element Elemento a insertar al final.
+ * @param da Dynamic array structure.
+ * @param element Element to append.
  */
 #define append(da, element)                                                    \
     do {                                                                       \
@@ -99,182 +99,182 @@ enum Due {
 
 /**
  * @struct Task
- * @brief Representa una tarea persistida y mostrada por la aplicacion.
+ * @brief Legacy task persisted and displayed by the old TDL code.
  */
 typedef struct {
-    int id;             /**< Identificador unico de la tarea. */
-    char *name;         /**< Nombre corto de la tarea. */
-    char *description;  /**< Descripcion libre. */
-    int priority;       /**< Prioridad, usando @ref Priority. */
-    time_t due;         /**< Fecha de vencimiento; 0 indica "sin fecha". */
-    int due_has_time;   /**< Indica si la fecha de vencimiento incluye hora. */
-    int notify;         /**< Bitfield THD de notificaciones. */
-    int recurrent;      /**< Regla de recurrencia, usando @ref Recurrent. */
-    int status;         /**< Estado actual, usando @ref Status. */
-    char *category;     /**< Categoria funcional o "none". */
-    char *project;      /**< Proyecto asociado o "none". */
+    int id;             /**< Unique task identifier. */
+    char *name;         /**< Short task name. */
+    char *description;  /**< Free-form description. */
+    int priority;       /**< Priority, using @ref Priority. */
+    time_t due;         /**< Due date; 0 means no due date. */
+    int due_has_time;   /**< Whether the due date includes a time. */
+    int notify;         /**< THD notification bitfield. */
+    int recurrent;      /**< Recurrence rule, using @ref Recurrent. */
+    int status;         /**< Current status, using @ref Status. */
+    char *category;     /**< Functional category or "none". */
+    char *project;      /**< Associated project or "none". */
 } Task;
 
 /**
  * @struct Project
- * @brief Representa un proyecto persistido con metadatos propios.
+ * @brief Legacy project with its own metadata.
  */
 typedef struct {
-    int id;             /**< Identificador unico del proyecto. */
-    char *name;         /**< Nombre corto del proyecto. */
-    char *description;  /**< Descripcion libre. */
-    int priority;       /**< Prioridad por defecto para tareas asociadas. */
-    time_t due;         /**< Fecha de vencimiento por defecto. */
-    int due_has_time;   /**< Indica si la fecha de vencimiento incluye hora. */
-    int notify;         /**< Bitfield THD de notificaciones por defecto. */
-    int recurrent;      /**< Recurrencia por defecto. */
-    int status;         /**< Estado propio del proyecto. */
-    char *category;     /**< Categoria por defecto. */
+    int id;             /**< Unique project identifier. */
+    char *name;         /**< Short project name. */
+    char *description;  /**< Free-form description. */
+    int priority;       /**< Default priority for associated tasks. */
+    time_t due;         /**< Default due date. */
+    int due_has_time;   /**< Whether the due date includes a time. */
+    int notify;         /**< Default THD notification bitfield. */
+    int recurrent;      /**< Default recurrence. */
+    int status;         /**< Project status. */
+    char *category;     /**< Default category. */
 } Project;
 
 /**
  * @struct ToDoList
- * @brief Array dinamico con todas las tareas cargadas en memoria.
+ * @brief Dynamic array containing all loaded legacy tasks.
  */
 typedef struct {
-    Task *items;     /**< Buffer con las tareas. */
-    size_t n_items;  /**< Numero de tareas validas. */
-    size_t size;     /**< Capacidad reservada en `items`. */
+    Task *items;     /**< Task buffer. */
+    size_t n_items;  /**< Number of valid tasks. */
+    size_t size;     /**< Reserved capacity in `items`. */
 } ToDoList;
 
 /**
  * @struct ToDoProjects
- * @brief Array dinamico con los nombres de proyectos activos.
+ * @brief Dynamic array containing all loaded legacy projects.
  */
 typedef struct {
-    Project *items;  /**< Buffer con proyectos. */
-    size_t n_items;  /**< Numero de proyectos almacenados. */
-    size_t size;     /**< Capacidad reservada en `items`. */
+    Project *items;  /**< Project buffer. */
+    size_t n_items;  /**< Number of stored projects. */
+    size_t size;     /**< Reserved capacity in `items`. */
 } ToDoProjects;
 
-/** @brief Lista global de tareas cargadas desde almacenamiento. */
+/** @brief Global task list loaded from storage. */
 extern ToDoList to_do_list;
 
-/** @brief Lista global de proyectos activos derivada de las tareas. */
+/** @brief Global project list derived from tasks. */
 extern ToDoProjects to_do_proj;
 
 /**
- * @brief Imprime una tarea en formato detallado.
- * @param task Tarea a mostrar.
+ * @brief Print a detailed task view.
+ * @param task Task to show.
  */
 void print_task(Task *task);
 
 /**
- * @brief Convierte una prioridad interna a su etiqueta legible.
- * @param priority Valor de prioridad.
- * @return Cadena constante con la representacion textual.
+ * @brief Convert an internal priority to a readable label.
+ * @param priority Priority value.
+ * @return Constant string with the text representation.
  */
 char *get_priority(int priority);
 
 /**
- * @brief Convierte una prioridad textual a su valor interno.
- * @param priority Cadena introducida por el usuario.
- * @return Valor de @ref Priority o `-1` si no es valida.
+ * @brief Convert priority text to its internal value.
+ * @param priority User-provided priority string.
+ * @return @ref Priority value, or `-1` when invalid.
  */
 int get_priority_int(char *priority);
 
 /**
- * @brief Convierte una recurrencia interna a su etiqueta legible.
- * @param recurrence Valor de recurrencia.
- * @return Cadena constante con la representacion textual.
+ * @brief Convert an internal recurrence to a readable label.
+ * @param recurrence Recurrence value.
+ * @return Constant string with the text representation.
  */
 char *get_recurrence(int recurrence);
 
 /**
- * @brief Convierte una recurrencia textual a su valor interno.
- * @param recurrence Cadena introducida por el usuario.
- * @return Valor de @ref Recurrent o `-1` si no es valida.
+ * @brief Convert recurrence text to its internal value.
+ * @param recurrence User-provided recurrence string.
+ * @return @ref Recurrent value, or `-1` when invalid.
  */
 int get_recurrence_int(char *recurrence);
 
 /**
- * @brief Convierte un estado interno a su etiqueta legible.
- * @param status Valor de estado.
- * @return Cadena constante con la representacion textual.
+ * @brief Convert an internal status to a readable label.
+ * @param status Status value.
+ * @return Constant string with the text representation.
  */
 char *get_status(int status);
 
 /**
- * @brief Convierte un estado textual a su valor interno.
- * @param status Cadena introducida por el usuario.
- * @return Valor de @ref Status o `-1` si no es valido.
+ * @brief Convert status text to its internal value.
+ * @param status User-provided status string.
+ * @return @ref Status value, or `-1` when invalid.
  */
 int get_status_int(char *status);
 
 /**
- * @brief Comprueba si una fecha descompuesta es valida.
- * @param date Estructura `tm` con dia, mes y ano inicializados.
- * @return `1` si la fecha es valida; `0` en caso contrario.
+ * @brief Check whether a decomposed date is valid.
+ * @param date `tm` structure with initialized day, month, and year.
+ * @return `1` when the date is valid; `0` otherwise.
  */
 int is_valid_date(struct tm date);
 
 /**
- * @brief Calcula los segundos que faltan hasta un instante objetivo.
- * @param target Marca temporal de destino.
- * @return Diferencia `target - now` en segundos.
+ * @brief Calculate the seconds remaining until a target instant.
+ * @param target Target timestamp.
+ * @return `target - now` difference in seconds.
  */
 double second_until(time_t target);
 
 /**
- * @brief Clasifica una fecha segun su cercania relativa.
- * @param target Fecha objetivo.
- * @return Valor de @ref Due correspondiente.
+ * @brief Classify a date by relative nearness.
+ * @param target Target date.
+ * @return Matching @ref Due value.
  */
 int when_due(time_t target);
 
 /**
- * @brief Indica si un proyecto ya esta registrado en la lista global.
- * @param name Nombre del proyecto.
- * @return `1` si existe; `0` en caso contrario.
+ * @brief Check whether a project is already registered in the global list.
+ * @param name Project name.
+ * @return `1` when found; `0` otherwise.
  */
 int is_in_proj_list(char *name);
 
 /**
- * @brief Busca un proyecto por nombre.
- * @param name Nombre del proyecto.
- * @return Puntero al proyecto o `NULL` si no existe.
+ * @brief Find a project by name.
+ * @param name Project name.
+ * @return Project pointer, or `NULL` when not found.
  */
 Project *find_project_by_name(const char *name);
 
 /**
- * @brief Busca un proyecto por ID.
- * @param id Identificador del proyecto.
- * @return Puntero al proyecto o `NULL` si no existe.
+ * @brief Find a project by ID.
+ * @param id Project identifier.
+ * @return Project pointer, or `NULL` when not found.
  */
 Project *find_project_by_id(int id);
 
 /**
- * @brief Imprime el resumen y progreso de un proyecto.
- * @param id Identificador persistido del proyecto.
+ * @brief Print a project summary and progress.
+ * @param id Persisted project identifier.
  */
 void print_proj(int id);
 
 /**
- * @brief Imprime un proyecto en formato detallado.
- * @param project Proyecto a mostrar.
+ * @brief Print a detailed project view.
+ * @param project Project to show.
  */
 void print_project(Project *project);
 
-/** @brief Imprime la cabecera de la tabla de tareas. */
+/** @brief Print the task table header. */
 void print_task_table_header();
 
 /**
- * @brief Imprime una fila de la tabla de tareas.
- * @param t Tarea a imprimir.
+ * @brief Print a task table row.
+ * @param t Task to print.
  */
 void print_task_table_row(Task *t);
 
-/** @brief Imprime la cabecera de la tabla de proyectos. */
+/** @brief Print the project table header. */
 void print_proj_table_header();
 
 /**
- * @brief Imprime una fila de la tabla de proyectos.
- * @param proj Proyecto a imprimir.
+ * @brief Print a project table row.
+ * @param proj Project to print.
  */
 void print_proj_table_row(Project *proj);
 

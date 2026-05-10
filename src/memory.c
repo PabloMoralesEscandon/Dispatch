@@ -154,7 +154,7 @@ static json_t *task_to_json(Task *task) {
                         json_string(task->description));
     json_object_set_new(json_task, "priority", json_integer(task->priority));
     json_set_due(json_task, task->due);
-    // Guarda si la fecha debe mostrarse con hora y los bits THD de notify.
+    // Persist whether the due date should display a time and THD notify bits.
     json_object_set_new(json_task, "due_has_time",
                         json_integer(task->due_has_time));
     json_object_set_new(json_task, "notify", json_integer(task->notify));
@@ -174,7 +174,7 @@ static json_t *project_to_json(Project *project) {
     json_object_set_new(json_project, "priority",
                         json_integer(project->priority));
     json_set_due(json_project, project->due);
-    // Los proyectos persisten los mismos defaults temporales que las tareas.
+    // Projects persist the same time-related defaults as tasks.
     json_object_set_new(json_project, "due_has_time",
                         json_integer(project->due_has_time));
     json_object_set_new(json_project, "notify", json_integer(project->notify));
@@ -200,7 +200,7 @@ static int parse_task(json_t *json_item, Task *task) {
     task->description = json_string_dup_or(json_item, "description", "none");
     task->priority = json_int_or(json_item, "priority", MEDIUM);
     task->due = json_due_or_zero(json_item);
-    // Los ficheros antiguos no tienen estos campos; se cargan como desactivados.
+    // Older files do not have these fields, so load them as disabled.
     task->due_has_time = json_int_or(json_item, "due_has_time", 0);
     task->notify = json_int_or(json_item, "notify", 0) & 7;
     task->category = json_string_dup_or(json_item, "category", "none");
@@ -224,7 +224,7 @@ static int parse_project(json_t *json_item, Project *project) {
     project->description = json_string_dup_or(json_item, "description", "none");
     project->priority = json_int_or(json_item, "priority", MEDIUM);
     project->due = json_due_or_zero(json_item);
-    // Limita notify a los tres bits utiles al cargar desde JSON.
+    // Limit notify to the three useful bits when loading from JSON.
     project->due_has_time = json_int_or(json_item, "due_has_time", 0);
     project->notify = json_int_or(json_item, "notify", 0) & 7;
     project->category = json_string_dup_or(json_item, "category", "none");
@@ -360,7 +360,7 @@ void update_recurrent(const char *filename) {
             struct tm time = *localtime(&to_do_list.items[i].due);
             switch (to_do_list.items[i].recurrent) {
             case DAILY:
-                // Avanza hasta encontrar la siguiente ocurrencia futura.
+                // Advance until the next future occurrence is found.
                 time.tm_mday += 1;
                 to_do_list.items[i].due = mktime(&time);
                 while (second_until(to_do_list.items[i].due) < 0) {

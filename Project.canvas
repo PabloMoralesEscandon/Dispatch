@@ -149,12 +149,12 @@
 		{
 			"id": "680cf1ad",
 			"type": "text",
-			"text": "## VD-04 English-only code and comments pass\nRename Spanish identifiers if any are found, translate Spanish comments/docs in source headers, and ensure all code-facing text is English.",
+			"text": "## VD-04 English-only code and comments pass\nCompleted the English-only code-facing pass. Translated legacy header Doxygen text and source comments in include/task.h, include/parser.h, include/memory.h, include/utils.h, src/memory.c, src/parser.c, src/task.c, and src/utils.c. Removed stale citation-style comments and fixed an English typo in a legacy parser message. Verified with Spanish-text rg scans, ./nob, and tests/run_cli_tests.sh.",
 			"x": 1340,
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "4dcec8dd",

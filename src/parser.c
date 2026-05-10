@@ -34,7 +34,7 @@ int dispatch_command(char *cmd, char *options[], int id) {
 
 char *parse_words(int argc, char **argv) {
     int i = 2;
-    // Agrupa los argumentos posicionales hasta la primera opcion "-x"/"--long".
+    // Group positional arguments until the first "-x" or "--long" option.
     while ((i < argc) && (argv[i][0] != '-'))
         i++;
     int size = 0;
@@ -128,7 +128,7 @@ int parse_options(int argc, char **argv, char **options) {
 }
 
 static int parse_notify_value(char *value, int *notify) {
-    // Almacena notify como bitfield THD: T=4, H=2, D=1.
+    // Store notify as a THD bitfield: T=4, H=2, D=1.
     int all_digits = 1;
     for (size_t i = 0; value[i] != '\0'; i++) {
         if (!isdigit(value[i])) {
@@ -174,8 +174,8 @@ static int parse_notify_value(char *value, int *notify) {
 
 static void normalize_due_for_notify(time_t *due, int due_has_time,
                                      int notify) {
-    // Las fechas sin hora usan 23:59 internamente si tienen notify.
-    // due_has_time queda a 0 para no mostrar hora en la salida.
+    // Dates without a time use 23:59 internally when notify is enabled.
+    // due_has_time remains 0 so output does not show a time.
     if (*due == 0 || due_has_time || notify == 0)
         return;
 
@@ -188,7 +188,7 @@ static void normalize_due_for_notify(time_t *due, int due_has_time,
 
 static int parse_due_value(const char *value, int notify, time_t *due,
                            int *due_has_time) {
-    // Acepta fecha sola o fecha con hora; due_has_time controla la salida.
+    // Accept date-only or date-with-time input; due_has_time controls output.
     struct tm date = {0};
     size_t len = strlen(value);
     if ((len == 10 || len == 16) &&
@@ -222,7 +222,7 @@ static int parse_due_value(const char *value, int notify, time_t *due,
         } else {
             *due_has_time = 0;
             if (notify) {
-                // Guarda 23:59 sin marcar la fecha como fecha con hora.
+                // Store 23:59 without marking the date as having a time.
                 date.tm_hour = 23;
                 date.tm_min = 59;
             }
@@ -372,7 +372,7 @@ int cmd_add(char *options[], int id) {
     }
 
     if (options[NOTIFY]) {
-        // Hereda notify del proyecto salvo que se indique en la tarea.
+        // Inherit notify from the project unless the task provides it.
         if (!parse_notify_value(options[NOTIFY], &new_task.notify))
             return 1;
     } else if (project) {
@@ -462,7 +462,7 @@ int cmd_add_project(char *options[], int id) {
     }
 
     if (options[NOTIFY]) {
-        // El notify del proyecto sera el valor por defecto de sus tareas.
+        // Project notify becomes the default value for its tasks.
         if (!parse_notify_value(options[NOTIFY], &new_project.notify))
             return 1;
     } else {
@@ -854,7 +854,7 @@ int cmd_done(char *options[], int id) {
             }
         }
     } else {
-        printf("Provide anme or id ot he completed task.\n");
+        printf("Provide the name or id of the completed task.\n");
         return 1;
     }
     if (index == -1) {
@@ -897,7 +897,7 @@ int cmd_list(char *options[], int id) {
     printf(RESET);
     int alternate = 0;
     for (size_t i = 0; i < to_do_list.n_items; i++) {
-        // Cada filtro descarta filas antes de imprimir la tabla.
+        // Each filter discards rows before printing the table.
         if ((id != -1) && (to_do_list.items[i].id != id))
             continue;
         if (options[PRIORITY] && (to_do_list.items[i].priority !=
@@ -946,7 +946,7 @@ int cmd_list(char *options[], int id) {
         } else
             bg = 237;
         alternate = !alternate;
-        // Alterna el fondo para mejorar la legibilidad de la salida tabular.
+        // Alternate the background to improve table output readability.
         set_bg256(bg);
         print_task_table_row(&to_do_list.items[i]);
         printf(RESET);
@@ -1025,5 +1025,5 @@ static inline void set_bg256(int n) { printf(ESC "48;5;%dm", n); }
 static inline void set_fg256(int n) { printf(ESC "38;5;%dm", n); }
 static inline void term_bold_on(void) {
     fputs("\x1b[1m", stdout);
-} // bold on [web:14]
+}
 static inline void term_bold_off(void) { fputs("\x1b[22m", stdout); }

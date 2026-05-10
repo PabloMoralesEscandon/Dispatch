@@ -5,48 +5,48 @@
 
 /**
  * @file memory.h
- * @brief Persistencia de tareas en almacenamiento JSON.
+ * @brief Legacy task persistence in JSON storage.
  */
 
 /**
- * @brief Carga las tareas desde disco y reconstruye las listas globales.
- * @param filename Nombre del fichero JSON de entrada.
+ * @brief Load tasks from disk and rebuild the global lists.
+ * @param filename Input JSON filename.
  */
 void load(const char *filename);
 
 /**
- * @brief Guarda una tarea anadiendola al fichero JSON.
- * @param task Tarea a persistir.
- * @param filename Nombre del fichero JSON de salida.
+ * @brief Save a task by appending it to the JSON file.
+ * @param task Task to persist.
+ * @param filename Output JSON filename.
  */
 void save(Task *task, const char *filename);
 
 /**
- * @brief Guarda un proyecto anadiendolo al fichero JSON.
- * @param project Proyecto a persistir.
- * @param filename Nombre del fichero JSON de salida.
+ * @brief Save a project by appending it to the JSON file.
+ * @param project Project to persist.
+ * @param filename Output JSON filename.
  */
 void save_project(Project *project, const char *filename);
 
 /**
- * @brief Elimina una tarea persistida por su identificador.
- * @param filename Nombre del fichero JSON.
- * @param target_id ID de la tarea a eliminar.
- * @return `0` si la operacion termina correctamente; `1` si falla.
+ * @brief Delete a persisted task by identifier.
+ * @param filename JSON filename.
+ * @param target_id ID of the task to delete.
+ * @return `0` when the operation succeeds; `1` when it fails.
  */
 int delete_task(const char *filename, int target_id);
 
 /**
- * @brief Elimina un proyecto persistido por su identificador.
- * @param filename Nombre del fichero JSON.
- * @param target_id ID del proyecto a eliminar.
- * @return `0` si la operacion termina correctamente; `1` si falla.
+ * @brief Delete a persisted project by identifier.
+ * @param filename JSON filename.
+ * @param target_id ID of the project to delete.
+ * @return `0` when the operation succeeds; `1` when it fails.
  */
 int delete_project(const char *filename, int target_id);
 
 /**
- * @brief Recalcula las fechas de tareas recurrentes ya vencidas y completadas.
- * @param filename Nombre del fichero JSON asociado al almacenamiento.
+ * @brief Recalculate due dates for completed recurring tasks that are overdue.
+ * @param filename JSON filename associated with storage.
  */
 void update_recurrent(const char *filename);
 
