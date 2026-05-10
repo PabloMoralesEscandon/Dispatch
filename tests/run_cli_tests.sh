@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN="$ROOT/dispatch"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-cli-tests.XXXXXX")"
+RUN_OUTPUT=""
+RUN_STATUS=0
+
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+fail() {
+    printf 'FAIL: %s\n' "$1" >&2
+    if [ -n "$RUN_OUTPUT" ]; then
+        printf '%s\n' "$RUN_OUTPUT" >&2
+    fi
+    exit 1
+}
+
+run_cmd() {
+    set +e
+    RUN_OUTPUT="$("$@" 2>&1)"
+    RUN_STATUS=$?
+    set -e
+}
+
+expect_ok() {
+    run_cmd "$@"
+    if [ "$RUN_STATUS" -ne 0 ]; then
+        fail "expected success: $*"
+    fi
+}
+
+expect_fail() {
+    run_cmd "$@"
+    if [ "$RUN_STATUS" -eq 0 ]; then
+        fail "expected failure: $*"
+    fi
+}
+
+assert_contains() {
+    if ! printf '%s\n' "$RUN_OUTPUT" | grep -Fq "$1"; then
+        fail "expected output to contain: $1"
+    fi
+}
+
+assert_not_contains() {
+    if printf '%s\n' "$RUN_OUTPUT" | grep -Fq "$1"; then
+        fail "expected output not to contain: $1"
+    fi
+}
+
+make_case_dir() {
+    local name="$1"
+    local dir="$TMP_ROOT/$name"
+    mkdir -p "$dir"
+    printf '%s\n' "$dir"
+}
+
+cd "$ROOT"
+./nob >/dev/null
+
+case_dir="$(make_case_dir core)"
+cd "$case_dir"
+
+expect_ok "$BIN" init
+assert_contains "Created dispatch.json"
+
+if [ ! -f dispatch.json ]; then
+    fail "dispatch init did not create dispatch.json"
+fi
+
+expect_ok "$BIN" init
+assert_contains "dispatch.json already exists"
+
+expect_ok "$BIN" group add Development --prefix DE
+assert_contains "Added group Development (DE)"
+
+expect_fail "$BIN" group add Duplicate --prefix DE
+assert_contains "Could not add group"
+
+expect_ok "$BIN" task add DE First --description "First task"
+assert_contains "Added task DE-01"
+
+expect_fail "$BIN" task add DE ""
+assert_contains "Could not add task"
+
+expect_ok "$BIN" task add DE Second
+assert_contains "Added task DE-02"
+
+expect_ok "$BIN" show DE-01
+assert_contains "Title: First"
+assert_contains "Description: First task"
+assert_contains "State: proposed"
+assert_contains "Blocks: -"
+
+expect_ok "$BIN" dep add DE-01 DE-02
+assert_contains "Added dependency DE-01 -> DE-02"
+
+expect_fail "$BIN" dep add DE-02 DE-01
+assert_contains "Could not add dependency DE-02 -> DE-01"
+
+expect_ok "$BIN" show DE-01
+assert_contains "Blocks: DE-02"
+
+expect_ok "$BIN" ready DE-01 --actor user
+assert_contains "Readied DE-01"
+
+expect_ok "$BIN" ready DE-02 --actor user
+assert_contains "Readied DE-02"
+
+expect_ok "$BIN" blocked
+assert_contains "DE-02"
+assert_contains "blocked_by: DE-01"
+
+expect_fail "$BIN" start DE-02 --actor codex
+assert_contains "Could not start DE-02"
+
+expect_ok "$BIN" start DE-01 --actor codex
+assert_contains "Started DE-01"
+
+expect_fail "$BIN" start DE-01 --actor other-agent
+assert_contains "Could not start DE-01"
+
+expect_ok "$BIN" show DE-01
+assert_contains "State: doing"
+assert_contains "Assigned to: codex"
+assert_contains "Started by: codex"
+
+expect_ok "$BIN" finish DE-01 --actor codex
+assert_contains "Finished DE-01 (review)"
+assert_contains "Review required before continuing this sequence."
+
+expect_ok "$BIN" blocked
+assert_contains "DE-02"
+assert_contains "blocked_by: DE-01"
+
+expect_ok "$BIN" review DE-01 --actor user
+assert_contains "Reviewed DE-01"
+
+expect_ok "$BIN" ready
+assert_contains "DE-02"
+assert_contains "ready"
+
+expect_ok "$BIN" start DE-02 --actor codex
+assert_contains "Started DE-02"
+
+expect_ok "$BIN" pause DE-02 --actor codex
+assert_contains "Paused DE-02"
+
+expect_ok "$BIN" start DE-02 --actor codex
+assert_contains "Started DE-02"
+
+expect_ok "$BIN" finish DE-02 --actor codex
+assert_contains "Finished DE-02 (review)"
+
+expect_ok "$BIN" review DE-02 --actor user
+assert_contains "Reviewed DE-02"
+
+expect_ok "$BIN" task add DE DeleteMe
+assert_contains "Added task DE-03"
+
+expect_ok "$BIN" task delete DE-03
+assert_contains "Deleted task DE-03"
+
+expect_fail "$BIN" task delete DE-01
+assert_contains "Could not delete DE-01"
+
+expect_ok "$BIN" task delete DE-01 --force
+assert_contains "Deleted task DE-01"
+
+case_dir="$(make_case_dir ungated)"
+cd "$case_dir"
+
+expect_ok "$BIN" init
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Ungated --no-review
+assert_contains "Added task DE-01"
+expect_ok "$BIN" task add DE AfterUngated
+assert_contains "Added task DE-02"
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+assert_contains "Finished DE-01 (done)"
+assert_contains "Next ready tasks:"
+assert_contains "DE-02"
+
+case_dir="$(make_case_dir legacy)"
+cd "$case_dir"
+
+expect_ok "$BIN" --help
+assert_contains "Dispatch: a command line workflow board."
+assert_not_contains "clear"
+assert_not_contains "project"
+assert_not_contains "recurrence"
+assert_not_contains "notification"
+assert_not_contains "category"
+
+expect_fail "$BIN" add LegacyTask
+assert_contains "Unknown Dispatch command: add"
+
+expect_fail "$BIN" clear
+assert_contains "Unknown Dispatch command: clear"
+
+expect_fail "$BIN" list projects
+assert_contains "Usage: dispatch list"
+
+expect_ok "$BIN" init
+expect_ok "$BIN" group add Development --prefix DE
+expect_fail "$BIN" task add DE Test -d 05-06-2026
+assert_contains "Unknown task option: -d"
+
+expect_fail "$BIN" task add DE Test --project old
+assert_contains "Unknown task option: --project"
+
+expect_fail "$BIN" task add DE Test --category old
+assert_contains "Unknown task option: --category"
+
+printf 'PASS: Dispatch CLI tests\n'

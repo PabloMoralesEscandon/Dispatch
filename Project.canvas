@@ -129,12 +129,12 @@
 		{
 			"id": "258eff30",
 			"type": "text",
-			"text": "## VD-02 Implement automated tests\nAdd automated tests for command parsing, persistence, state transitions, blocked dependencies, invalid operations, and multi-agent-safe workflows.",
+			"text": "## VD-02 Implement automated tests\nImplemented automated CLI tests in tests/run_cli_tests.sh. Coverage includes init idempotency, groups and duplicate prefix rejection, task creation and empty-title rejection, show/list state visibility, dependency creation and cycle rejection, blocked-state enforcement, start assignment lockout, pause/finish/review lifecycle, no-review continuation behavior, guarded delete with --force, and removed TDL command/option regressions. Verified by running tests/run_cli_tests.sh.",
 			"x": 1340,
 			"y": 220,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "0980e29e",
@@ -334,7 +334,7 @@
 			"y": 160,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "87362c14",
