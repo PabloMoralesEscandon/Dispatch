@@ -174,7 +174,7 @@
 			"y": 940,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "95d42ce0",
@@ -355,6 +355,85 @@
 			"width": 280,
 			"height": 160,
 			"color": "4"
+		},
+		{
+			"id": "group-cleanu",
+			"type": "group",
+			"x": 2200,
+			"y": 0,
+			"width": 380,
+			"height": 1300,
+			"label": "Cleanup"
+		},
+		{
+			"id": "5eae7dba",
+			"type": "text",
+			"text": "## CL-01 Approve cleanup deletion list\nReview CLEANUP.md and confirm the exact files to remove or untrack. This is the safety gate before deleting generated artifacts, runtime state, or Kanvas workflow files.",
+			"x": 2220,
+			"y": 40,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "a9dd273c",
+			"type": "text",
+			"text": "## CL-02 Add ignore rules for generated local files\nCreate or update .gitignore so build outputs, compiled binaries, symlinks, local session files, Obsidian workspace state, and nob rebuild backups do not keep appearing in git status.",
+			"x": 2220,
+			"y": 220,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "4ad11481",
+			"type": "text",
+			"text": "## CL-03 Untrack build outputs and runtime board state\nRemove tracked generated artifacts from git without deleting required source: build object files, compiled nob binary, and repository-root dispatch.json runtime state. Keep nob.c, nob.h, source, docs, fixtures, and tests.",
+			"x": 2220,
+			"y": 400,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "d36f0877",
+			"type": "text",
+			"text": "## CL-04 Remove local generated files from working tree\nDelete untracked or regenerated local files such as build/dispatch, dispatch symlink, nob.old, .session, and regenerated build artifacts after they are ignored or untracked. Rebuild remains available through ./nob.",
+			"x": 2220,
+			"y": 580,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "186682eb",
+			"type": "text",
+			"text": "## CL-05 Remove legacy TDL source from build\nUpdate nob.c so it compiles only active Dispatch source files, then remove obsolete legacy TDL headers and source files: include/memory.h, include/parser.h, include/task.h, include/utils.h, src/memory.c, src/parser.c, src/task.c, and src/utils.c. Verify tests still pass.",
+			"x": 2220,
+			"y": 760,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "b719fc24",
+			"type": "text",
+			"text": "## CL-06 Remove Kanvas workflow files\nRemove Project.canvas, canvas-tool.py, AGENTS.md, RULES.md, .obsidian/, and .codex after the cleanup sequence is otherwise complete. This must be last because it removes the current Canvas/Kanvas coordination tooling.",
+			"x": 2220,
+			"y": 940,
+			"width": 280,
+			"height": 160,
+			"color": "6"
+		},
+		{
+			"id": "ea0219ed",
+			"type": "text",
+			"text": "## CL-07 Run post-cleanup acceptance\nFrom the cleaned repository, run ./nob, tests/run_cli_tests.sh, inspect git status, and confirm README.md, CLAUDE.md, tests, fixtures, Dispatch source, and build scripts remain coherent.",
+			"x": 2220,
+			"y": 1120,
+			"width": 280,
+			"height": 160,
+			"color": "6"
 		}
 	],
 	"edges": [
@@ -630,6 +709,48 @@
 			"fromSide": "top",
 			"toNode": "d38f8e90",
 			"toSide": "bottom"
+		},
+		{
+			"id": "edge-044",
+			"fromNode": "5eae7dba",
+			"fromSide": "bottom",
+			"toNode": "a9dd273c",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-045",
+			"fromNode": "a9dd273c",
+			"fromSide": "bottom",
+			"toNode": "4ad11481",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-046",
+			"fromNode": "4ad11481",
+			"fromSide": "bottom",
+			"toNode": "d36f0877",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-047",
+			"fromNode": "d36f0877",
+			"fromSide": "bottom",
+			"toNode": "186682eb",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-048",
+			"fromNode": "186682eb",
+			"fromSide": "bottom",
+			"toNode": "b719fc24",
+			"toSide": "top"
+		},
+		{
+			"id": "edge-049",
+			"fromNode": "b719fc24",
+			"fromSide": "bottom",
+			"toNode": "ea0219ed",
+			"toSide": "top"
 		}
 	]
 }
