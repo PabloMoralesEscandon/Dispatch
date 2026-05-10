@@ -139,12 +139,12 @@
 		{
 			"id": "0980e29e",
 			"type": "text",
-			"text": "## VD-03 Update README.md\nRewrite the README for Dispatch: purpose, install/build steps, command reference, agent workflow examples, and storage behavior.",
+			"text": "## VD-03 Update README.md\nRewrote the README for Dispatch and normalized the filename to README.md. The new README covers purpose, requirements, build and clean commands, quick start, command reference, lifecycle states, agent workflow, planning example, dispatch.json storage behavior, automated tests, and removed TDL surface. Verified the documented CLI with tests/run_cli_tests.sh.",
 			"x": 1340,
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "680cf1ad",

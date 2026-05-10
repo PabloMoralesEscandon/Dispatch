@@ -1,0 +1,251 @@
+# Dispatch
+
+Dispatch is a command-line workflow board for humans and agents. It replaces
+the old TDL personal todo app with a project workflow tool built around task
+groups, stable task IDs, dependencies, assignment, review gates, and explicit
+completion history.
+
+Dispatch is meant to help a user and one or more coding agents coordinate work
+without editing the board storage file directly.
+
+## Requirements
+
+- A C compiler such as `clang` or `gcc`
+- `jansson`
+- A POSIX-like shell for the test runner
+
+## Build
+
+Build the `nob` bootstrapper and then build Dispatch:
+
+```bash
+cc nob.c -o nob
+./nob
+```
+
+The build creates:
+
+```text
+build/dispatch
+dispatch -> build/dispatch
+```
+
+For a release-style build:
+
+```bash
+./nob release
+```
+
+To clean generated build output:
+
+```bash
+./nob clean
+```
+
+## Quick Start
+
+Create a board, add a group, add two tasks, and make the second task depend on
+the first:
+
+```bash
+./dispatch init
+./dispatch group add Development --prefix DE
+./dispatch task add DE "Design storage model"
+./dispatch task add DE "Implement storage model"
+./dispatch dep add DE-01 DE-02
+./dispatch ready DE-01 --actor user
+./dispatch ready
+```
+
+Start and finish work as an actor:
+
+```bash
+./dispatch show DE-01
+./dispatch start DE-01 --actor codex
+
+# Do the work.
+
+./dispatch finish DE-01 --actor codex
+```
+
+If the task requires review, `finish` moves it to `review` and the agent should
+stop that sequence until the user accepts it:
+
+```bash
+./dispatch review DE-01 --actor user
+```
+
+After review, dependent tasks can become ready:
+
+```bash
+./dispatch ready
+```
+
+## Command Reference
+
+### Board
+
+```bash
+dispatch init
+dispatch normalize
+```
+
+`init` creates `dispatch.json` if it does not already exist. `normalize`
+recomputes derived states such as blocked and ready.
+
+### Groups
+
+```bash
+dispatch group add <name> [--prefix XX]
+```
+
+Groups are workflow lanes or topics. Task IDs are generated from the group
+prefix, for example `DE-01`.
+
+### Tasks
+
+```bash
+dispatch task add <group> <title> [--description <text>] [--no-review]
+dispatch task delete <id> [--force]
+dispatch show <id>
+dispatch list
+```
+
+Tasks require a group and a title. By default, tasks require review after they
+are finished. Use `--no-review` only when the task can safely complete and
+unblock the next task without human acceptance.
+
+Deleting a task with dependents is rejected unless `--force` is used. Forced
+delete also removes that task from other tasks' dependency lists.
+
+### Dependencies
+
+```bash
+dispatch dep add <from-id> <to-id>
+dispatch dep remove <from-id> <to-id>
+dispatch blocked
+```
+
+`dep add DE-01 DE-02` means `DE-02` depends on `DE-01`. A task is blocked when
+any dependency is not done. Dependency cycles are rejected.
+
+### Lifecycle
+
+```bash
+dispatch ready [<id> [--actor <name>]]
+dispatch start <id> --actor <name>
+dispatch pause <id> --actor <name>
+dispatch finish <id> --actor <name>
+dispatch review <id> --actor <name>
+```
+
+The normal lifecycle is:
+
+```text
+proposed -> ready -> doing -> review -> done
+```
+
+Tasks without review gates go directly from `doing` to `done` when finished:
+
+```text
+proposed -> ready -> doing -> done
+```
+
+Use `ready` with no ID to list work that can be started. Use `ready <id>` to
+approve a proposed task for work.
+
+`start` assigns the task to an actor and prevents a second actor from starting
+the same task. `pause` returns a doing task to ready. `finish` records the
+completing actor and moves the task to `review` or `done`. `review` accepts a
+review task as done.
+
+## Agent Workflow
+
+Agents should use Dispatch as their task protocol:
+
+```bash
+./dispatch ready
+./dispatch blocked
+./dispatch show <TASK-ID>
+./dispatch start <TASK-ID> --actor <agent-id>
+
+# Do the requested work and run relevant checks.
+
+./dispatch finish <TASK-ID> --actor <agent-id>
+git status --short
+git add <files changed for this task>
+git commit -m "<TASK-ID> <task title>"
+./dispatch ready
+```
+
+If `finish` reports that review is required, the agent must stop that sequence
+and wait for the user. If `finish` reports `done` and prints newly ready tasks,
+the agent may continue only when the user asked it to keep working through
+available tasks.
+
+Parallel agents should not share a Git working tree. Use one Git worktree and
+one branch per agent or task sequence:
+
+```bash
+git worktree add ../Dispatch-agent-codex-DE-12 -b agent/codex/DE-12
+```
+
+Dispatch controls task assignment. Git worktrees control file and commit
+isolation.
+
+## Planning Example
+
+When a user asks an agent to plan a feature, the agent should create tasks and
+dependencies through Dispatch:
+
+```bash
+./dispatch group add Validation --prefix VD
+./dispatch task add VD "Define CLI test scenarios"
+./dispatch task add VD "Implement CLI test runner"
+./dispatch task add VD "Run final acceptance pass"
+./dispatch dep add VD-01 VD-02
+./dispatch dep add VD-02 VD-03
+./dispatch ready VD-01 --actor user
+```
+
+This creates a sequence where implementation waits for planning, and final
+acceptance waits for implementation.
+
+## Storage
+
+Dispatch stores its board in `dispatch.json` in the current working directory.
+The file contains the board name, groups, tasks, dependencies, ownership fields,
+timestamps, review flags, and history entries.
+
+Agents should treat `dispatch.json` as an implementation detail. Do not read or
+edit it directly during normal workflow. Use Dispatch commands to inspect and
+change board state.
+
+## Tests
+
+Run the automated CLI tests:
+
+```bash
+tests/run_cli_tests.sh
+```
+
+The test runner builds Dispatch, creates temporary boards under `/tmp`, and
+checks command behavior through the CLI.
+
+Current coverage includes initialization, groups, task creation, dependencies,
+blocked state, assignment lockout, pause/finish/review lifecycle, ungated
+continuation, guarded delete, and rejection of removed TDL commands/options.
+
+## Removed TDL Surface
+
+Dispatch no longer supports the old personal todo commands or metadata:
+
+- `add`, `mod`, `done`, `del`, `clear`
+- project inheritance commands
+- due dates
+- recurrence
+- notification metadata
+- categories
+- priority-first sorting
+
+Use Dispatch groups, dependencies, review gates, and lifecycle commands instead.
