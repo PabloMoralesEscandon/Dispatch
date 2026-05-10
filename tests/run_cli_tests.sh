@@ -39,13 +39,13 @@ expect_fail() {
 }
 
 assert_contains() {
-    if ! printf '%s\n' "$RUN_OUTPUT" | grep -Fq "$1"; then
+    if ! printf '%s\n' "$RUN_OUTPUT" | grep -Fq -- "$1"; then
         fail "expected output to contain: $1"
     fi
 }
 
 assert_not_contains() {
-    if printf '%s\n' "$RUN_OUTPUT" | grep -Fq "$1"; then
+    if printf '%s\n' "$RUN_OUTPUT" | grep -Fq -- "$1"; then
         fail "expected output not to contain: $1"
     fi
 }
@@ -192,6 +192,7 @@ cd "$case_dir"
 
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
+assert_not_contains "--json"
 assert_not_contains "clear"
 assert_not_contains "project"
 assert_not_contains "recurrence"

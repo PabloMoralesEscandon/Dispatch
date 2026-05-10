@@ -42,7 +42,7 @@ static const DispatchCliCommand *find_command(const char *command) {
 
 void dispatch_cli_print_help(void) {
     puts("Dispatch: a command line workflow board.");
-    puts("Usage: dispatch <command> [args] [--json]");
+    puts("Usage: dispatch <command> [args]");
     puts("");
     puts("Workflow commands:");
     for (int i = 0; commands[i].name != NULL; i++)

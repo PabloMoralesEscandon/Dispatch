@@ -134,7 +134,7 @@
 			"y": 220,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "0980e29e",
@@ -144,7 +144,7 @@
 			"y": 400,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "680cf1ad",
@@ -154,7 +154,7 @@
 			"y": 580,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "4dcec8dd",
@@ -164,17 +164,17 @@
 			"y": 760,
 			"width": 280,
 			"height": 160,
-			"color": "5"
+			"color": "4"
 		},
 		{
 			"id": "1886ca96",
 			"type": "text",
-			"text": "## VD-06 Run final acceptance pass\nBuild, run tests, exercise core CLI workflows manually, and verify docs match implemented behavior.",
+			"text": "## VD-06 Run final acceptance pass\nFinal acceptance pass completed. Built with ./nob, ran tests/run_cli_tests.sh, smoke-checked ./dispatch --help, verified docs against the implemented command set, corrected TEST_PLAN.md so JSON output is marked future work, removed the unimplemented --json hint from CLI help, and hardened the CLI test helper for patterns beginning with --.",
 			"x": 1340,
 			"y": 940,
 			"width": 280,
 			"height": 160,
-			"color": "0"
+			"color": "5"
 		},
 		{
 			"id": "95d42ce0",

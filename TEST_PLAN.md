@@ -78,7 +78,8 @@ the Dispatch binary from that directory, so tests never mutate repository data.
 - `ready` lists only startable tasks.
 - `blocked` lists blockers for each blocked task.
 - Review tasks are visible in a dedicated view or state filter.
-- JSON output is valid JSON and contains stable field names.
+- JSON output is not part of the current implementation; add coverage when the
+  `--json` mode exists.
 
 ## Regression Tests For Removed TDL Behavior
 
