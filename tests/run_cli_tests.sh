@@ -58,6 +58,9 @@ make_case_dir() {
 }
 
 cd "$ROOT"
+if [ ! -x ./nob ]; then
+    cc nob.c -o nob
+fi
 ./nob >/dev/null
 
 case_dir="$(make_case_dir core)"

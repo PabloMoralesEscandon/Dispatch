@@ -3,7 +3,14 @@
 #include "nob.h"
 
 #define BUILD_FOLDER "build/"
-#define SRC_FOLDER "src/"
+
+const char *sources[] = {
+    "src/main.c",
+    "src/dispatch.c",
+    "src/dispatch_cli.c",
+    "src/dispatch_store.c",
+    NULL,
+};
 
 const char *obj_path(const char *path) {
     Nob_String_View name = nob_sv_from_cstr(path_name(path));
@@ -16,21 +23,13 @@ const char *obj_path(const char *path) {
     return temp_sprintf("build/%.*s.o", (int)name.count, name.data);
 }
 
-bool compile_object_files(Nob_Walk_Entry entry) {
-    Cmd *base = entry.data;
+bool compile_object_file(Cmd *base, const char *source) {
     Cmd cmd = {0};
     cmd_extend(&cmd, base);
-    const char *out = obj_path(entry.path);
-    const char *ext = temp_file_ext(entry.path);
-    if ((ext != NULL) && (!strcmp(".c", ext))) {
-        cmd_append(&cmd, "-c", entry.path, "-o", out);
-        nob_log(INFO, "%*s%s", (int)entry.level * 2, "", entry.path);
-        if (!strcmp(".c", ext)) {
-            if (!cmd_run(&cmd))
-                return false;
-        }
-    }
-    return true;
+    const char *out = obj_path(source);
+    cmd_append(&cmd, "-c", source, "-o", out);
+    nob_log(INFO, "%s", source);
+    return cmd_run(&cmd);
 }
 
 int main(int argc, char **argv) {
@@ -57,25 +56,18 @@ int main(int argc, char **argv) {
     if (!mkdir_if_not_exists(BUILD_FOLDER))
         return 1;
 
-    if (!nob_walk_dir(SRC_FOLDER, compile_object_files, .data = &cmd))
-        return 1;
+    Cmd link_cmd = {0};
+    cmd_extend(&link_cmd, &cmd);
 
-    Nob_File_Paths files = {0};
-
-    if (!read_entire_dir(BUILD_FOLDER, &files))
-        return 1;
-
-    for (size_t i = 2; i < files.count; ++i) {
-        const char *file = temp_sprintf(BUILD_FOLDER "%s", files.items[i]);
-        const char *ext = temp_file_ext(file);
-        if (ext == NULL || strcmp(ext, ".o") != 0)
-            continue;
-        nob_cmd_append(&cmd, file);
+    for (size_t i = 0; sources[i] != NULL; i++) {
+        if (!compile_object_file(&cmd, sources[i]))
+            return 1;
+        nob_cmd_append(&link_cmd, obj_path(sources[i]));
     }
 
-    nob_cmd_append(&cmd, "-ljansson", "-o", BUILD_FOLDER "dispatch");
+    nob_cmd_append(&link_cmd, "-ljansson", "-o", BUILD_FOLDER "dispatch");
 
-    if (!cmd_run(&cmd))
+    if (!cmd_run(&link_cmd))
         return 1;
 
     Cmd cmd_symlink = {0};
