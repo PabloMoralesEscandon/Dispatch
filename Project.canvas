@@ -159,12 +159,12 @@
 		{
 			"id": "4dcec8dd",
 			"type": "text",
-			"text": "## VD-05 Inventory repo cleanup candidates\nList workflow-only or Kanvas-specific files that are not part of Dispatch itself, explain why each can be removed, and ask the user before deletion.",
+			"text": "## VD-05 Inventory repo cleanup candidates\nCreated CLEANUP.md with a repo cleanup inventory. It lists workflow-only Canvas/Kanvas files, generated build artifacts, runtime state, and legacy TDL source candidates, with recommendations and a proposed cleanup order. No files were deleted; deletion still requires user approval.",
 			"x": 1340,
 			"y": 760,
 			"width": 280,
 			"height": 160,
-			"color": "1"
+			"color": "5"
 		},
 		{
 			"id": "1886ca96",
