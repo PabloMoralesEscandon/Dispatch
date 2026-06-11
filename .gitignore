@@ -10,5 +10,3 @@
 # Local agent/editor state
 /.session
 /.codex
-/.obsidian/
-/*.canvas

@@ -13,7 +13,3 @@
 # Local agent/session state
 /.session
 /.codex
-
-# Local Obsidian/Kanvas files if the project previously used Canvas planning
-/.obsidian/
-/*.canvas
