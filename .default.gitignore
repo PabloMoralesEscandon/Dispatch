@@ -1,15 +1,3 @@
-# Dispatch local executable and build artifacts
+# Dispatch executable if copied or symlinked into this project.
 /dispatch
 /dispatch.exe
-/build/dispatch
-/build/*.o
-/nob
-/nob.old
-
-# Dispatch local board state
-# Remove this line if the project wants to version-control its Dispatch board.
-/dispatch.json
-
-# Local agent/session state
-/.session
-/.codex
