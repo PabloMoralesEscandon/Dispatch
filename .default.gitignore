@@ -1,0 +1,19 @@
+# Dispatch local executable and build artifacts
+/dispatch
+/dispatch.exe
+/build/dispatch
+/build/*.o
+/nob
+/nob.old
+
+# Dispatch local board state
+# Remove this line if the project wants to version-control its Dispatch board.
+/dispatch.json
+
+# Local agent/session state
+/.session
+/.codex
+
+# Local Obsidian/Kanvas files if the project previously used Canvas planning
+/.obsidian/
+/*.canvas
