@@ -11,6 +11,7 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
                         size_t error_size);
 int dispatch_store_save(const DispatchBoard *board, const char *path,
                         char *error, size_t error_size);
-int dispatch_store_init_file(const char *path, char *error, size_t error_size);
+int dispatch_store_init_file(const char *path, const char *repo_path,
+                             char *error, size_t error_size);
 
 #endif

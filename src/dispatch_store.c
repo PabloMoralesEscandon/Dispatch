@@ -170,6 +170,11 @@ int dispatch_store_save(const DispatchBoard *board, const char *path,
     json_t *root = json_object();
     json_object_set_new(root, "version", json_integer(board->version));
 
+    json_t *workspace = json_object();
+    json_object_set_new(workspace, "repo_path",
+                        json_string(board->repo_path ? board->repo_path : "."));
+    json_object_set_new(root, "workspace", workspace);
+
     json_t *json_board = json_object();
     json_object_set_new(json_board, "name", json_string(board->name));
 
@@ -363,6 +368,12 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
 
     dispatch_board_init(board, json_string_or(json_board, "name", "Dispatch"));
 
+    json_t *workspace = json_object_get(root, "workspace");
+    if (json_is_object(workspace)) {
+        dispatch_board_set_repo_path(
+            board, json_string_or(workspace, "repo_path", "."));
+    }
+
     if (!load_groups(board, json_object_get(json_board, "groups"), error,
                      error_size) ||
         !load_tasks(board, json_object_get(json_board, "tasks"), error,
@@ -378,7 +389,8 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
     return 1;
 }
 
-int dispatch_store_init_file(const char *path, char *error, size_t error_size) {
+int dispatch_store_init_file(const char *path, const char *repo_path,
+                             char *error, size_t error_size) {
     if (file_exists(path)) {
         DispatchBoard board;
         if (!dispatch_store_load(&board, path, error, error_size))
@@ -389,6 +401,7 @@ int dispatch_store_init_file(const char *path, char *error, size_t error_size) {
 
     DispatchBoard board;
     dispatch_board_init(&board, "Dispatch");
+    dispatch_board_set_repo_path(&board, repo_path);
     int saved = dispatch_store_save(&board, path, error, error_size);
     dispatch_board_free(&board);
     return saved;

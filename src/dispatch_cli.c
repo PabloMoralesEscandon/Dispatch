@@ -13,14 +13,15 @@ typedef struct {
 } DispatchCliCommand;
 
 static const DispatchCliCommand commands[] = {
-    {"init", "Create dispatch.json if it does not exist"},
+    {"init", "Create dispatch.json for a target repository"},
     {"group", "Manage groups"},
     {"task", "Manage tasks"},
     {"dep", "Manage dependencies"},
     {"ready", "List ready work or mark a task ready"},
     {"blocked", "List blocked work and blockers"},
     {"show", "Show one task"},
-    {"list", "List tasks by group and workflow order"},
+    {"list", "List tasks as dependency trees"},
+    {"tree", "List dependency trees, optionally for one group"},
     {"start", "Start and assign a ready task"},
     {"pause", "Pause an in-progress task"},
     {"finish", "Finish a task"},
@@ -50,7 +51,7 @@ void dispatch_cli_print_help(void) {
     puts("");
     puts("Implemented now:");
     puts("  init, group add, task add, dep add/remove, ready, start, pause,");
-    puts("  finish, review, normalize, list, show, blocked");
+    puts("  finish, review, normalize, list, tree, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -63,7 +64,13 @@ int dispatch_cli_is_command(const char *command) {
     return find_command(command) != NULL;
 }
 
-static int cmd_init(void) {
+static int cmd_init(int argc, char **argv) {
+    if (argc > 3) {
+        fprintf(stderr, "Usage: dispatch init [repo-path]\n");
+        return 1;
+    }
+
+    const char *repo_path = argc == 3 ? argv[2] : ".";
     char error[256] = {0};
     int existed = 0;
     FILE *file = fopen(DISPATCH_STORE_FILE, "r");
@@ -72,7 +79,8 @@ static int cmd_init(void) {
         fclose(file);
     }
 
-    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, error, sizeof(error))) {
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, repo_path, error,
+                                  sizeof(error))) {
         fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
                 error);
         return 1;
@@ -83,13 +91,14 @@ static int cmd_init(void) {
         return 0;
     }
 
-    printf("Created %s\n", DISPATCH_STORE_FILE);
+    printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
     return 0;
 }
 
 static int load_board_or_error(DispatchBoard *board) {
     char error[256] = {0};
-    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, error, sizeof(error))) {
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error))) {
         fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
                 error);
         return 0;
@@ -356,10 +365,125 @@ static int ready_task_count(const DispatchBoard *board) {
     return count;
 }
 
-static int cmd_list(int argc, char **argv) {
-    (void)argv;
-    if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch list\n");
+static int task_is_in_group(const DispatchTask *task, const char *group_id) {
+    return !group_id || strcmp(task->group, group_id) == 0;
+}
+
+static const char *primary_dependency_in_scope(const DispatchBoard *board,
+                                               const DispatchTask *task,
+                                               const char *group_id) {
+    for (size_t i = 0; i < task->depends_on.count; i++) {
+        DispatchTask *dependency =
+            dispatch_board_find_task((DispatchBoard *)board,
+                                     task->depends_on.items[i]);
+        if (dependency && task_is_in_group(dependency, group_id))
+            return task->depends_on.items[i];
+    }
+    return NULL;
+}
+
+static int task_index_by_id(const DispatchBoard *board, const char *task_id,
+                            size_t *index) {
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        if (strcmp(board->tasks.items[i].id, task_id) == 0) {
+            *index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void print_tree_indent(size_t depth) {
+    for (size_t i = 0; i < depth; i++)
+        printf("  ");
+}
+
+static void print_tree_dependencies(const DispatchTask *task,
+                                    const char *primary_dependency) {
+    int printed_label = 0;
+    for (size_t i = 0; i < task->depends_on.count; i++) {
+        const char *dependency = task->depends_on.items[i];
+        if (primary_dependency && strcmp(dependency, primary_dependency) == 0)
+            continue;
+        if (!printed_label) {
+            printf("  %s:", primary_dependency ? "also_depends_on"
+                                               : "depends_on");
+            printed_label = 1;
+        }
+        printf("%s%s", printed_label == 1 ? " " : ",", dependency);
+        printed_label++;
+    }
+}
+
+static void print_tree_task(const DispatchBoard *board, const DispatchTask *task,
+                            const char *group_id, size_t depth, int *printed) {
+    size_t task_index = 0;
+    if (!task_index_by_id(board, task->id, &task_index) || printed[task_index])
+        return;
+
+    printed[task_index] = 1;
+    const char *primary_dependency =
+        primary_dependency_in_scope(board, task, group_id);
+
+    print_tree_indent(depth);
+    printf("%s [%s] %s", task->id,
+           dispatch_state_name(dispatch_task_effective_state(board, task)),
+           task->title);
+    if (task->assigned_to)
+        printf("  assigned:%s", task->assigned_to);
+    print_tree_dependencies(task, primary_dependency);
+    printf("\n");
+
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *candidate = &board->tasks.items[i];
+        if (!task_is_in_group(candidate, group_id))
+            continue;
+        const char *candidate_primary =
+            primary_dependency_in_scope(board, candidate, group_id);
+        if (candidate_primary && strcmp(candidate_primary, task->id) == 0)
+            print_tree_task(board, candidate, group_id, depth + 1, printed);
+    }
+}
+
+static void print_tree_for_group(const DispatchBoard *board,
+                                 const DispatchGroup *group) {
+    printf("[%s] %s\n", group->prefix, group->name);
+
+    int *printed = calloc(board->tasks.count ? board->tasks.count : 1,
+                          sizeof(*printed));
+    if (!printed) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    int any = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (!task_is_in_group(task, group->id))
+            continue;
+        if (primary_dependency_in_scope(board, task, group->id))
+            continue;
+        print_tree_task(board, task, group->id, 1, printed);
+        any = 1;
+    }
+
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (!task_is_in_group(task, group->id) || printed[i])
+            continue;
+        print_tree_task(board, task, group->id, 1, printed);
+        any = 1;
+    }
+
+    if (!any)
+        printf("  (no tasks)\n");
+
+    free(printed);
+}
+
+static int cmd_tree(int argc, char **argv) {
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "Usage: dispatch tree [group]\n");
         return 1;
     }
 
@@ -367,23 +491,35 @@ static int cmd_list(int argc, char **argv) {
     if (!load_board_or_error(&board))
         return 1;
 
-    for (size_t g = 0; g < board.groups.count; g++) {
-        DispatchGroup *group = &board.groups.items[g];
-        printf("[%s] %s\n", group->prefix, group->name);
-        int any = 0;
-        for (size_t t = 0; t < board.tasks.count; t++) {
-            DispatchTask *task = &board.tasks.items[t];
-            if (strcmp(task->group, group->id) != 0)
-                continue;
-            print_task_line(&board, task, "  ");
-            any = 1;
+    if (argc == 3) {
+        DispatchGroup *group = dispatch_board_find_group(&board, argv[2]);
+        if (!group) {
+            dispatch_board_free(&board);
+            fprintf(stderr, "No group with id, prefix, or name %s\n", argv[2]);
+            return 1;
         }
-        if (!any)
-            printf("  (no tasks)\n");
+        print_tree_for_group(&board, group);
+        dispatch_board_free(&board);
+        return 0;
+    }
+
+    if (board.groups.count == 0) {
+        printf("(no groups)\n");
+    } else {
+        for (size_t g = 0; g < board.groups.count; g++)
+            print_tree_for_group(&board, &board.groups.items[g]);
     }
 
     dispatch_board_free(&board);
     return 0;
+}
+
+static int cmd_list(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: dispatch list\n");
+        return 1;
+    }
+    return cmd_tree(argc, argv);
 }
 
 static int cmd_show(int argc, char **argv) {
@@ -660,7 +796,7 @@ int dispatch_cli_dispatch(int argc, char **argv) {
     }
 
     if (strcmp(command->name, "init") == 0)
-        return cmd_init();
+        return cmd_init(argc, argv);
     if (strcmp(command->name, "group") == 0)
         return cmd_group(argc, argv);
     if (strcmp(command->name, "task") == 0)
@@ -671,6 +807,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_normalize();
     if (strcmp(command->name, "list") == 0)
         return cmd_list(argc, argv);
+    if (strcmp(command->name, "tree") == 0)
+        return cmd_tree(argc, argv);
     if (strcmp(command->name, "show") == 0)
         return cmd_show(argc, argv);
     if (strcmp(command->name, "blocked") == 0)

@@ -148,6 +148,14 @@ void dispatch_board_init(DispatchBoard *board, const char *name) {
     memset(board, 0, sizeof(*board));
     board->version = 1;
     board->name = dispatch_strdup(name && name[0] ? name : "Dispatch");
+    board->repo_path = dispatch_strdup(".");
+}
+
+void dispatch_board_set_repo_path(DispatchBoard *board, const char *repo_path) {
+    if (!board)
+        return;
+    replace_string(&board->repo_path,
+                   repo_path && repo_path[0] ? repo_path : ".");
 }
 
 void dispatch_board_free(DispatchBoard *board) {
@@ -167,6 +175,7 @@ void dispatch_board_free(DispatchBoard *board) {
     }
     free(board->tasks.items);
     free(board->name);
+    free(board->repo_path);
     memset(board, 0, sizeof(*board));
 }
 

@@ -65,9 +65,10 @@ fi
 
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
+mkdir repo
 
-expect_ok "$BIN" init
-assert_contains "Created dispatch.json"
+expect_ok "$BIN" init repo
+assert_contains "Created dispatch.json for repo repo"
 
 if [ ! -f dispatch.json ]; then
     fail "dispatch init did not create dispatch.json"
@@ -99,6 +100,14 @@ assert_contains "Blocks: -"
 
 expect_ok "$BIN" dep add DE-01 DE-02
 assert_contains "Added dependency DE-01 -> DE-02"
+
+expect_ok "$BIN" tree
+assert_contains "[DE] Development"
+assert_contains "  DE-01 [proposed] First"
+assert_contains "    DE-02 [blocked] Second"
+
+expect_ok "$BIN" list
+assert_contains "    DE-02 [blocked] Second"
 
 expect_fail "$BIN" dep add DE-02 DE-01
 assert_contains "Could not add dependency DE-02 -> DE-01"
@@ -174,8 +183,9 @@ assert_contains "Deleted task DE-01"
 
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
+mkdir repo
 
-expect_ok "$BIN" init
+expect_ok "$BIN" init repo
 expect_ok "$BIN" group add Development --prefix DE
 expect_ok "$BIN" task add DE Ungated --no-review
 assert_contains "Added task DE-01"
@@ -211,7 +221,8 @@ assert_contains "Unknown Dispatch command: clear"
 expect_fail "$BIN" list projects
 assert_contains "Usage: dispatch list"
 
-expect_ok "$BIN" init
+mkdir repo
+expect_ok "$BIN" init repo
 expect_ok "$BIN" group add Development --prefix DE
 expect_fail "$BIN" task add DE Test -d 05-06-2026
 assert_contains "Unknown task option: -d"
@@ -221,5 +232,25 @@ assert_contains "Unknown task option: --project"
 
 expect_fail "$BIN" task add DE Test --category old
 assert_contains "Unknown task option: --category"
+
+case_dir="$(make_case_dir tree)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE BranchA --no-review
+expect_ok "$BIN" task add DE BranchB --no-review
+expect_ok "$BIN" task add DE Join --no-review
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" dep add DE-01 DE-03
+expect_ok "$BIN" dep add DE-02 DE-04
+expect_ok "$BIN" dep add DE-03 DE-04
+expect_ok "$BIN" tree DE
+assert_contains "  DE-01 [proposed] Root"
+assert_contains "    DE-02 [blocked] BranchA"
+assert_contains "      DE-04 [blocked] Join  also_depends_on: DE-03"
+assert_contains "    DE-03 [blocked] BranchB"
 
 printf 'PASS: Dispatch CLI tests\n'

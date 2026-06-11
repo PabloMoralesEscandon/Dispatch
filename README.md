@@ -8,6 +8,19 @@ completion history.
 Dispatch is meant to help a user and one or more coding agents coordinate work
 without editing the board storage file directly.
 
+The recommended layout keeps Dispatch state one directory above the repository
+being changed:
+
+```text
+work_dir/
+  .git/
+  dispatch.json
+  repo/
+```
+
+Run Dispatch from `work_dir`. The `repo/` directory remains the normal product
+repository, while `work_dir` can have its own Git history for workflow state.
+
 ## Requirements
 
 - A C compiler such as `clang` or `gcc`
@@ -44,41 +57,54 @@ To clean generated build output:
 
 ## Quick Start
 
-Create a board, add a group, add two tasks, and make the second task depend on
-the first:
+Create a workflow directory, put or clone the code repository inside it, then
+create a board that points at that repository:
 
 ```bash
-./dispatch init
-./dispatch group add Development --prefix DE
-./dispatch task add DE "Design storage model"
-./dispatch task add DE "Implement storage model"
-./dispatch dep add DE-01 DE-02
-./dispatch ready DE-01 --actor user
-./dispatch ready
+mkdir work_dir
+cd work_dir
+git init
+git clone <repo-url> repo
+dispatch init repo
 ```
+
+Add a group, add two tasks, and make the second task depend on the first:
+
+```bash
+dispatch group add Development --prefix DE
+dispatch task add DE "Design storage model"
+dispatch task add DE "Implement storage model"
+dispatch dep add DE-01 DE-02
+dispatch ready DE-01 --actor user
+dispatch ready
+dispatch tree
+```
+
+When developing Dispatch itself from this repository, `./dispatch init repo`
+has the same shape if you run it from the parent workflow directory.
 
 Start and finish work as an actor:
 
 ```bash
-./dispatch show DE-01
-./dispatch start DE-01 --actor codex
+dispatch show DE-01
+dispatch start DE-01 --actor codex
 
 # Do the work.
 
-./dispatch finish DE-01 --actor codex
+dispatch finish DE-01 --actor codex
 ```
 
 If the task requires review, `finish` moves it to `review` and the agent should
 stop that sequence until the user accepts it:
 
 ```bash
-./dispatch review DE-01 --actor user
+dispatch review DE-01 --actor user
 ```
 
 After review, dependent tasks can become ready:
 
 ```bash
-./dispatch ready
+dispatch ready
 ```
 
 ## Command Reference
@@ -86,12 +112,13 @@ After review, dependent tasks can become ready:
 ### Board
 
 ```bash
-dispatch init
+dispatch init [repo-path]
 dispatch normalize
 ```
 
-`init` creates `dispatch.json` if it does not already exist. `normalize`
-recomputes derived states such as blocked and ready.
+`init` creates `dispatch.json` if it does not already exist. Pass the repository
+path, normally `repo`, when using the recommended parent workflow layout.
+`normalize` recomputes derived states such as blocked and ready.
 
 ### Groups
 
@@ -109,6 +136,7 @@ dispatch task add <group> <title> [--description <text>] [--no-review]
 dispatch task delete <id> [--force]
 dispatch show <id>
 dispatch list
+dispatch tree [group]
 ```
 
 Tasks require a group and a title. By default, tasks require review after they
@@ -117,6 +145,9 @@ unblock the next task without human acceptance.
 
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.
+
+`list` prints tasks as dependency trees grouped by Dispatch group. `tree` is the
+same view and can be limited to one group by ID, prefix, or name.
 
 ### Dependencies
 
@@ -164,18 +195,18 @@ review task as done.
 Agents should use Dispatch as their task protocol:
 
 ```bash
-./dispatch ready
-./dispatch blocked
-./dispatch show <TASK-ID>
-./dispatch start <TASK-ID> --actor <agent-id>
+dispatch ready
+dispatch blocked
+dispatch show <TASK-ID>
+dispatch start <TASK-ID> --actor <agent-id>
 
 # Do the requested work and run relevant checks.
 
-./dispatch finish <TASK-ID> --actor <agent-id>
+dispatch finish <TASK-ID> --actor <agent-id>
 git status --short
 git add <files changed for this task>
 git commit -m "<TASK-ID> <task title>"
-./dispatch ready
+dispatch ready
 ```
 
 If `finish` reports that review is required, the agent must stop that sequence
@@ -199,13 +230,13 @@ When a user asks an agent to plan a feature, the agent should create tasks and
 dependencies through Dispatch:
 
 ```bash
-./dispatch group add Validation --prefix VD
-./dispatch task add VD "Define CLI test scenarios"
-./dispatch task add VD "Implement CLI test runner"
-./dispatch task add VD "Run final acceptance pass"
-./dispatch dep add VD-01 VD-02
-./dispatch dep add VD-02 VD-03
-./dispatch ready VD-01 --actor user
+dispatch group add Validation --prefix VD
+dispatch task add VD "Define CLI test scenarios"
+dispatch task add VD "Implement CLI test runner"
+dispatch task add VD "Run final acceptance pass"
+dispatch dep add VD-01 VD-02
+dispatch dep add VD-02 VD-03
+dispatch ready VD-01 --actor user
 ```
 
 This creates a sequence where implementation waits for planning, and final
@@ -213,9 +244,11 @@ acceptance waits for implementation.
 
 ## Storage
 
-Dispatch stores its board in `dispatch.json` in the current working directory.
-The file contains the board name, groups, tasks, dependencies, ownership fields,
-timestamps, review flags, and history entries.
+Dispatch stores its board in `dispatch.json` in the workflow directory where the
+CLI is run. That directory should usually be one level above the repository
+being modified. The file contains the workspace repository path, board name,
+groups, tasks, dependencies, ownership fields, timestamps, review flags, and
+history entries.
 
 Agents should treat `dispatch.json` as an implementation detail. Do not read or
 edit it directly during normal workflow. Use Dispatch commands to inspect and

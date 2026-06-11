@@ -72,11 +72,13 @@ typedef struct {
 typedef struct {
     int version;
     char *name;
+    char *repo_path;
     DispatchGroups groups;
     DispatchTasks tasks;
 } DispatchBoard;
 
 void dispatch_board_init(DispatchBoard *board, const char *name);
+void dispatch_board_set_repo_path(DispatchBoard *board, const char *repo_path);
 void dispatch_board_free(DispatchBoard *board);
 
 DispatchGroup *dispatch_board_find_group(DispatchBoard *board,

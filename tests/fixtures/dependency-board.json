@@ -1,5 +1,8 @@
 {
   "version": 1,
+  "workspace": {
+    "repo_path": "repo"
+  },
   "board": {
     "name": "Dispatch",
     "groups": [
