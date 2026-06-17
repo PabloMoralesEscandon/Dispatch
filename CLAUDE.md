@@ -50,6 +50,15 @@ if working from another directory.
 
 ```bash
 dispatch init repo
+dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]
+dispatch agent list
+dispatch agent show <name>
+dispatch agent command <name> [--print-command]
+dispatch workspace create <TASK-ID> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
+dispatch workspace list
+dispatch workspace show <TASK-ID-or-workspace>
+dispatch workspace remove <TASK-ID-or-workspace> [--force]
+dispatch workspace prune [--done] [--stale] [--dry-run]
 dispatch ready
 dispatch blocked
 dispatch list
@@ -148,7 +157,7 @@ dispatch start DE-12 --actor codex
 dispatch finish DE-12 --actor codex
 git status --short
 git add <files changed for this task>
-git commit -m "DE-12 Implement review-gate behavior"
+git commit -m "Implement review-gate behavior"
 dispatch ready
 ```
 
@@ -163,11 +172,11 @@ and wait.
 
 Every completed Dispatch task gets its own commit.
 
-Use the task ID followed by the task title as the commit message, matching
-Dispatch task names such as:
+Use the task title as the commit message. Include a task ID only when it is
+already part of the task title:
 
 ```bash
-git commit -m "AD-01 Create CLAUDE.md"
+git commit -m "Create CLAUDE.md"
 ```
 
 Stage only files that belong to the completed task. Do not include unrelated
@@ -180,10 +189,10 @@ them without reverting them unless the user explicitly asks.
 
 Agents working in parallel must not share the same Git working tree.
 
-Use one Git worktree and one branch per agent or task sequence:
+Use one Dispatch workspace, Git worktree, and branch per task or task sequence:
 
 ```bash
-git worktree add ../Dispatch-agent-codex-DE-12 -b agent/codex/DE-12
+dispatch workspace create DE-12 --actor codex
 ```
 
 Dispatch controls task ownership. Git worktrees control file and commit
@@ -202,8 +211,8 @@ agent/codex/DE-12-review-gate
 agent/claude/VD-02-tests
 ```
 
-Do not switch branches, stage files, amend commits, or merge branches in a
-shared worktree while another agent is using it. A human or designated
+Do not switch branches, stage files, amend commits, or merge branches in
+another actor's worktree while that actor is using it. A human or designated
 integrator should merge completed branches one at a time.
 
 ## Planning Work
@@ -234,6 +243,57 @@ The first task is ready after user approval. The implementation and test tasks
 wait behind dependencies. If the user has not explicitly delegated readiness
 approval, leave newly planned tasks proposed.
 
+## Agent Identity And Workspace Setup
+
+Use `agent create` to register persistent actor names and generate local prompt
+material:
+
+```bash
+dispatch agent create --name codex-server --runner codex --print-command
+dispatch agent create --name claude-frontend --runner claude
+dispatch agent command codex-server --print-command
+```
+
+Agent files live under `.dispatch/agents/<name>/`. Agents may use their own
+`scratch/` and `decisions/` directories for temporary notes, but those files are
+not product repository changes unless a Dispatch task explicitly says so.
+
+Create task worktrees through Dispatch, not by calling `git worktree add`
+directly:
+
+```bash
+dispatch workspace create DE-12 --actor codex-server
+dispatch workspace show DE-12
+```
+
+Then run the agent from the workflow directory and edit only the recorded task
+workspace. `dispatch start` never creates a workspace as a side effect. If a
+workspace exists, the actor passed to `start` must match the workspace actor.
+
+For multiple parallel agents, create one actor and one workspace per task or
+task sequence:
+
+```bash
+dispatch workspace create SE-01 --actor codex-server
+dispatch workspace create BE-01 --actor codex-backend
+dispatch workspace create FE-01 --actor claude-frontend
+```
+
+Each agent starts only its own task and edits only its own worktree. A human or
+designated integrator merges accepted branches back into the main repository one
+at a time.
+
+Use `--sequence` only for a direct linear dependency chain where intermediate
+tasks do not require review and the chain ends at the first review gate:
+
+```bash
+dispatch workspace create DE-01 --actor codex-server --sequence
+```
+
+The same actor works through the sequence in one workspace and still makes one
+commit per completed Dispatch task. Stop when the review-required gate task
+reaches `review`.
+
 ## Executing A User-Named Task
 
 Example user request:
@@ -254,7 +314,7 @@ dispatch start DE-02 --actor codex
 dispatch finish DE-02 --actor codex
 git status --short
 git add <relevant files>
-git commit -m "DE-02 Implement JSON output flag"
+git commit -m "Implement JSON output flag"
 dispatch ready
 ```
 
@@ -262,7 +322,7 @@ If `dispatch show DE-02` shows blockers, the agent stops and reports the
 blockers instead of starting the task.
 
 If `dispatch finish DE-02 --actor codex` moves the task to review, the agent
-stops after committing and asks for review.
+commits the task result, stops, and asks for review.
 
 If finishing the task makes `DE-03` ready and the user asked the agent to keep
 going through available tasks, the agent may start `DE-03`.

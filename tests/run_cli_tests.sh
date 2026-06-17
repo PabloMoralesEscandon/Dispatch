@@ -659,6 +659,8 @@ cd "$case_dir"
 
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
+assert_contains "agent create/list/show/command"
+assert_contains "workspace create/list/show/remove/prune"
 assert_not_contains "--json"
 assert_not_contains "clear"
 assert_not_contains "project"

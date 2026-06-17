@@ -120,6 +120,45 @@ dispatch normalize
 path, normally `repo`, when using the recommended parent workflow layout.
 `normalize` recomputes derived states such as blocked and ready.
 
+### Agents
+
+```bash
+dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]
+dispatch agent list
+dispatch agent show <name>
+dispatch agent command <name> [--print-command]
+```
+
+`agent create` registers a named agent and creates local support files under
+`.dispatch/agents/<name>/`. The generated prompt file explains the shared
+Dispatch workflow, and the optional `run.sh` starts the selected runner from the
+workflow directory. Agent directories are for prompt material, scratch notes,
+and local decisions; task state remains in Dispatch and product changes belong
+in task worktrees.
+
+### Workspaces
+
+```bash
+dispatch workspace create <task-id> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
+dispatch workspace list
+dispatch workspace show <task-id-or-workspace>
+dispatch workspace remove <task-id-or-workspace> [--force]
+dispatch workspace prune [--done] [--stale] [--dry-run]
+```
+
+`workspace create` creates an isolated Git worktree and records its actor,
+branch, repository path, and task coverage. By default, the workspace belongs to
+one task. With `--sequence`, Dispatch records one workspace for a direct linear
+chain of no-review tasks that ends at the first review gate.
+
+`start` does not create worktrees as a side effect. If a task already has a
+workspace, the start actor must match the workspace actor. `workspace remove`
+removes a recorded Git worktree and clears its record, refusing doing tasks,
+dirty worktrees, and non-worktree paths unless the operation is explicitly safe.
+`workspace prune --done` cleans up clean workspaces for done tasks, and
+`workspace prune --stale` clears stale creating records with no matching
+worktree. Use `--dry-run` to preview prune actions.
+
 ### Groups
 
 ```bash
@@ -220,7 +259,7 @@ dispatch start <TASK-ID> --actor <agent-id>
 dispatch finish <TASK-ID> --actor <agent-id>
 git status --short
 git add <files changed for this task>
-git commit -m "<TASK-ID> <task title>"
+git commit -m "<task title>"
 dispatch ready
 ```
 
@@ -234,15 +273,78 @@ workflow decisions. Hidden runtime instructions, tool policies, credentials, and
 system or developer prompts are not Dispatch workflow state and should be
 summarized only at a high level when they affect behavior.
 
-Parallel agents should not share a Git working tree. Use one Git worktree and
-one branch per agent or task sequence:
+Parallel agents should not share a Git working tree. Use `workspace create` to
+make one Git worktree and one branch per task or task sequence:
 
 ```bash
-git worktree add ../Dispatch-agent-codex-DE-12 -b agent/codex/DE-12
+dispatch workspace create DE-12 --actor codex-server
+dispatch workspace create FE-04 --actor claude-frontend
 ```
 
 Dispatch controls task assignment. Git worktrees control file and commit
 isolation.
+
+### Single-Agent Workspace Example
+
+```bash
+dispatch agent create --name codex-server --runner codex --print-command
+dispatch workspace create DE-01 --actor codex-server
+dispatch workspace show DE-01
+
+cd repo-agent-codex-server-DE-01
+../dispatch start DE-01 --actor codex-server
+
+# edit, test, and commit the task changes
+
+../dispatch finish DE-01 --actor codex-server
+```
+
+The workspace remains available for review after `finish`. After acceptance and
+merge, clean it up explicitly:
+
+```bash
+dispatch workspace prune --done
+```
+
+### Multi-Agent Workspace Example
+
+Three agents can work at the same time by using one actor and workspace per
+area:
+
+```bash
+dispatch agent create --name codex-server --runner codex
+dispatch agent create --name codex-backend --runner codex
+dispatch agent create --name claude-frontend --runner claude
+
+dispatch workspace create SE-01 --actor codex-server
+dispatch workspace create BE-01 --actor codex-backend
+dispatch workspace create FE-01 --actor claude-frontend
+```
+
+Each agent runs from the workflow directory, starts only its assigned task, and
+edits only its recorded worktree. A human or designated integrator merges
+accepted branches back to the main repository one at a time.
+
+### Sequence Workspace Example
+
+For a direct chain where intermediate tasks do not require review, use one
+workspace for the sequence:
+
+```bash
+dispatch task add DE "Prepare API shape" --no-review
+dispatch task add DE "Implement API shape" --no-review
+dispatch task add DE "Review API workflow"
+dispatch dep add DE-01 DE-02
+dispatch dep add DE-02 DE-03
+dispatch ready DE-01 --actor user
+dispatch ready DE-02 --actor user
+dispatch ready DE-03 --actor user
+dispatch workspace create DE-01 --actor codex-server --sequence
+```
+
+The agent works through `DE-01`, `DE-02`, and `DE-03` in the same branch, making
+one commit per task. The sequence stops when `DE-03` reaches `review`, and the
+user reviews the final branch state.
 
 ## Planning Example
 
