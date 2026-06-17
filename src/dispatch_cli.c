@@ -61,7 +61,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command, workspace create/list/show/remove,");
+    puts("  init, agent create/list/show/command, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, show, blocked");
 }
@@ -624,6 +624,11 @@ static void print_workspace_remove_usage(void) {
             "Usage: dispatch workspace remove <task-id-or-workspace> [--force]\n");
 }
 
+static void print_workspace_prune_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch workspace prune [--done] [--stale] [--dry-run]\n");
+}
+
 static char *current_workflow_path(void) {
     char *path = getcwd(NULL, 0);
     if (!path) {
@@ -810,6 +815,31 @@ static DispatchWorkspace *append_workspace_reservation(
     workspace->created_at = time(NULL);
     workspace->updated_at = workspace->created_at;
     return workspace;
+}
+
+static int workspace_all_tasks_done(const DispatchBoard *board,
+                                    const DispatchWorkspace *workspace) {
+    const DispatchStringList *tasks = &workspace->sequence_tasks;
+    if (tasks->count == 0) {
+        DispatchTask *task =
+            dispatch_board_find_task((DispatchBoard *)board,
+                                     workspace->task_id);
+        return task &&
+               dispatch_task_effective_state(board, task) ==
+                   DISPATCH_STATE_DONE;
+    }
+
+    for (size_t i = 0; i < tasks->count; i++) {
+        DispatchTask *task =
+            dispatch_board_find_task((DispatchBoard *)board,
+                                     tasks->items[i]);
+        if (!task ||
+            dispatch_task_effective_state(board, task) !=
+                DISPATCH_STATE_DONE) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static DispatchTask *single_dependent_task(const DispatchBoard *board,
@@ -1557,6 +1587,182 @@ static int cmd_workspace_remove(int argc, char **argv) {
     return 0;
 }
 
+typedef enum {
+    PRUNE_CANDIDATE_DONE,
+    PRUNE_CANDIDATE_STALE
+} PruneCandidateKind;
+
+typedef struct {
+    char *task_id;
+    char *repo_path;
+    char *workspace_path;
+    PruneCandidateKind kind;
+} PruneCandidate;
+
+typedef struct {
+    PruneCandidate *items;
+    size_t count;
+    size_t capacity;
+} PruneCandidates;
+
+static void prune_candidates_append(PruneCandidates *candidates,
+                                    const DispatchWorkspace *workspace,
+                                    PruneCandidateKind kind) {
+    if (candidates->count >= candidates->capacity) {
+        candidates->capacity =
+            candidates->capacity == 0 ? 4 : candidates->capacity * 2;
+        candidates->items = cli_realloc_array(candidates->items,
+                                              candidates->capacity,
+                                              sizeof(*candidates->items));
+    }
+
+    PruneCandidate *candidate = &candidates->items[candidates->count++];
+    candidate->task_id = cli_strdup(workspace->task_id);
+    candidate->repo_path = cli_strdup(workspace->repo_path);
+    candidate->workspace_path = cli_strdup(workspace->path);
+    candidate->kind = kind;
+}
+
+static void prune_candidates_free(PruneCandidates *candidates) {
+    for (size_t i = 0; i < candidates->count; i++) {
+        free(candidates->items[i].task_id);
+        free(candidates->items[i].repo_path);
+        free(candidates->items[i].workspace_path);
+    }
+    free(candidates->items);
+    memset(candidates, 0, sizeof(*candidates));
+}
+
+static int remove_workspace_records_by_id(DispatchStringList *task_ids) {
+    if (task_ids->count == 0)
+        return 1;
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 0;
+
+    for (size_t i = 0; i < task_ids->count; i++)
+        (void)remove_workspace_record(&locked.board, task_ids->items[i]);
+
+    int ok = locked_board_save_or_error(&locked);
+    locked_board_close(&locked);
+    return ok;
+}
+
+static int cmd_workspace_prune(int argc, char **argv) {
+    int prune_done = 0;
+    int prune_stale = 0;
+    int dry_run = 0;
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--done") == 0) {
+            prune_done = 1;
+        } else if (strcmp(argv[i], "--stale") == 0) {
+            prune_stale = 1;
+        } else if (strcmp(argv[i], "--dry-run") == 0) {
+            dry_run = 1;
+        } else {
+            print_workspace_prune_usage();
+            return 1;
+        }
+    }
+
+    if (!prune_done && !prune_stale) {
+        print_workspace_prune_usage();
+        return 1;
+    }
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+
+    PruneCandidates candidates = {0};
+    for (size_t i = 0; i < locked.board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &locked.board.workspaces.items[i];
+        if (!workspace_record_is_live(workspace))
+            continue;
+
+        if (prune_stale &&
+            workspace->state == DISPATCH_WORKSPACE_CREATING) {
+            prune_candidates_append(&candidates, workspace,
+                                    PRUNE_CANDIDATE_STALE);
+            continue;
+        }
+
+        if (prune_done && workspace_all_tasks_done(&locked.board, workspace)) {
+            prune_candidates_append(&candidates, workspace,
+                                    PRUNE_CANDIDATE_DONE);
+        }
+    }
+    locked_board_close(&locked);
+
+    DispatchStringList records_to_remove = {0};
+    size_t pruned = 0;
+    size_t skipped = 0;
+    for (size_t i = 0; i < candidates.count; i++) {
+        PruneCandidate *candidate = &candidates.items[i];
+        int registered = git_worktree_is_registered(candidate->repo_path,
+                                                    candidate->workspace_path);
+
+        if (candidate->kind == PRUNE_CANDIDATE_STALE) {
+            if (registered) {
+                printf("Skipped stale workspace %s: git worktree exists\n",
+                       candidate->task_id);
+                skipped++;
+                continue;
+            }
+
+            printf("%s stale workspace %s\n",
+                   dry_run ? "Would prune" : "Pruned", candidate->task_id);
+            pruned++;
+            if (!dry_run)
+                string_list_append_cli(&records_to_remove,
+                                       candidate->task_id);
+            continue;
+        }
+
+        if (!registered) {
+            printf("Skipped done workspace %s: path is not a git worktree\n",
+                   candidate->task_id);
+            skipped++;
+            continue;
+        }
+
+        if (git_worktree_is_dirty(candidate->workspace_path)) {
+            printf("Skipped done workspace %s: workspace has uncommitted changes\n",
+                   candidate->task_id);
+            skipped++;
+            continue;
+        }
+
+        if (dry_run) {
+            printf("Would remove done workspace %s\n", candidate->task_id);
+            pruned++;
+            continue;
+        }
+
+        if (!git_worktree_remove(candidate->repo_path,
+                                 candidate->workspace_path)) {
+            printf("Skipped done workspace %s: could not remove git worktree\n",
+                   candidate->task_id);
+            skipped++;
+            continue;
+        }
+
+        printf("Removed done workspace %s\n", candidate->task_id);
+        pruned++;
+        string_list_append_cli(&records_to_remove, candidate->task_id);
+    }
+
+    int ok = dry_run || remove_workspace_records_by_id(&records_to_remove);
+    if (pruned == 0 && skipped == 0)
+        printf("No workspaces pruned\n");
+
+    string_list_free_cli(&records_to_remove);
+    prune_candidates_free(&candidates);
+    return ok ? 0 : 1;
+}
+
 static int cmd_workspace(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "create") == 0)
         return cmd_workspace_create(argc, argv);
@@ -1566,12 +1772,16 @@ static int cmd_workspace(int argc, char **argv) {
         return cmd_workspace_show(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "remove") == 0)
         return cmd_workspace_remove(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "prune") == 0)
+        return cmd_workspace_prune(argc, argv);
 
     print_workspace_create_usage();
     fprintf(stderr, "       dispatch workspace list\n");
     fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
     fprintf(stderr,
             "       dispatch workspace remove <task-id-or-workspace> [--force]\n");
+    fprintf(stderr,
+            "       dispatch workspace prune [--done] [--stale] [--dry-run]\n");
     return 1;
 }
 

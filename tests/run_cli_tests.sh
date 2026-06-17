@@ -473,6 +473,56 @@ if [ -e repo-agent-codex-DE-02 ]; then
     fail "active workspace worktree was not force removed"
 fi
 
+case_dir="$(make_case_dir workspace-prune)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+
+expect_fail "$BIN" workspace prune
+assert_contains "Usage: dispatch workspace prune"
+
+expect_ok "$BIN" task add DE Clean
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" workspace create DE-01 --actor codex
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+expect_ok "$BIN" review DE-01 --actor user
+
+expect_ok "$BIN" task add DE Dirty
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" workspace create DE-02 --actor codex
+expect_ok "$BIN" start DE-02 --actor codex
+expect_ok "$BIN" finish DE-02 --actor codex
+expect_ok "$BIN" review DE-02 --actor user
+printf 'dirty\n' >repo-agent-codex-DE-02/dirty.txt
+
+expect_ok "$BIN" task add DE Active
+expect_ok "$BIN" ready DE-03 --actor user
+expect_ok "$BIN" workspace create DE-03 --actor codex
+
+expect_ok "$BIN" workspace prune --done --dry-run
+assert_contains "Would remove done workspace DE-01"
+assert_contains "Skipped done workspace DE-02: workspace has uncommitted changes"
+if [ ! -e repo-agent-codex-DE-01/.git ]; then
+    fail "dry-run removed clean done workspace"
+fi
+expect_ok "$BIN" workspace show DE-01
+
+expect_ok "$BIN" workspace prune --done
+assert_contains "Removed done workspace DE-01"
+assert_contains "Skipped done workspace DE-02: workspace has uncommitted changes"
+if [ -e repo-agent-codex-DE-01 ]; then
+    fail "clean done workspace worktree was not pruned"
+fi
+expect_fail "$BIN" workspace show DE-01
+assert_contains "No workspace for DE-01"
+expect_ok "$BIN" workspace show DE-02
+expect_ok "$BIN" workspace show DE-03
+
 case_dir="$(make_case_dir workspace-inspect)"
 cd "$case_dir"
 cp "$ROOT/tests/fixtures/workspace-records-board.json" dispatch.json
@@ -500,6 +550,16 @@ assert_contains "No workspace for Missing"
 
 expect_fail "$BIN" workspace remove DE-01 --force
 assert_contains "Workspace path is not a git worktree"
+
+expect_ok "$BIN" workspace prune --stale --dry-run
+assert_contains "Would prune stale workspace DE-02"
+expect_ok "$BIN" workspace show DE-02
+
+expect_ok "$BIN" workspace prune --stale
+assert_contains "Pruned stale workspace DE-02"
+expect_fail "$BIN" workspace show DE-02
+assert_contains "No workspace for DE-02"
+expect_ok "$BIN" workspace show DE-01
 
 case_dir="$(make_case_dir workspace-sequence)"
 cd "$case_dir"
