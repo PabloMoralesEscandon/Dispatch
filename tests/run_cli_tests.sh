@@ -453,6 +453,59 @@ assert_contains "Git worktree: missing"
 expect_fail "$BIN" workspace show Missing
 assert_contains "No workspace for Missing"
 
+case_dir="$(make_case_dir workspace-sequence)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE First --no-review
+expect_ok "$BIN" task add DE Second --no-review
+expect_ok "$BIN" task add DE Gate
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" dep add DE-02 DE-03
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" ready DE-03 --actor user
+
+expect_ok "$BIN" workspace create DE-01 --actor seq --sequence
+assert_contains "branch: agent/seq/DE-01-sequence"
+assert_contains "tasks: DE-01,DE-02,DE-03"
+assert_contains "review gate: DE-03"
+
+expect_ok "$BIN" workspace show DE-02
+assert_contains "Task: DE-01"
+assert_contains "Sequence tasks: DE-01,DE-02,DE-03"
+assert_contains "Review gate: DE-03"
+
+expect_fail "$BIN" start DE-02 --actor other
+assert_contains "Workspace for DE-02 belongs to seq"
+
+expect_ok "$BIN" start DE-01 --actor seq
+expect_ok "$BIN" finish DE-01 --actor seq
+assert_contains "Finished DE-01 (done)"
+expect_ok "$BIN" start DE-02 --actor seq
+
+expect_ok "$BIN" task add DE BranchRoot --no-review
+expect_ok "$BIN" task add DE BranchA
+expect_ok "$BIN" task add DE BranchB
+expect_ok "$BIN" dep add DE-04 DE-05
+expect_ok "$BIN" dep add DE-04 DE-06
+expect_ok "$BIN" ready DE-04 --actor user
+expect_fail "$BIN" workspace create DE-04 --actor seq --sequence
+assert_contains "Sequence task DE-04 must have exactly one dependent"
+
+expect_ok "$BIN" task add DE JoinRoot --no-review
+expect_ok "$BIN" task add DE Other
+expect_ok "$BIN" task add DE JoinGate
+expect_ok "$BIN" dep add DE-07 DE-09
+expect_ok "$BIN" dep add DE-08 DE-09
+expect_ok "$BIN" ready DE-07 --actor user
+expect_fail "$BIN" workspace create DE-07 --actor seq --sequence
+assert_contains "Sequence task DE-09 must depend only on DE-07"
+
 case_dir="$(make_case_dir ready-no-review)"
 cd "$case_dir"
 mkdir repo
