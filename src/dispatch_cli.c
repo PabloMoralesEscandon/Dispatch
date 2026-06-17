@@ -20,8 +20,7 @@ static const DispatchCliCommand commands[] = {
     {"ready", "List ready work or mark a task ready"},
     {"blocked", "List blocked work and blockers"},
     {"show", "Show one task"},
-    {"list", "List tasks as dependency trees"},
-    {"tree", "List dependency trees, optionally for one group"},
+    {"list", "List dependency trees, optionally for one group"},
     {"start", "Start and assign a ready task"},
     {"finish", "Finish a task"},
     {"review", "Accept a task in review"},
@@ -50,7 +49,7 @@ void dispatch_cli_print_help(void) {
     puts("");
     puts("Implemented now:");
     puts("  init, group add/ready, task add, dep add/remove, ready, start,");
-    puts("  finish, review, normalize, list, tree, show, blocked");
+    puts("  finish, review, normalize, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -541,9 +540,9 @@ static void print_tree_for_group(const DispatchBoard *board,
     free(printed);
 }
 
-static int cmd_tree(int argc, char **argv) {
+static int cmd_list(int argc, char **argv) {
     if (argc != 2 && argc != 3) {
-        fprintf(stderr, "Usage: dispatch tree [group]\n");
+        fprintf(stderr, "Usage: dispatch list [group]\n");
         return 1;
     }
 
@@ -572,14 +571,6 @@ static int cmd_tree(int argc, char **argv) {
 
     dispatch_board_free(&board);
     return 0;
-}
-
-static int cmd_list(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch list\n");
-        return 1;
-    }
-    return cmd_tree(argc, argv);
 }
 
 static int cmd_show(int argc, char **argv) {
@@ -842,8 +833,6 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_normalize();
     if (strcmp(command->name, "list") == 0)
         return cmd_list(argc, argv);
-    if (strcmp(command->name, "tree") == 0)
-        return cmd_tree(argc, argv);
     if (strcmp(command->name, "show") == 0)
         return cmd_show(argc, argv);
     if (strcmp(command->name, "blocked") == 0)

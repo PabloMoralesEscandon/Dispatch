@@ -53,7 +53,6 @@ dispatch init repo
 dispatch ready
 dispatch blocked
 dispatch list
-dispatch tree [group]
 dispatch show <TASK-ID>
 dispatch start <TASK-ID> --actor <agent-id>
 dispatch finish <TASK-ID> --actor <agent-id>
@@ -96,7 +95,7 @@ At the start of a work session, inspect the board through the CLI:
 dispatch normalize
 dispatch ready
 dispatch blocked
-dispatch tree
+dispatch list
 ```
 
 If the user names a specific task, inspect it before doing anything:
@@ -208,7 +207,7 @@ integrator should merge completed branches one at a time.
 
 When the user asks an agent to plan work, create Dispatch tasks through the CLI.
 Use groups, meaningful titles, dependencies, and review gates for checkpoints.
-Use `dispatch tree` or `dispatch list` to inspect dependency sequences.
+Use `dispatch list` to inspect dependency sequences.
 
 Example user request:
 

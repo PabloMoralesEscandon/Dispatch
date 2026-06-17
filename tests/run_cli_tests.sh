@@ -101,7 +101,7 @@ assert_contains "Blocks: -"
 expect_ok "$BIN" dep add DE-01 DE-02
 assert_contains "Added dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
 
-expect_ok "$BIN" tree
+expect_ok "$BIN" list
 assert_contains "[DE] Development"
 assert_contains "  DE-01 [proposed] First"
 assert_contains "    DE-02 [blocked] Second"
@@ -215,7 +215,7 @@ assert_contains "Usage: dispatch group ready <group> --actor <name>"
 expect_ok "$BIN" group ready DE --actor user
 assert_contains "Readied 3 tasks in group DE"
 
-expect_ok "$BIN" tree
+expect_ok "$BIN" list
 assert_contains "  DE-01 [ready] Root"
 assert_contains "    DE-02 [blocked] AlreadyBlocked"
 assert_contains "    DE-03 [blocked] ProposedBlocked"
@@ -258,6 +258,7 @@ assert_not_contains "project"
 assert_not_contains "recurrence"
 assert_not_contains "notification"
 assert_not_contains "category"
+assert_not_contains "  tree"
 
 expect_fail "$BIN" add LegacyTask
 assert_contains "Unknown Dispatch command: add"
@@ -268,8 +269,11 @@ assert_contains "Unknown Dispatch command: clear"
 expect_fail "$BIN" pause DE-01 --actor codex
 assert_contains "Unknown Dispatch command: pause"
 
-expect_fail "$BIN" list projects
-assert_contains "Usage: dispatch list"
+expect_fail "$BIN" tree
+assert_contains "Unknown Dispatch command: tree"
+
+expect_fail "$BIN" list projects extra
+assert_contains "Usage: dispatch list [group]"
 
 mkdir repo
 expect_ok "$BIN" init repo
@@ -283,7 +287,10 @@ assert_contains "Unknown task option: --project"
 expect_fail "$BIN" task add DE Test --category old
 assert_contains "Unknown task option: --category"
 
-case_dir="$(make_case_dir tree)"
+expect_fail "$BIN" list Missing
+assert_contains "No group with id, prefix, or name Missing"
+
+case_dir="$(make_case_dir list-filter)"
 cd "$case_dir"
 mkdir repo
 
@@ -297,7 +304,7 @@ expect_ok "$BIN" dep add DE-01 DE-02
 expect_ok "$BIN" dep add DE-01 DE-03
 expect_ok "$BIN" dep add DE-02 DE-04
 expect_ok "$BIN" dep add DE-03 DE-04
-expect_ok "$BIN" tree DE
+expect_ok "$BIN" list DE
 assert_contains "  DE-01 [proposed] Root"
 assert_contains "    DE-02 [blocked] BranchA"
 assert_contains "      DE-04 [blocked] Join  also_depends_on: DE-03"

@@ -77,7 +77,7 @@ dispatch task add DE "Implement storage model"
 dispatch dep add DE-01 DE-02  # DE-02 depends on DE-01
 dispatch ready DE-01 --actor user
 dispatch ready
-dispatch tree
+dispatch list
 ```
 
 When developing Dispatch itself from this repository, `./dispatch init repo`
@@ -142,8 +142,7 @@ should ready tasks only when the user explicitly asks it to do so.
 dispatch task add <group> <title> [--description <text>] [--no-review]
 dispatch task delete <id> [--force]
 dispatch show <id>
-dispatch list
-dispatch tree [group]
+dispatch list [group]
 ```
 
 Tasks require a group and a title. By default, tasks require review after they
@@ -153,8 +152,8 @@ unblock the next task without human acceptance.
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.
 
-`list` prints tasks as dependency trees grouped by Dispatch group. `tree` is the
-same view and can be limited to one group by ID, prefix, or name.
+`list` prints tasks as dependency trees grouped by Dispatch group. It can be
+limited to one group by ID, prefix, or name.
 
 ### Dependencies
 
