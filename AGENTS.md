@@ -67,6 +67,7 @@ dispatch start <TASK-ID> --actor <agent-id>
 dispatch finish <TASK-ID> --actor <agent-id>
 dispatch review <TASK-ID> --actor <user-or-reviewer-id>
 dispatch group add <name> --prefix <PREFIX>
+dispatch group ready <group> --actor <name> [--no-review]
 dispatch task add <group> <title> [--description <text>] [--no-review]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
@@ -131,7 +132,9 @@ proposed tasks by marking them ready, unless the user explicitly instructs an
 agent to ready a specific task or group. All readiness changes must include an
 actor so the approval is visible in task history. Use `dispatch ready <id>
 --actor user --no-review` only when the user approves the task as safe to finish
-without a review gate.
+without a review gate. Use `dispatch group ready <group> --actor user
+--no-review` only when the user approves every readied task in the group as safe
+to finish without review.
 
 ## Task Execution Protocol
 

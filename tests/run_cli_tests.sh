@@ -320,7 +320,7 @@ expect_ok "$BIN" start DE-07 --actor codex
 expect_ok "$BIN" finish DE-07 --actor codex
 
 expect_fail "$BIN" group ready DE
-assert_contains "Usage: dispatch group ready <group> --actor <name>"
+assert_contains "Usage: dispatch group ready <group> --actor <name> [--no-review]"
 
 expect_ok "$BIN" group ready DE --actor user
 assert_contains "Readied 3 tasks in group DE"
@@ -337,6 +337,16 @@ assert_contains "  QA-01    proposed   Other"
 
 expect_fail "$BIN" group ready Missing --actor user
 assert_contains "No group with id, prefix, or name Missing"
+
+expect_ok "$BIN" group add Docs --prefix DOC
+expect_ok "$BIN" task add DOC Notes
+expect_ok "$BIN" task add DOC Followup
+expect_ok "$BIN" group ready DOC --actor user --no-review
+assert_contains "Readied 2 tasks in group DOC"
+expect_ok "$BIN" show DOC-01
+assert_contains "Requires review: no"
+expect_ok "$BIN" show DOC-02
+assert_contains "Requires review: no"
 
 case_dir="$(make_case_dir workspace-reserve)"
 cd "$case_dir"

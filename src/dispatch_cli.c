@@ -180,26 +180,6 @@ static void locked_board_close(LockedBoard *locked) {
     dispatch_store_lock_release(&locked->lock);
 }
 
-static const char *parse_actor(int argc, char **argv, int start_index) {
-    for (int i = start_index; i < argc; i++) {
-        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc)
-            return argv[i + 1];
-    }
-    return NULL;
-}
-
-static int reject_unknown_actor_options(int argc, char **argv, int start_index) {
-    for (int i = start_index; i < argc; i++) {
-        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
-            i++;
-            continue;
-        }
-        fprintf(stderr, "Unknown option: %s\n", argv[i]);
-        return 1;
-    }
-    return 0;
-}
-
 static int title_starts_with_dispatch_id(const char *title) {
     size_t prefix_len = 0;
     if (!title)
@@ -1825,15 +1805,32 @@ static int cmd_group_add(int argc, char **argv) {
 }
 
 static int cmd_group_ready(int argc, char **argv) {
-    if (argc != 6) {
-        fprintf(stderr, "Usage: dispatch group ready <group> --actor <name>\n");
+    if (argc < 6) {
+        fprintf(stderr,
+                "Usage: dispatch group ready <group> --actor <name> [--no-review]\n");
         return 1;
     }
-    if (reject_unknown_actor_options(argc, argv, 4))
-        return 1;
 
     const char *group_id = argv[3];
-    const char *actor = parse_actor(argc, argv, 4);
+    const char *actor = NULL;
+    int no_review = 0;
+
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
+        } else if (strcmp(argv[i], "--no-review") == 0) {
+            no_review = 1;
+        } else {
+            fprintf(stderr, "Unknown group ready option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+
+    if (!actor || actor[0] == '\0') {
+        fprintf(stderr,
+                "Usage: dispatch group ready <group> --actor <name> [--no-review]\n");
+        return 1;
+    }
 
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
@@ -1855,6 +1852,8 @@ static int cmd_group_ready(int argc, char **argv) {
         if (task->state != DISPATCH_STATE_PROPOSED)
             continue;
         dispatch_task_mark_ready(board, task, actor);
+        if (no_review)
+            task->requires_review = 0;
         readied++;
     }
 
@@ -1877,7 +1876,8 @@ static int cmd_group(int argc, char **argv) {
         return cmd_group_ready(argc, argv);
 
     fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
-    fprintf(stderr, "       dispatch group ready <group> --actor <name>\n");
+    fprintf(stderr,
+            "       dispatch group ready <group> --actor <name> [--no-review]\n");
     return 1;
 }
 

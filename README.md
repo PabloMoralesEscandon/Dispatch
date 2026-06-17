@@ -163,7 +163,7 @@ worktree. Use `--dry-run` to preview prune actions.
 
 ```bash
 dispatch group add <name> [--prefix XX]
-dispatch group ready <group> --actor <name>
+dispatch group ready <group> --actor <name> [--no-review]
 ```
 
 Groups are workflow lanes or topics. Task IDs are generated from the group
@@ -173,7 +173,9 @@ prefix, for example `DE-01`.
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
 Proposed tasks with unmet dependencies are approved but still display as blocked
 until their blockers are done. The actor should normally be the user; an agent
-should ready tasks only when the user explicitly asks it to do so.
+should ready tasks only when the user explicitly asks it to do so. Add
+`--no-review` only when the user approves every readied task as safe to finish
+without a review gate.
 
 ### Tasks
 
