@@ -181,6 +181,49 @@ assert_contains "Could not delete DE-01"
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
 
+case_dir="$(make_case_dir group-ready)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" group add QA --prefix QA
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE AlreadyBlocked --no-review
+expect_ok "$BIN" task add DE ProposedBlocked --no-review
+expect_ok "$BIN" task add DE Simple
+expect_ok "$BIN" task add DE Active
+expect_ok "$BIN" task add DE Review
+expect_ok "$BIN" task add DE Done --no-review
+expect_ok "$BIN" task add QA Other
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" dep add DE-01 DE-03
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" ready DE-05 --actor user
+expect_ok "$BIN" start DE-05 --actor codex
+expect_ok "$BIN" ready DE-06 --actor user
+expect_ok "$BIN" start DE-06 --actor codex
+expect_ok "$BIN" finish DE-06 --actor codex
+expect_ok "$BIN" ready DE-07 --actor user
+expect_ok "$BIN" start DE-07 --actor codex
+expect_ok "$BIN" finish DE-07 --actor codex
+
+expect_ok "$BIN" group ready DE --actor user
+assert_contains "Readied 3 tasks in group DE"
+
+expect_ok "$BIN" tree
+assert_contains "  DE-01 [ready] Root"
+assert_contains "    DE-02 [blocked] AlreadyBlocked"
+assert_contains "    DE-03 [blocked] ProposedBlocked"
+assert_contains "  DE-04 [ready] Simple"
+assert_contains "  DE-05 [doing] Active  assigned:codex"
+assert_contains "  DE-06 [review] Review"
+assert_contains "  DE-07 [done] Done"
+assert_contains "  QA-01 [proposed] Other"
+
+expect_fail "$BIN" group ready Missing --actor user
+assert_contains "No group with id, prefix, or name Missing"
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo

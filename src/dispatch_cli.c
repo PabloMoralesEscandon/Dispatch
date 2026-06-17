@@ -50,7 +50,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, group add, task add, dep add/remove, ready, start, pause,");
+    puts("  init, group add/ready, task add, dep add/remove, ready, start, pause,");
     puts("  finish, review, normalize, list, tree, show, blocked");
 }
 
@@ -139,8 +139,8 @@ static int reject_unknown_actor_options(int argc, char **argv, int start_index) 
     return 0;
 }
 
-static int cmd_group(int argc, char **argv) {
-    if (argc < 4 || strcmp(argv[2], "add") != 0) {
+static int cmd_group_add(int argc, char **argv) {
+    if (argc < 4) {
         fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
         return 1;
     }
@@ -175,6 +175,62 @@ static int cmd_group(int argc, char **argv) {
     printf("Added group %s (%s)\n", group->name, group->prefix);
     dispatch_board_free(&board);
     return 0;
+}
+
+static int cmd_group_ready(int argc, char **argv) {
+    if (argc != 4 && argc != 6) {
+        fprintf(stderr, "Usage: dispatch group ready <group> [--actor name]\n");
+        return 1;
+    }
+    if (reject_unknown_actor_options(argc, argv, 4))
+        return 1;
+
+    const char *group_id = argv[3];
+    const char *actor = parse_actor(argc, argv, 4);
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchGroup *group = dispatch_board_find_group(&board, group_id);
+    if (!group) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No group with id, prefix, or name %s\n", group_id);
+        return 1;
+    }
+
+    int readied = 0;
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        if (strcmp(task->group, group->id) != 0)
+            continue;
+        if (task->state != DISPATCH_STATE_PROPOSED)
+            continue;
+        dispatch_task_mark_ready(&board, task, actor);
+        readied++;
+    }
+
+    dispatch_board_normalize_states(&board);
+    if (!save_board_or_error(&board)) {
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Readied %d task%s in group %s\n", readied,
+           readied == 1 ? "" : "s", group->prefix);
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_group(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[2], "add") == 0)
+        return cmd_group_add(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "ready") == 0)
+        return cmd_group_ready(argc, argv);
+
+    fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
+    fprintf(stderr, "       dispatch group ready <group> [--actor name]\n");
+    return 1;
 }
 
 static int cmd_task(int argc, char **argv) {

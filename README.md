@@ -124,10 +124,16 @@ path, normally `repo`, when using the recommended parent workflow layout.
 
 ```bash
 dispatch group add <name> [--prefix XX]
+dispatch group ready <group> [--actor <name>]
 ```
 
 Groups are workflow lanes or topics. Task IDs are generated from the group
 prefix, for example `DE-01`.
+
+`group ready` marks every proposed task in the group as ready in one operation.
+Tasks already blocked, assigned, doing, in review, or done are left unchanged.
+Proposed tasks with unmet dependencies are approved but still display as blocked
+until their blockers are done.
 
 ### Tasks
 
