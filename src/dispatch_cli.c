@@ -14,6 +14,12 @@ typedef struct {
     const char *summary;
 } DispatchCliCommand;
 
+typedef struct {
+    DispatchBoard board;
+    DispatchStoreLock lock;
+    int loaded;
+} LockedBoard;
+
 static const DispatchCliCommand commands[] = {
     {"init", "Create dispatch.json for a target repository"},
     {"group", "Manage groups"},
@@ -72,6 +78,13 @@ static int cmd_init(int argc, char **argv) {
 
     const char *repo_path = argc == 3 ? argv[2] : ".";
     char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        fprintf(stderr, "%s\n", error);
+        return 1;
+    }
+
     int existed = 0;
     FILE *file = fopen(DISPATCH_STORE_FILE, "r");
     if (file) {
@@ -83,15 +96,18 @@ static int cmd_init(int argc, char **argv) {
                                   sizeof(error))) {
         fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
                 error);
+        dispatch_store_lock_release(&lock);
         return 1;
     }
 
     if (existed) {
         printf("%s already exists\n", DISPATCH_STORE_FILE);
+        dispatch_store_lock_release(&lock);
         return 0;
     }
 
     printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
+    dispatch_store_lock_release(&lock);
     return 0;
 }
 
@@ -110,13 +126,52 @@ static int load_board_or_error(DispatchBoard *board) {
     return 1;
 }
 
-static int save_board_or_error(DispatchBoard *board) {
+static int locked_board_load_or_error(LockedBoard *locked) {
     char error[256] = {0};
-    if (!dispatch_store_save(board, DISPATCH_STORE_FILE, error, sizeof(error))) {
+    memset(locked, 0, sizeof(*locked));
+
+    if (!dispatch_store_lock_acquire(&locked->lock, DISPATCH_STORE_FILE, 1000,
+                                     error, sizeof(error))) {
+        fprintf(stderr, "%s\n", error);
+        return 0;
+    }
+
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error))) {
+        fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
+                error);
+        dispatch_store_lock_release(&locked->lock);
+        return 0;
+    }
+    if (!dispatch_store_load(&locked->board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "Could not load %s: %s\n", DISPATCH_STORE_FILE, error);
+        dispatch_store_lock_release(&locked->lock);
+        return 0;
+    }
+
+    locked->loaded = 1;
+    return 1;
+}
+
+static int locked_board_save_or_error(LockedBoard *locked) {
+    char error[256] = {0};
+    if (!dispatch_store_save(&locked->board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
         fprintf(stderr, "Could not save %s: %s\n", DISPATCH_STORE_FILE, error);
         return 0;
     }
     return 1;
+}
+
+static void locked_board_close(LockedBoard *locked) {
+    if (!locked)
+        return;
+    if (locked->loaded) {
+        dispatch_board_free(&locked->board);
+        locked->loaded = 0;
+    }
+    dispatch_store_lock_release(&locked->lock);
 }
 
 static const char *parse_actor(int argc, char **argv, int start_index) {
@@ -190,24 +245,25 @@ static int cmd_group_add(int argc, char **argv) {
         }
     }
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
-    if (!dispatch_board_add_group(&board, name, prefix)) {
-        dispatch_board_free(&board);
+    if (!dispatch_board_add_group(board, name, prefix)) {
+        locked_board_close(&locked);
         fprintf(stderr, "Could not add group '%s'\n", name);
         return 1;
     }
 
-    DispatchGroup *group = dispatch_board_find_group(&board, name);
-    if (!save_board_or_error(&board)) {
-        dispatch_board_free(&board);
+    DispatchGroup *group = dispatch_board_find_group(board, name);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
         return 1;
     }
 
     printf("Added group %s (%s)\n", group->name, group->prefix);
-    dispatch_board_free(&board);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -222,37 +278,38 @@ static int cmd_group_ready(int argc, char **argv) {
     const char *group_id = argv[3];
     const char *actor = parse_actor(argc, argv, 4);
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
-    DispatchGroup *group = dispatch_board_find_group(&board, group_id);
+    DispatchGroup *group = dispatch_board_find_group(board, group_id);
     if (!group) {
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         fprintf(stderr, "No group with id, prefix, or name %s\n", group_id);
         return 1;
     }
 
     int readied = 0;
-    for (size_t i = 0; i < board.tasks.count; i++) {
-        DispatchTask *task = &board.tasks.items[i];
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
         if (strcmp(task->group, group->id) != 0)
             continue;
         if (task->state != DISPATCH_STATE_PROPOSED)
             continue;
-        dispatch_task_mark_ready(&board, task, actor);
+        dispatch_task_mark_ready(board, task, actor);
         readied++;
     }
 
-    dispatch_board_normalize_states(&board);
-    if (!save_board_or_error(&board)) {
-        dispatch_board_free(&board);
+    dispatch_board_normalize_states(board);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
         return 1;
     }
 
     printf("Readied %d task%s in group %s\n", readied,
            readied == 1 ? "" : "s", group->prefix);
-    dispatch_board_free(&board);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -280,23 +337,23 @@ static int cmd_task(int argc, char **argv) {
             }
         }
 
-        DispatchBoard board;
-        if (!load_board_or_error(&board))
+        LockedBoard locked;
+        if (!locked_board_load_or_error(&locked))
             return 1;
-        if (!dispatch_board_delete_task(&board, task_id, force)) {
-            dispatch_board_free(&board);
+        if (!dispatch_board_delete_task(&locked.board, task_id, force)) {
+            locked_board_close(&locked);
             fprintf(stderr,
                     "Could not delete %s%s\n",
                     task_id,
                     force ? "" : " (task may have dependents; use --force)");
             return 1;
         }
-        if (!save_board_or_error(&board)) {
-            dispatch_board_free(&board);
+        if (!locked_board_save_or_error(&locked)) {
+            locked_board_close(&locked);
             return 1;
         }
         printf("Deleted task %s\n", task_id);
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         return 0;
     }
 
@@ -330,14 +387,15 @@ static int cmd_task(int argc, char **argv) {
         }
     }
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
     DispatchTask *task =
-        dispatch_board_add_task(&board, group, title, description);
+        dispatch_board_add_task(board, group, title, description);
     if (!task) {
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         fprintf(stderr, "Could not add task '%s' to group '%s'\n", title,
                 group);
         return 1;
@@ -345,15 +403,15 @@ static int cmd_task(int argc, char **argv) {
     task->requires_review = requires_review;
 
     char *task_id = strdup(task->id);
-    if (!save_board_or_error(&board)) {
+    if (!locked_board_save_or_error(&locked)) {
         free(task_id);
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         return 1;
     }
 
     printf("Added task %s\n", task_id);
     free(task_id);
-    dispatch_board_free(&board);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -373,56 +431,57 @@ static int cmd_dep(int argc, char **argv) {
     const char *from_id = argv[3];
     const char *to_id = argv[4];
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
     int ok;
     if (strcmp(argv[2], "add") == 0) {
-        ok = dispatch_task_add_dependency(&board, from_id, to_id);
+        ok = dispatch_task_add_dependency(board, from_id, to_id);
     } else {
-        ok = dispatch_task_remove_dependency(&board, from_id, to_id);
+        ok = dispatch_task_remove_dependency(board, from_id, to_id);
     }
 
     if (!ok) {
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         fprintf(stderr, "Could not %s dependency %s -> %s (%s depends on %s)\n",
                 argv[2], from_id, to_id, to_id, from_id);
         return 1;
     }
 
-    if (!save_board_or_error(&board)) {
-        dispatch_board_free(&board);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
         return 1;
     }
 
     printf("%s dependency %s -> %s (%s depends on %s)\n",
            strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
            to_id, to_id, from_id);
-    dispatch_board_free(&board);
+    locked_board_close(&locked);
     return 0;
 }
 
 static int cmd_normalize(void) {
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
 
-    dispatch_board_normalize_states(&board);
-    if (!save_board_or_error(&board)) {
-        dispatch_board_free(&board);
+    dispatch_board_normalize_states(&locked.board);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
         return 1;
     }
 
     printf("Normalized %s\n", DISPATCH_STORE_FILE);
-    dispatch_board_free(&board);
+    locked_board_close(&locked);
     return 0;
 }
 
-static int save_task_transition(DispatchBoard *board, const char *verb,
+static int save_task_transition(LockedBoard *locked, const char *verb,
                                 const char *task_id) {
-    dispatch_board_normalize_states(board);
-    if (!save_board_or_error(board))
+    dispatch_board_normalize_states(&locked->board);
+    if (!locked_board_save_or_error(locked))
         return 1;
     printf("%s %s\n", verb, task_id);
     return 0;
@@ -711,21 +770,22 @@ static int cmd_ready(int argc, char **argv) {
         return 1;
     }
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
-    DispatchTask *task = dispatch_board_find_task(&board, task_id);
-    if (!task || !dispatch_task_mark_ready(&board, task, actor)) {
-        dispatch_board_free(&board);
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
+    if (!task || !dispatch_task_mark_ready(board, task, actor)) {
+        locked_board_close(&locked);
         fprintf(stderr, "Could not mark %s ready\n", task_id);
         return 1;
     }
     if (no_review)
         task->requires_review = 0;
 
-    int result = save_task_transition(&board, "Readied", task_id);
-    dispatch_board_free(&board);
+    int result = save_task_transition(&locked, "Readied", task_id);
+    locked_board_close(&locked);
     return result;
 }
 
@@ -738,19 +798,20 @@ static int cmd_start(int argc, char **argv) {
     const char *task_id = argv[2];
     const char *actor = argv[4];
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
-    DispatchTask *task = dispatch_board_find_task(&board, task_id);
-    if (!task || !dispatch_task_start(&board, task, actor)) {
-        dispatch_board_free(&board);
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
+    if (!task || !dispatch_task_start(board, task, actor)) {
+        locked_board_close(&locked);
         fprintf(stderr, "Could not start %s\n", task_id);
         return 1;
     }
 
-    int result = save_task_transition(&board, "Started", task_id);
-    dispatch_board_free(&board);
+    int result = save_task_transition(&locked, "Started", task_id);
+    locked_board_close(&locked);
     return result;
 }
 
@@ -763,21 +824,22 @@ static int cmd_finish(int argc, char **argv) {
     const char *task_id = argv[2];
     const char *actor = argv[4];
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
-    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task || !dispatch_task_finish(task, actor)) {
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         fprintf(stderr, "Could not finish %s\n", task_id);
         return 1;
     }
 
     DispatchState finished_state = task->state;
-    dispatch_board_normalize_states(&board);
-    if (!save_board_or_error(&board)) {
-        dispatch_board_free(&board);
+    dispatch_board_normalize_states(board);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
         return 1;
     }
 
@@ -785,12 +847,12 @@ static int cmd_finish(int argc, char **argv) {
     if (finished_state == DISPATCH_STATE_REVIEW) {
         puts("Review required before continuing this sequence.");
     } else if (finished_state == DISPATCH_STATE_DONE &&
-               ready_task_count(&board) > 0) {
+               ready_task_count(board) > 0) {
         puts("Next ready tasks:");
-        print_ready_tasks_from_board(&board, "  ");
+        print_ready_tasks_from_board(board, "  ");
     }
 
-    dispatch_board_free(&board);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -803,19 +865,20 @@ static int cmd_review(int argc, char **argv) {
     const char *task_id = argv[2];
     const char *actor = argv[4];
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
+    DispatchBoard *board = &locked.board;
 
-    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task || !dispatch_task_review(task, actor)) {
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         fprintf(stderr, "Could not review %s\n", task_id);
         return 1;
     }
 
-    int result = save_task_transition(&board, "Reviewed", task_id);
-    dispatch_board_free(&board);
+    int result = save_task_transition(&locked, "Reviewed", task_id);
+    locked_board_close(&locked);
     return result;
 }
 

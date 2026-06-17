@@ -82,6 +82,13 @@ fi
 expect_ok "$BIN" init
 assert_contains "dispatch.json already exists"
 
+printf 'locked\n' > dispatch.json.lock
+expect_fail "$BIN" group add Locked --prefix LK
+assert_contains "Dispatch board is locked by another process; retry shortly."
+expect_fail "$BIN" normalize
+assert_contains "Dispatch board is locked by another process; retry shortly."
+rm -f dispatch.json.lock
+
 expect_ok "$BIN" group add Development --prefix DE
 assert_contains "Added group Development (DE)"
 
