@@ -338,6 +338,56 @@ assert_contains "  QA-01    proposed   Other"
 expect_fail "$BIN" group ready Missing --actor user
 assert_contains "No group with id, prefix, or name Missing"
 
+case_dir="$(make_case_dir workspace-reserve)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root
+expect_ok "$BIN" ready DE-01 --actor user
+
+expect_fail "$BIN" workspace create DE-01
+assert_contains "Usage: dispatch workspace create <task-id> --actor <name>"
+
+expect_fail "$BIN" workspace create DE-01 --actor bad/name
+assert_contains "Actor must start with an ASCII letter or digit"
+
+expect_fail "$BIN" workspace create Missing --actor codex
+assert_contains "No task with id Missing"
+
+expect_fail "$BIN" workspace create DE-01 --actor codex
+assert_contains "Configured repository is not a git repository: repo"
+
+mkdir repo/.git
+expect_ok "$BIN" workspace create DE-01 --actor Codex_A
+assert_contains "Created workspace DE-01 for Codex_A"
+assert_contains "branch: agent/codex_a/DE-01"
+assert_contains "state: creating"
+
+expect_fail "$BIN" workspace create DE-01 --actor Codex_A
+assert_contains "Workspace already exists for DE-01"
+
+expect_ok "$BIN" task add DE Second
+expect_fail "$BIN" workspace create DE-02 --actor codex
+assert_contains "Task DE-02 must be ready and unassigned"
+
+expect_ok "$BIN" ready DE-02 --actor user
+expect_fail "$BIN" workspace create DE-02 --actor codex --branch agent/codex_a/DE-01
+assert_contains "Workspace branch already reserved: agent/codex_a/DE-01"
+
+expect_fail "$BIN" workspace create DE-02 --actor codex --dir repo
+assert_contains "Workspace path must not equal repository path"
+
+expect_ok "$BIN" workspace create DE-02 --actor codex --dir custom-workspace --branch agent/codex/DE-02
+assert_contains "Created workspace DE-02 for codex"
+assert_contains "branch: agent/codex/DE-02"
+
+expect_ok "$BIN" task add DE Third
+expect_ok "$BIN" ready DE-03 --actor user
+expect_fail "$BIN" workspace create DE-03 --actor other --dir custom-workspace
+assert_contains "Workspace path already reserved:"
+
 case_dir="$(make_case_dir ready-no-review)"
 cd "$case_dir"
 mkdir repo

@@ -26,6 +26,7 @@ typedef struct {
 static const DispatchCliCommand commands[] = {
     {"init", "Create dispatch.json for a target repository"},
     {"agent", "Manage agents"},
+    {"workspace", "Manage workspaces"},
     {"group", "Manage groups"},
     {"task", "Manage tasks"},
     {"dep", "Manage dependencies"},
@@ -60,8 +61,8 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command, group add/ready, task add,");
-    puts("  dep add/remove, ready, start,");
+    puts("  init, agent create/list/show/command, workspace create,");
+    puts("  group add/ready, task add, dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, show, blocked");
 }
 
@@ -610,6 +611,291 @@ static int cmd_agent(int argc, char **argv) {
     fprintf(stderr, "       dispatch agent list\n");
     fprintf(stderr, "       dispatch agent show <name>\n");
     fprintf(stderr, "       dispatch agent command <name> [--print-command]\n");
+    return 1;
+}
+
+static void print_workspace_create_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch workspace create <task-id> --actor <name> [--repo <path>] [--dir <path>] [--branch <name>]\n");
+}
+
+static char *current_workflow_path(void) {
+    char *path = getcwd(NULL, 0);
+    if (!path) {
+        fprintf(stderr, "Could not resolve current directory: %s\n",
+                strerror(errno));
+        return NULL;
+    }
+    return path;
+}
+
+static char *path_dirname_copy(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (!slash)
+        return cli_strdup(".");
+    if (slash == path)
+        return cli_strdup("/");
+
+    size_t length = (size_t)(slash - path);
+    char *dirname = malloc(length + 1);
+    if (!dirname) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(dirname, path, length);
+    dirname[length] = '\0';
+    return dirname;
+}
+
+static const char *path_basename_view(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+static char *resolve_future_path(const char *workflow_dir, const char *path) {
+    if (!path || path[0] == '\0')
+        return NULL;
+    if (path[0] == '/')
+        return cli_strdup(path);
+
+    char *dirname = path_dirname_copy(path);
+    const char *basename = path_basename_view(path);
+    if (basename[0] == '\0' || strcmp(basename, ".") == 0 ||
+        strcmp(basename, "..") == 0) {
+        free(dirname);
+        return NULL;
+    }
+
+    char *parent = dispatch_resolve_path(workflow_dir, dirname);
+    free(dirname);
+    if (!parent)
+        return NULL;
+
+    char *resolved = join_path2(parent, basename);
+    free(parent);
+    return resolved;
+}
+
+static int workspace_record_is_live(const DispatchWorkspace *workspace) {
+    return workspace->state != DISPATCH_WORKSPACE_REMOVED;
+}
+
+static int workspace_branch_exists(const DispatchBoard *board,
+                                   const char *branch) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace_record_is_live(workspace) &&
+            strcmp(workspace->branch, branch) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int workspace_path_exists(const DispatchBoard *board, const char *path) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace_record_is_live(workspace) &&
+            strcmp(workspace->path, path) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static DispatchWorkspace *append_workspace_reservation(
+    DispatchBoard *board, const char *task_id, const char *actor,
+    const char *repo_path, const char *workspace_path, const char *branch) {
+    if (board->workspaces.count >= board->workspaces.capacity) {
+        board->workspaces.capacity = board->workspaces.capacity == 0
+                                         ? 4
+                                         : board->workspaces.capacity * 2;
+        board->workspaces.items = cli_realloc_array(
+            board->workspaces.items, board->workspaces.capacity,
+            sizeof(*board->workspaces.items));
+    }
+
+    DispatchWorkspace *workspace =
+        &board->workspaces.items[board->workspaces.count++];
+    memset(workspace, 0, sizeof(*workspace));
+    workspace->id = cli_strdup(task_id);
+    workspace->task_id = cli_strdup(task_id);
+    workspace->actor = cli_strdup(actor);
+    workspace->repo_path = cli_strdup(repo_path);
+    workspace->path = cli_strdup(workspace_path);
+    workspace->branch = cli_strdup(branch);
+    workspace->state = DISPATCH_WORKSPACE_CREATING;
+    workspace->created_at = time(NULL);
+    workspace->updated_at = workspace->created_at;
+    return workspace;
+}
+
+static int cmd_workspace_create(int argc, char **argv) {
+    if (argc < 5) {
+        print_workspace_create_usage();
+        return 1;
+    }
+
+    const char *task_id = argv[3];
+    const char *actor = NULL;
+    const char *repo_option = NULL;
+    const char *dir_option = NULL;
+    const char *branch_option = NULL;
+
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
+        } else if (strcmp(argv[i], "--repo") == 0 && (i + 1) < argc) {
+            repo_option = argv[++i];
+        } else if (strcmp(argv[i], "--dir") == 0 && (i + 1) < argc) {
+            dir_option = argv[++i];
+        } else if (strcmp(argv[i], "--branch") == 0 && (i + 1) < argc) {
+            branch_option = argv[++i];
+        } else {
+            print_workspace_create_usage();
+            return 1;
+        }
+    }
+
+    if (!actor || actor[0] == '\0') {
+        print_workspace_create_usage();
+        return 1;
+    }
+    if (!dispatch_actor_label_is_valid(actor)) {
+        fprintf(stderr,
+                "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+        return 1;
+    }
+
+    char *workflow_dir = current_workflow_path();
+    if (!workflow_dir)
+        return 1;
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked)) {
+        free(workflow_dir);
+        return 1;
+    }
+    DispatchBoard *board = &locked.board;
+
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
+    if (!task) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No task with id %s\n", task_id);
+        free(workflow_dir);
+        return 1;
+    }
+    if (dispatch_task_effective_state(board, task) != DISPATCH_STATE_READY ||
+        task->assigned_to) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Task %s must be ready and unassigned\n", task_id);
+        free(workflow_dir);
+        return 1;
+    }
+    if (dispatch_board_find_workspace(board, task_id)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace already exists for %s\n", task_id);
+        free(workflow_dir);
+        return 1;
+    }
+
+    const char *configured_repo =
+        repo_option && repo_option[0] ? repo_option : board->repo_path;
+    char *repo_path = dispatch_resolve_path(workflow_dir, configured_repo);
+    if (!repo_path || !dispatch_path_is_git_repository(repo_path)) {
+        fprintf(stderr,
+                "Configured repository is not a git repository: %s\n",
+                configured_repo);
+        locked_board_close(&locked);
+        free(workflow_dir);
+        free(repo_path);
+        return 1;
+    }
+
+    char *branch = branch_option && branch_option[0]
+                       ? cli_strdup(branch_option)
+                       : dispatch_default_workspace_branch(actor, task_id);
+    if (!branch || branch[0] == '\0') {
+        locked_board_close(&locked);
+        fprintf(stderr, "Could not derive workspace branch\n");
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        return 1;
+    }
+
+    char *workspace_path = dir_option && dir_option[0]
+                               ? resolve_future_path(workflow_dir, dir_option)
+                               : dispatch_default_workspace_path(repo_path,
+                                                                 actor,
+                                                                 task_id);
+    if (!workspace_path) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Could not resolve workspace directory\n");
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        return 1;
+    }
+
+    if (strcmp(repo_path, workspace_path) == 0) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace path must not equal repository path\n");
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
+    if (workspace_branch_exists(board, branch)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace branch already reserved: %s\n", branch);
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
+    if (workspace_path_exists(board, workspace_path)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace path already reserved: %s\n",
+                workspace_path);
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
+
+    append_workspace_reservation(board, task_id, actor, repo_path,
+                                 workspace_path, branch);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
+
+    printf("Created workspace %s for %s\n", task_id, actor);
+    printf("  path: %s\n", workspace_path);
+    printf("  branch: %s\n", branch);
+    printf("  state: creating\n");
+
+    locked_board_close(&locked);
+    free(workflow_dir);
+    free(repo_path);
+    free(branch);
+    free(workspace_path);
+    return 0;
+}
+
+static int cmd_workspace(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[2], "create") == 0)
+        return cmd_workspace_create(argc, argv);
+
+    print_workspace_create_usage();
     return 1;
 }
 
@@ -1284,6 +1570,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_init(argc, argv);
     if (strcmp(command->name, "agent") == 0)
         return cmd_agent(argc, argv);
+    if (strcmp(command->name, "workspace") == 0)
+        return cmd_workspace(argc, argv);
     if (strcmp(command->name, "group") == 0)
         return cmd_group(argc, argv);
     if (strcmp(command->name, "task") == 0)
