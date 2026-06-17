@@ -1,9 +1,12 @@
 #include "dispatch_cli.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "dispatch.h"
@@ -22,6 +25,7 @@ typedef struct {
 
 static const DispatchCliCommand commands[] = {
     {"init", "Create dispatch.json for a target repository"},
+    {"agent", "Manage agents"},
     {"group", "Manage groups"},
     {"task", "Manage tasks"},
     {"dep", "Manage dependencies"},
@@ -56,7 +60,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, group add/ready, task add, dep add/remove, ready, start,");
+    puts("  init, agent create, group add/ready, task add, dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, show, blocked");
 }
 
@@ -226,6 +230,291 @@ static const char *task_display_title(const DispatchTask *task) {
     while (isspace((unsigned char)*title))
         title++;
     return title[0] ? title : task->title;
+}
+
+static char *cli_strdup(const char *value) {
+    char *copy = strdup(value ? value : "");
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    return copy;
+}
+
+static void *cli_realloc_array(void *items, size_t count, size_t item_size) {
+    void *new_items = realloc(items, count * item_size);
+    if (!new_items) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    return new_items;
+}
+
+static char *join_path2(const char *left, const char *right) {
+    size_t left_len = strlen(left);
+    size_t right_len = strlen(right);
+    int needs_slash = left_len > 0 && left[left_len - 1] != '/';
+    char *path = malloc(left_len + (size_t)needs_slash + right_len + 1);
+    if (!path) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(path, left, left_len);
+    if (needs_slash)
+        path[left_len++] = '/';
+    memcpy(path + left_len, right, right_len + 1);
+    return path;
+}
+
+static int make_dir_if_needed(const char *path) {
+    if (mkdir(path, 0700) == 0)
+        return 1;
+    if (errno == EEXIST) {
+        struct stat info;
+        return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
+    }
+    return 0;
+}
+
+static int create_agent_dirs(const char *agent_dir, char **scratch_dir,
+                             char **decisions_dir) {
+    if (!make_dir_if_needed(".dispatch") ||
+        !make_dir_if_needed(".dispatch/agents") ||
+        !make_dir_if_needed(agent_dir)) {
+        fprintf(stderr, "Could not create agent directory %s: %s\n", agent_dir,
+                strerror(errno));
+        return 0;
+    }
+
+    *scratch_dir = join_path2(agent_dir, "scratch");
+    *decisions_dir = join_path2(agent_dir, "decisions");
+    if (!make_dir_if_needed(*scratch_dir) ||
+        !make_dir_if_needed(*decisions_dir)) {
+        fprintf(stderr, "Could not create agent support directories: %s\n",
+                strerror(errno));
+        return 0;
+    }
+    return 1;
+}
+
+static int agent_name_is_valid(const char *name) {
+    if (!name || name[0] == '\0')
+        return 0;
+    for (size_t i = 0; name[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (!(isalnum(c) || c == '-' || c == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+static int agent_runner_is_valid(const char *runner) {
+    return runner &&
+           (strcmp(runner, "codex") == 0 || strcmp(runner, "claude") == 0);
+}
+
+static char *agent_command_for(const char *runner, const char *model,
+                               const char *prompt_path) {
+    const char *model_flag = model && model[0] ? " --model " : "";
+    const char *model_value = model && model[0] ? model : "";
+    const char *format = NULL;
+    if (strcmp(runner, "codex") == 0) {
+        format = "codex%s%s --prompt-file \"%s\"";
+    } else {
+        format = "claude%s%s --prompt-file \"%s\"";
+    }
+
+    size_t size = strlen(format) + strlen(model_flag) + strlen(model_value) +
+                  strlen(prompt_path) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, format, model_flag, model_value, prompt_path);
+    return command;
+}
+
+static int write_agent_prompt(const char *path, const char *name,
+                              const char *runner) {
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        fprintf(stderr, "Could not write %s: %s\n", path, strerror(errno));
+        return 0;
+    }
+
+    fprintf(file, "# Dispatch Agent: %s\n\n", name);
+    fprintf(file, "You are the `%s` agent running with `%s`.\n\n", name,
+            runner);
+    fprintf(file, "Rules:\n");
+    fprintf(file, "- Work from the workflow directory that contains dispatch.json.\n");
+    fprintf(file, "- Use the Dispatch CLI for all workflow state.\n");
+    fprintf(file, "- Never read or edit dispatch.json directly.\n");
+    fprintf(file, "- Start only ready, unassigned tasks assigned to your work.\n");
+    fprintf(file, "- Assume other agents may be working in parallel.\n");
+    fprintf(file, "- Do not edit another agent's task worktree or scratch directory.\n");
+    fprintf(file, "- Keep temporary notes in .dispatch/agents/%s/scratch/.\n",
+            name);
+    fprintf(file, "- Keep agent-local decisions in .dispatch/agents/%s/decisions/.\n",
+            name);
+    fprintf(file, "- Write repository documentation only when the user asks or a Dispatch task requires it.\n");
+    fclose(file);
+    return 1;
+}
+
+static int write_agent_run_script(const char *path, const char *command) {
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        fprintf(stderr, "Could not write %s: %s\n", path, strerror(errno));
+        return 0;
+    }
+
+    fprintf(file, "#!/usr/bin/env bash\n");
+    fprintf(file, "set -euo pipefail\n");
+    fprintf(file, "cd \"$(dirname \"$0\")/../../..\"\n");
+    fprintf(file, "exec %s\n", command);
+    fclose(file);
+    if (chmod(path, 0700) != 0) {
+        fprintf(stderr, "Could not mark %s executable: %s\n", path,
+                strerror(errno));
+        return 0;
+    }
+    return 1;
+}
+
+static DispatchAgent *append_agent_record(DispatchBoard *board,
+                                          const char *name,
+                                          const char *runner,
+                                          const char *model,
+                                          const char *agent_dir,
+                                          const char *prompt_path,
+                                          const char *run_script_path) {
+    if (dispatch_board_find_agent(board, name))
+        return NULL;
+    if (board->agents.count >= board->agents.capacity) {
+        board->agents.capacity =
+            board->agents.capacity == 0 ? 4 : board->agents.capacity * 2;
+        board->agents.items = cli_realloc_array(
+            board->agents.items, board->agents.capacity,
+            sizeof(*board->agents.items));
+    }
+
+    DispatchAgent *agent = &board->agents.items[board->agents.count++];
+    memset(agent, 0, sizeof(*agent));
+    agent->name = cli_strdup(name);
+    agent->runner = cli_strdup(runner);
+    agent->model = model && model[0] ? cli_strdup(model) : NULL;
+    agent->agent_dir = cli_strdup(agent_dir);
+    agent->prompt_path = cli_strdup(prompt_path);
+    agent->run_script_path =
+        run_script_path && run_script_path[0] ? cli_strdup(run_script_path)
+                                              : NULL;
+    agent->created_at = time(NULL);
+    return agent;
+}
+
+static int cmd_agent_create(int argc, char **argv) {
+    const char *name = NULL;
+    const char *runner = NULL;
+    const char *model = NULL;
+    int no_run_script = 0;
+    int print_command = 0;
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--name") == 0 && (i + 1) < argc) {
+            name = argv[++i];
+        } else if (strcmp(argv[i], "--runner") == 0 && (i + 1) < argc) {
+            runner = argv[++i];
+        } else if (strcmp(argv[i], "--model") == 0 && (i + 1) < argc) {
+            model = argv[++i];
+        } else if (strcmp(argv[i], "--no-run-script") == 0) {
+            no_run_script = 1;
+        } else if (strcmp(argv[i], "--print-command") == 0) {
+            print_command = 1;
+        } else {
+            fprintf(stderr,
+                    "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
+            return 1;
+        }
+    }
+
+    if (!agent_name_is_valid(name)) {
+        fprintf(stderr,
+                "Agent name must contain only letters, digits, '-' or '_'\n");
+        return 1;
+    }
+    if (!agent_runner_is_valid(runner)) {
+        fprintf(stderr, "Agent runner must be codex or claude\n");
+        return 1;
+    }
+
+    char *agent_dir_base = join_path2(".dispatch/agents", name);
+    char *prompt_path = join_path2(agent_dir_base, "AGENT.md");
+    char *run_script_path = no_run_script ? NULL : join_path2(agent_dir_base, "run.sh");
+    char *scratch_dir = NULL;
+    char *decisions_dir = NULL;
+    char *command = agent_command_for(runner, model, prompt_path);
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked)) {
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(command);
+        return 1;
+    }
+    if (dispatch_board_find_agent(&locked.board, name)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent %s already exists\n", name);
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(command);
+        return 1;
+    }
+
+    if (!create_agent_dirs(agent_dir_base, &scratch_dir, &decisions_dir) ||
+        !write_agent_prompt(prompt_path, name, runner) ||
+        (!no_run_script && !write_agent_run_script(run_script_path, command)) ||
+        !append_agent_record(&locked.board, name, runner, model, agent_dir_base,
+                             prompt_path, run_script_path) ||
+        !locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(scratch_dir);
+        free(decisions_dir);
+        free(command);
+        return 1;
+    }
+
+    printf("Created agent %s (%s)\n", name, runner);
+    printf("  prompt: %s\n", prompt_path);
+    printf("  scratch: %s\n", scratch_dir);
+    printf("  decisions: %s\n", decisions_dir);
+    if (run_script_path)
+        printf("  run script: %s\n", run_script_path);
+    if (print_command)
+        printf("  command: %s\n", command);
+
+    locked_board_close(&locked);
+    free(agent_dir_base);
+    free(prompt_path);
+    free(run_script_path);
+    free(scratch_dir);
+    free(decisions_dir);
+    free(command);
+    return 0;
+}
+
+static int cmd_agent(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[2], "create") == 0)
+        return cmd_agent_create(argc, argv);
+
+    fprintf(stderr,
+            "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
+    return 1;
 }
 
 static int cmd_group_add(int argc, char **argv) {
@@ -897,6 +1186,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
 
     if (strcmp(command->name, "init") == 0)
         return cmd_init(argc, argv);
+    if (strcmp(command->name, "agent") == 0)
+        return cmd_agent(argc, argv);
     if (strcmp(command->name, "group") == 0)
         return cmd_group(argc, argv);
     if (strcmp(command->name, "task") == 0)

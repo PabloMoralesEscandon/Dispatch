@@ -94,6 +94,44 @@ expect_fail "$BIN" normalize
 assert_contains "Dispatch board is locked by another process; retry shortly."
 rm -f dispatch.json.lock
 
+expect_fail "$BIN" agent create --runner codex
+assert_contains "Agent name must contain only letters, digits, '-' or '_'"
+
+expect_fail "$BIN" agent create --name bad/name --runner codex
+assert_contains "Agent name must contain only letters, digits, '-' or '_'"
+
+expect_fail "$BIN" agent create --name codex-a --runner unknown
+assert_contains "Agent runner must be codex or claude"
+
+expect_ok "$BIN" agent create --name codex-a --runner codex --model gpt-test --print-command
+assert_contains "Created agent codex-a (codex)"
+assert_contains "prompt: .dispatch/agents/codex-a/AGENT.md"
+assert_contains "run script: .dispatch/agents/codex-a/run.sh"
+assert_contains "command: codex --model gpt-test --prompt-file \".dispatch/agents/codex-a/AGENT.md\""
+
+if [ ! -f .dispatch/agents/codex-a/AGENT.md ]; then
+    fail "agent prompt was not created"
+fi
+if [ ! -d .dispatch/agents/codex-a/scratch ]; then
+    fail "agent scratch directory was not created"
+fi
+if [ ! -d .dispatch/agents/codex-a/decisions ]; then
+    fail "agent decisions directory was not created"
+fi
+if [ ! -x .dispatch/agents/codex-a/run.sh ]; then
+    fail "agent run script was not created executable"
+fi
+
+expect_fail "$BIN" agent create --name codex-a --runner codex
+assert_contains "Agent codex-a already exists"
+
+expect_ok "$BIN" agent create --name claude-a --runner claude --no-run-script --print-command
+assert_contains "Created agent claude-a (claude)"
+assert_contains "command: claude --prompt-file \".dispatch/agents/claude-a/AGENT.md\""
+if [ -e .dispatch/agents/claude-a/run.sh ]; then
+    fail "agent run script was created despite --no-run-script"
+fi
+
 expect_ok "$BIN" group add Development --prefix DE
 assert_contains "Added group Development (DE)"
 
