@@ -68,6 +68,11 @@ cc -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
     -ljansson -o "$TMP_ROOT/lock_primitive_test"
 "$TMP_ROOT/lock_primitive_test" "$TMP_ROOT/dispatch.json" >/dev/null
 
+cc -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c \
+    -ljansson -o "$TMP_ROOT/store_records_test"
+"$TMP_ROOT/store_records_test" "$TMP_ROOT/empty-records.json" \
+    "$TMP_ROOT/populated-records.json" >/dev/null
+
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
 mkdir repo

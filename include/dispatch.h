@@ -14,6 +14,12 @@ typedef enum {
     DISPATCH_STATE_PAUSED
 } DispatchState;
 
+typedef enum {
+    DISPATCH_WORKSPACE_CREATING,
+    DISPATCH_WORKSPACE_ACTIVE,
+    DISPATCH_WORKSPACE_REMOVED
+} DispatchWorkspaceState;
+
 typedef struct {
     char **items;
     size_t count;
@@ -70,11 +76,49 @@ typedef struct {
 } DispatchTasks;
 
 typedef struct {
+    char *name;
+    char *runner;
+    char *model;
+    char *agent_dir;
+    char *prompt_path;
+    char *run_script_path;
+    time_t created_at;
+} DispatchAgent;
+
+typedef struct {
+    DispatchAgent *items;
+    size_t count;
+    size_t capacity;
+} DispatchAgents;
+
+typedef struct {
+    char *id;
+    char *task_id;
+    char *actor;
+    char *path;
+    char *branch;
+    char *repo_path;
+    DispatchWorkspaceState state;
+    DispatchStringList sequence_tasks;
+    char *review_gate;
+    time_t created_at;
+    time_t updated_at;
+} DispatchWorkspace;
+
+typedef struct {
+    DispatchWorkspace *items;
+    size_t count;
+    size_t capacity;
+} DispatchWorkspaces;
+
+typedef struct {
     int version;
     char *name;
     char *repo_path;
     DispatchGroups groups;
     DispatchTasks tasks;
+    DispatchAgents agents;
+    DispatchWorkspaces workspaces;
 } DispatchBoard;
 
 void dispatch_board_init(DispatchBoard *board, const char *name);
@@ -85,6 +129,10 @@ DispatchGroup *dispatch_board_find_group(DispatchBoard *board,
                                          const char *group_id);
 DispatchTask *dispatch_board_find_task(DispatchBoard *board,
                                        const char *task_id);
+DispatchAgent *dispatch_board_find_agent(DispatchBoard *board,
+                                         const char *name);
+DispatchWorkspace *dispatch_board_find_workspace(DispatchBoard *board,
+                                                 const char *id_or_task_id);
 
 int dispatch_board_add_group(DispatchBoard *board, const char *name,
                              const char *prefix);
@@ -100,6 +148,9 @@ int dispatch_task_set_description(DispatchTask *task, const char *description);
 
 const char *dispatch_state_name(DispatchState state);
 int dispatch_state_from_name(const char *name, DispatchState *state);
+const char *dispatch_workspace_state_name(DispatchWorkspaceState state);
+int dispatch_workspace_state_from_name(const char *name,
+                                       DispatchWorkspaceState *state);
 int dispatch_task_set_state(DispatchTask *task, DispatchState state,
                             const char *actor, const char *note);
 int dispatch_task_assign(DispatchTask *task, const char *actor);

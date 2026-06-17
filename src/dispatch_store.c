@@ -129,6 +129,10 @@ static json_t *json_time_or_null(time_t value) {
     return json_integer((json_int_t)value);
 }
 
+static json_t *json_optional_string(const char *value) {
+    return value ? json_string(value) : json_null();
+}
+
 static const char *json_string_or(json_t *object, const char *key,
                                   const char *fallback) {
     json_t *value = json_object_get(object, key);
@@ -179,6 +183,19 @@ static void task_free_fields(DispatchTask *task) {
     free(task->history.items);
 }
 
+static void workspace_free_fields(DispatchWorkspace *workspace) {
+    free(workspace->id);
+    free(workspace->task_id);
+    free(workspace->actor);
+    free(workspace->path);
+    free(workspace->branch);
+    free(workspace->repo_path);
+    for (size_t i = 0; i < workspace->sequence_tasks.count; i++)
+        free(workspace->sequence_tasks.items[i]);
+    free(workspace->sequence_tasks.items);
+    free(workspace->review_gate);
+}
+
 static int append_loaded_task(DispatchBoard *board, const DispatchTask *task) {
     if (board->tasks.count >= board->tasks.capacity) {
         board->tasks.capacity = board->tasks.capacity == 0
@@ -189,6 +206,34 @@ static int append_loaded_task(DispatchBoard *board, const DispatchTask *task) {
                                                  sizeof(*board->tasks.items));
     }
     board->tasks.items[board->tasks.count++] = *task;
+    return 1;
+}
+
+static int append_loaded_agent(DispatchBoard *board,
+                               const DispatchAgent *agent) {
+    if (board->agents.count >= board->agents.capacity) {
+        board->agents.capacity = board->agents.capacity == 0
+                                     ? 4
+                                     : board->agents.capacity * 2;
+        board->agents.items = store_realloc_array(
+            board->agents.items, board->agents.capacity,
+            sizeof(*board->agents.items));
+    }
+    board->agents.items[board->agents.count++] = *agent;
+    return 1;
+}
+
+static int append_loaded_workspace(DispatchBoard *board,
+                                   const DispatchWorkspace *workspace) {
+    if (board->workspaces.count >= board->workspaces.capacity) {
+        board->workspaces.capacity = board->workspaces.capacity == 0
+                                         ? 4
+                                         : board->workspaces.capacity * 2;
+        board->workspaces.items = store_realloc_array(
+            board->workspaces.items, board->workspaces.capacity,
+            sizeof(*board->workspaces.items));
+    }
+    board->workspaces.items[board->workspaces.count++] = *workspace;
     return 1;
 }
 
@@ -212,6 +257,13 @@ static json_t *history_to_json(const DispatchHistory *history) {
                             json_time_or_null(entry->timestamp));
         json_array_append_new(array, object);
     }
+    return array;
+}
+
+static json_t *string_list_to_json(const DispatchStringList *list) {
+    json_t *array = json_array();
+    for (size_t i = 0; i < list->count; i++)
+        json_array_append_new(array, json_string(list->items[i]));
     return array;
 }
 
@@ -250,6 +302,42 @@ static json_t *task_to_json(const DispatchTask *task) {
     return object;
 }
 
+static json_t *agent_to_json(const DispatchAgent *agent) {
+    json_t *object = json_object();
+    json_object_set_new(object, "name", json_string(agent->name));
+    json_object_set_new(object, "runner", json_string(agent->runner));
+    json_object_set_new(object, "model", json_optional_string(agent->model));
+    json_object_set_new(object, "agent_dir", json_string(agent->agent_dir));
+    json_object_set_new(object, "prompt_path", json_string(agent->prompt_path));
+    json_object_set_new(object, "run_script_path",
+                        json_optional_string(agent->run_script_path));
+    json_object_set_new(object, "created_at",
+                        json_time_or_null(agent->created_at));
+    return object;
+}
+
+static json_t *workspace_to_json(const DispatchWorkspace *workspace) {
+    json_t *object = json_object();
+    json_object_set_new(object, "id", json_string(workspace->id));
+    json_object_set_new(object, "task_id", json_string(workspace->task_id));
+    json_object_set_new(object, "actor", json_string(workspace->actor));
+    json_object_set_new(object, "path", json_string(workspace->path));
+    json_object_set_new(object, "branch", json_string(workspace->branch));
+    json_object_set_new(object, "repo_path", json_string(workspace->repo_path));
+    json_object_set_new(
+        object, "state",
+        json_string(dispatch_workspace_state_name(workspace->state)));
+    json_object_set_new(object, "sequence_tasks",
+                        string_list_to_json(&workspace->sequence_tasks));
+    json_object_set_new(object, "review_gate",
+                        json_optional_string(workspace->review_gate));
+    json_object_set_new(object, "created_at",
+                        json_time_or_null(workspace->created_at));
+    json_object_set_new(object, "updated_at",
+                        json_time_or_null(workspace->updated_at));
+    return object;
+}
+
 int dispatch_store_save(const DispatchBoard *board, const char *path,
                         char *error, size_t error_size) {
     json_t *root = json_object();
@@ -272,6 +360,18 @@ int dispatch_store_save(const DispatchBoard *board, const char *path,
     for (size_t i = 0; i < board->tasks.count; i++)
         json_array_append_new(tasks, task_to_json(&board->tasks.items[i]));
     json_object_set_new(json_board, "tasks", tasks);
+
+    json_t *agents = json_array();
+    for (size_t i = 0; i < board->agents.count; i++)
+        json_array_append_new(agents, agent_to_json(&board->agents.items[i]));
+    json_object_set_new(json_board, "agents", agents);
+
+    json_t *workspaces = json_array();
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        json_array_append_new(
+            workspaces, workspace_to_json(&board->workspaces.items[i]));
+    }
+    json_object_set_new(json_board, "workspaces", workspaces);
 
     json_object_set_new(root, "board", json_board);
 
@@ -412,6 +512,147 @@ static int load_tasks(DispatchBoard *board, json_t *tasks, char *error,
     return 1;
 }
 
+static int load_agents(DispatchBoard *board, json_t *agents, char *error,
+                       size_t error_size) {
+    if (!agents)
+        return 1;
+    if (!json_is_array(agents)) {
+        set_error(error, error_size, "board.agents must be an array");
+        return 0;
+    }
+
+    size_t index;
+    json_t *value;
+    json_array_foreach(agents, index, value) {
+        if (!json_is_object(value)) {
+            set_error(error, error_size, "agent entries must be objects");
+            return 0;
+        }
+
+        const char *name = json_string_or(value, "name", NULL);
+        const char *runner = json_string_or(value, "runner", NULL);
+        const char *agent_dir = json_string_or(value, "agent_dir", NULL);
+        const char *prompt_path = json_string_or(value, "prompt_path", NULL);
+        if (!name || !runner || !agent_dir || !prompt_path ||
+            dispatch_board_find_agent(board, name)) {
+            set_error(error, error_size, "invalid or duplicate agent record");
+            return 0;
+        }
+
+        const char *model = json_string_or(value, "model", NULL);
+        const char *run_script_path =
+            json_string_or(value, "run_script_path", NULL);
+
+        DispatchAgent agent = {0};
+        agent.name = store_strdup(name);
+        agent.runner = store_strdup(runner);
+        agent.model = model ? store_strdup(model) : NULL;
+        agent.agent_dir = store_strdup(agent_dir);
+        agent.prompt_path = store_strdup(prompt_path);
+        agent.run_script_path =
+            run_script_path ? store_strdup(run_script_path) : NULL;
+        agent.created_at = json_time_or_zero(value, "created_at");
+
+        append_loaded_agent(board, &agent);
+    }
+
+    return 1;
+}
+
+static int load_workspace_sequence(DispatchWorkspace *workspace,
+                                   DispatchBoard *board, json_t *array,
+                                   char *error, size_t error_size) {
+    if (!array)
+        return 1;
+    if (!json_is_array(array)) {
+        set_error(error, error_size, "workspace.sequence_tasks must be an array");
+        return 0;
+    }
+
+    size_t index;
+    json_t *value;
+    json_array_foreach(array, index, value) {
+        if (!json_is_string(value)) {
+            set_error(error, error_size,
+                      "workspace.sequence_tasks entries must be task IDs");
+            return 0;
+        }
+        const char *task_id = json_string_value(value);
+        if (!dispatch_board_find_task(board, task_id)) {
+            set_error(error, error_size,
+                      "workspace.sequence_tasks references a missing task");
+            return 0;
+        }
+        string_list_append(&workspace->sequence_tasks, task_id);
+    }
+    return 1;
+}
+
+static int load_workspaces(DispatchBoard *board, json_t *workspaces,
+                           char *error, size_t error_size) {
+    if (!workspaces)
+        return 1;
+    if (!json_is_array(workspaces)) {
+        set_error(error, error_size, "board.workspaces must be an array");
+        return 0;
+    }
+
+    size_t index;
+    json_t *value;
+    json_array_foreach(workspaces, index, value) {
+        if (!json_is_object(value)) {
+            set_error(error, error_size, "workspace entries must be objects");
+            return 0;
+        }
+
+        const char *id = json_string_or(value, "id", NULL);
+        const char *task_id = json_string_or(value, "task_id", NULL);
+        const char *actor = json_string_or(value, "actor", NULL);
+        const char *path = json_string_or(value, "path", NULL);
+        const char *branch = json_string_or(value, "branch", NULL);
+        const char *repo_path = json_string_or(value, "repo_path", NULL);
+        if (!id || !task_id || !actor || !path || !branch || !repo_path ||
+            !dispatch_board_find_task(board, task_id) ||
+            dispatch_board_find_workspace(board, id) ||
+            dispatch_board_find_workspace(board, task_id)) {
+            set_error(error, error_size, "invalid or duplicate workspace record");
+            return 0;
+        }
+
+        DispatchWorkspace workspace = {0};
+        workspace.id = store_strdup(id);
+        workspace.task_id = store_strdup(task_id);
+        workspace.actor = store_strdup(actor);
+        workspace.path = store_strdup(path);
+        workspace.branch = store_strdup(branch);
+        workspace.repo_path = store_strdup(repo_path);
+
+        if (!dispatch_workspace_state_from_name(
+                json_string_or(value, "state", "creating"),
+                &workspace.state)) {
+            set_error(error, error_size, "invalid workspace state");
+            workspace_free_fields(&workspace);
+            return 0;
+        }
+
+        if (!load_workspace_sequence(
+                &workspace, board, json_object_get(value, "sequence_tasks"),
+                error, error_size)) {
+            workspace_free_fields(&workspace);
+            return 0;
+        }
+
+        const char *review_gate = json_string_or(value, "review_gate", NULL);
+        workspace.review_gate = review_gate ? store_strdup(review_gate) : NULL;
+        workspace.created_at = json_time_or_zero(value, "created_at");
+        workspace.updated_at = json_time_or_zero(value, "updated_at");
+
+        append_loaded_workspace(board, &workspace);
+    }
+
+    return 1;
+}
+
 static int validate_dependencies(DispatchBoard *board, char *error,
                                  size_t error_size) {
     for (size_t i = 0; i < board->tasks.count; i++) {
@@ -463,6 +704,10 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
                      error_size) ||
         !load_tasks(board, json_object_get(json_board, "tasks"), error,
                     error_size) ||
+        !load_agents(board, json_object_get(json_board, "agents"), error,
+                     error_size) ||
+        !load_workspaces(board, json_object_get(json_board, "workspaces"),
+                         error, error_size) ||
         !validate_dependencies(board, error, error_size)) {
         dispatch_board_free(board);
         json_decref(root);

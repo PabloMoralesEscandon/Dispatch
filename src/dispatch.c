@@ -89,6 +89,26 @@ static void task_free_fields(DispatchTask *task) {
     history_free(&task->history);
 }
 
+static void agent_free_fields(DispatchAgent *agent) {
+    free(agent->name);
+    free(agent->runner);
+    free(agent->model);
+    free(agent->agent_dir);
+    free(agent->prompt_path);
+    free(agent->run_script_path);
+}
+
+static void workspace_free_fields(DispatchWorkspace *workspace) {
+    free(workspace->id);
+    free(workspace->task_id);
+    free(workspace->actor);
+    free(workspace->path);
+    free(workspace->branch);
+    free(workspace->repo_path);
+    string_list_free(&workspace->sequence_tasks);
+    free(workspace->review_gate);
+}
+
 int dispatch_task_append_history(DispatchTask *task, const char *actor,
                                  const char *action, const char *note) {
     if (!task || !action || action[0] == '\0')
@@ -174,6 +194,15 @@ void dispatch_board_free(DispatchBoard *board) {
         task_free_fields(task);
     }
     free(board->tasks.items);
+
+    for (size_t i = 0; i < board->agents.count; i++)
+        agent_free_fields(&board->agents.items[i]);
+    free(board->agents.items);
+
+    for (size_t i = 0; i < board->workspaces.count; i++)
+        workspace_free_fields(&board->workspaces.items[i]);
+    free(board->workspaces.items);
+
     free(board->name);
     free(board->repo_path);
     memset(board, 0, sizeof(*board));
@@ -201,6 +230,31 @@ DispatchTask *dispatch_board_find_task(DispatchBoard *board,
     for (size_t i = 0; i < board->tasks.count; i++) {
         if (strcmp(board->tasks.items[i].id, task_id) == 0)
             return &board->tasks.items[i];
+    }
+    return NULL;
+}
+
+DispatchAgent *dispatch_board_find_agent(DispatchBoard *board,
+                                         const char *name) {
+    if (!board || !name)
+        return NULL;
+    for (size_t i = 0; i < board->agents.count; i++) {
+        if (strcmp(board->agents.items[i].name, name) == 0)
+            return &board->agents.items[i];
+    }
+    return NULL;
+}
+
+DispatchWorkspace *dispatch_board_find_workspace(DispatchBoard *board,
+                                                 const char *id_or_task_id) {
+    if (!board || !id_or_task_id)
+        return NULL;
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (strcmp(workspace->id, id_or_task_id) == 0 ||
+            strcmp(workspace->task_id, id_or_task_id) == 0) {
+            return workspace;
+        }
     }
     return NULL;
 }
@@ -382,6 +436,37 @@ int dispatch_state_from_name(const char *name, DispatchState *state) {
 
     for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
         if (strcmp(name, dispatch_state_name(states[i])) == 0) {
+            *state = states[i];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const char *dispatch_workspace_state_name(DispatchWorkspaceState state) {
+    switch (state) {
+    case DISPATCH_WORKSPACE_CREATING:
+        return "creating";
+    case DISPATCH_WORKSPACE_ACTIVE:
+        return "active";
+    case DISPATCH_WORKSPACE_REMOVED:
+        return "removed";
+    }
+    return "creating";
+}
+
+int dispatch_workspace_state_from_name(const char *name,
+                                       DispatchWorkspaceState *state) {
+    static const DispatchWorkspaceState states[] = {
+        DISPATCH_WORKSPACE_CREATING,
+        DISPATCH_WORKSPACE_ACTIVE,
+        DISPATCH_WORKSPACE_REMOVED,
+    };
+
+    if (!name || !state)
+        return 0;
+    for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+        if (strcmp(name, dispatch_workspace_state_name(states[i])) == 0) {
             *state = states[i];
             return 1;
         }
