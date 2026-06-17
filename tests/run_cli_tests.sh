@@ -121,7 +121,7 @@ assert_contains "Usage: dispatch dep add <dependency-id> <dependent-id>"
 assert_contains "Example: dispatch dep add DE-01 DE-02 means DE-02 depends on DE-01"
 
 expect_fail "$BIN" ready DE-01
-assert_contains "Usage: dispatch ready <id> --actor <name>"
+assert_contains "Usage: dispatch ready <id> --actor <name> [--no-review]"
 
 expect_ok "$BIN" show DE-01
 assert_contains "Blocks: DE-02"
@@ -247,6 +247,27 @@ assert_contains "  QA-01    proposed   Other"
 
 expect_fail "$BIN" group ready Missing --actor user
 assert_contains "No group with id, prefix, or name Missing"
+
+case_dir="$(make_case_dir ready-no-review)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE DirectFinish
+assert_contains "Added task DE-01"
+
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+assert_contains "Readied DE-01"
+
+expect_ok "$BIN" show DE-01
+assert_contains "Requires review: no"
+
+expect_ok "$BIN" start DE-01 --actor codex
+assert_contains "Started DE-01"
+
+expect_ok "$BIN" finish DE-01 --actor codex
+assert_contains "Finished DE-01 (done)"
 
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"

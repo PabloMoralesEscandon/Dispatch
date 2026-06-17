@@ -684,15 +684,32 @@ static int cmd_blocked(int argc, char **argv) {
 static int cmd_ready(int argc, char **argv) {
     if (argc == 2)
         return cmd_ready_list();
-    if (argc != 5) {
-        fprintf(stderr, "Usage: dispatch ready <id> --actor <name>\n");
+    if (argc < 5) {
+        fprintf(stderr,
+                "Usage: dispatch ready <id> --actor <name> [--no-review]\n");
         return 1;
     }
-    if (reject_unknown_actor_options(argc, argv, 3))
-        return 1;
 
     const char *task_id = argv[2];
-    const char *actor = parse_actor(argc, argv, 3);
+    const char *actor = NULL;
+    int no_review = 0;
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
+        } else if (strcmp(argv[i], "--no-review") == 0) {
+            no_review = 1;
+        } else {
+            fprintf(stderr, "Unknown ready option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+
+    if (!actor || actor[0] == '\0') {
+        fprintf(stderr,
+                "Usage: dispatch ready <id> --actor <name> [--no-review]\n");
+        return 1;
+    }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
@@ -704,6 +721,8 @@ static int cmd_ready(int argc, char **argv) {
         fprintf(stderr, "Could not mark %s ready\n", task_id);
         return 1;
     }
+    if (no_review)
+        task->requires_review = 0;
 
     int result = save_task_transition(&board, "Readied", task_id);
     dispatch_board_free(&board);

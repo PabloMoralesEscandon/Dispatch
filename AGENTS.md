@@ -120,7 +120,9 @@ choose a ready task that is not assigned and proceed in dependency order.
 Agents may create proposed tasks while planning. Only the user should approve
 proposed tasks by marking them ready, unless the user explicitly instructs an
 agent to ready a specific task or group. All readiness changes must include an
-actor so the approval is visible in task history.
+actor so the approval is visible in task history. Use `dispatch ready <id>
+--actor user --no-review` only when the user approves the task as safe to finish
+without a review gate.
 
 ## Task Execution Protocol
 

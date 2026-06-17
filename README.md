@@ -177,7 +177,7 @@ is blocked when any dependency is not done. Dependency cycles are rejected.
 ### Lifecycle
 
 ```bash
-dispatch ready [<id> --actor <name>]
+dispatch ready [<id> --actor <name> [--no-review]]
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
 dispatch review <id> --actor <name>
@@ -198,7 +198,8 @@ proposed -> ready -> doing -> done
 Use `ready` with no ID to list work that can be started. Use
 `ready <id> --actor <name>` to approve a proposed task for work. The actor
 should normally be the user; an agent should mark tasks ready only when the user
-explicitly instructs it to do so.
+explicitly instructs it to do so. Add `--no-review` when approving a task that
+can safely move directly from `doing` to `done` after the agent finishes it.
 
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to
