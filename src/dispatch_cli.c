@@ -20,7 +20,7 @@ static const DispatchCliCommand commands[] = {
     {"ready", "List ready work or mark a task ready"},
     {"blocked", "List blocked work and blockers"},
     {"show", "Show one task"},
-    {"list", "List dependency trees, optionally for one group"},
+    {"list", "List tasks by group and workflow order"},
     {"start", "Start and assign a ready task"},
     {"finish", "Finish a task"},
     {"review", "Accept a task in review"},
@@ -424,120 +424,21 @@ static int ready_task_count(const DispatchBoard *board) {
     return count;
 }
 
-static int task_is_in_group(const DispatchTask *task, const char *group_id) {
-    return !group_id || strcmp(task->group, group_id) == 0;
-}
-
-static const char *primary_dependency_in_scope(const DispatchBoard *board,
-                                               const DispatchTask *task,
-                                               const char *group_id) {
-    for (size_t i = 0; i < task->depends_on.count; i++) {
-        DispatchTask *dependency =
-            dispatch_board_find_task((DispatchBoard *)board,
-                                     task->depends_on.items[i]);
-        if (dependency && task_is_in_group(dependency, group_id))
-            return task->depends_on.items[i];
-    }
-    return NULL;
-}
-
-static int task_index_by_id(const DispatchBoard *board, const char *task_id,
-                            size_t *index) {
-    for (size_t i = 0; i < board->tasks.count; i++) {
-        if (strcmp(board->tasks.items[i].id, task_id) == 0) {
-            *index = i;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static void print_tree_indent(size_t depth) {
-    for (size_t i = 0; i < depth; i++)
-        printf("  ");
-}
-
-static void print_tree_dependencies(const DispatchTask *task,
-                                    const char *primary_dependency) {
-    int printed_label = 0;
-    for (size_t i = 0; i < task->depends_on.count; i++) {
-        const char *dependency = task->depends_on.items[i];
-        if (primary_dependency && strcmp(dependency, primary_dependency) == 0)
-            continue;
-        if (!printed_label) {
-            printf("  %s:", primary_dependency ? "also_depends_on"
-                                               : "depends_on");
-            printed_label = 1;
-        }
-        printf("%s%s", printed_label == 1 ? " " : ",", dependency);
-        printed_label++;
-    }
-}
-
-static void print_tree_task(const DispatchBoard *board, const DispatchTask *task,
-                            const char *group_id, size_t depth, int *printed) {
-    size_t task_index = 0;
-    if (!task_index_by_id(board, task->id, &task_index) || printed[task_index])
-        return;
-
-    printed[task_index] = 1;
-    const char *primary_dependency =
-        primary_dependency_in_scope(board, task, group_id);
-
-    print_tree_indent(depth);
-    printf("%s [%s] %s", task->id,
-           dispatch_state_name(dispatch_task_effective_state(board, task)),
-           task->title);
-    if (task->assigned_to)
-        printf("  assigned:%s", task->assigned_to);
-    print_tree_dependencies(task, primary_dependency);
-    printf("\n");
-
-    for (size_t i = 0; i < board->tasks.count; i++) {
-        DispatchTask *candidate = &board->tasks.items[i];
-        if (!task_is_in_group(candidate, group_id))
-            continue;
-        const char *candidate_primary =
-            primary_dependency_in_scope(board, candidate, group_id);
-        if (candidate_primary && strcmp(candidate_primary, task->id) == 0)
-            print_tree_task(board, candidate, group_id, depth + 1, printed);
-    }
-}
-
-static void print_tree_for_group(const DispatchBoard *board,
+static void print_list_for_group(const DispatchBoard *board,
                                  const DispatchGroup *group) {
     printf("[%s] %s\n", group->prefix, group->name);
-
-    int *printed = calloc(board->tasks.count ? board->tasks.count : 1,
-                          sizeof(*printed));
-    if (!printed) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
 
     int any = 0;
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
-        if (!task_is_in_group(task, group->id))
+        if (strcmp(task->group, group->id) != 0)
             continue;
-        if (primary_dependency_in_scope(board, task, group->id))
-            continue;
-        print_tree_task(board, task, group->id, 1, printed);
-        any = 1;
-    }
-
-    for (size_t i = 0; i < board->tasks.count; i++) {
-        DispatchTask *task = &board->tasks.items[i];
-        if (!task_is_in_group(task, group->id) || printed[i])
-            continue;
-        print_tree_task(board, task, group->id, 1, printed);
+        print_task_line(board, task, "  ");
         any = 1;
     }
 
     if (!any)
         printf("  (no tasks)\n");
-
-    free(printed);
 }
 
 static int cmd_list(int argc, char **argv) {
@@ -557,7 +458,7 @@ static int cmd_list(int argc, char **argv) {
             fprintf(stderr, "No group with id, prefix, or name %s\n", argv[2]);
             return 1;
         }
-        print_tree_for_group(&board, group);
+        print_list_for_group(&board, group);
         dispatch_board_free(&board);
         return 0;
     }
@@ -566,7 +467,7 @@ static int cmd_list(int argc, char **argv) {
         printf("(no groups)\n");
     } else {
         for (size_t g = 0; g < board.groups.count; g++)
-            print_tree_for_group(&board, &board.groups.items[g]);
+            print_list_for_group(&board, &board.groups.items[g]);
     }
 
     dispatch_board_free(&board);

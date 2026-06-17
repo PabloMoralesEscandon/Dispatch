@@ -103,11 +103,11 @@ assert_contains "Added dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
 
 expect_ok "$BIN" list
 assert_contains "[DE] Development"
-assert_contains "  DE-01 [proposed] First"
-assert_contains "    DE-02 [blocked] Second"
+assert_contains "  DE-01    proposed   First"
+assert_contains "  DE-02    blocked    Second  depends_on:DE-01"
 
 expect_ok "$BIN" list
-assert_contains "    DE-02 [blocked] Second"
+assert_contains "  DE-02    blocked    Second  depends_on:DE-01"
 
 expect_fail "$BIN" dep add DE-02 DE-01
 assert_contains "Could not add dependency DE-02 -> DE-01 (DE-01 depends on DE-02)"
@@ -216,14 +216,14 @@ expect_ok "$BIN" group ready DE --actor user
 assert_contains "Readied 3 tasks in group DE"
 
 expect_ok "$BIN" list
-assert_contains "  DE-01 [ready] Root"
-assert_contains "    DE-02 [blocked] AlreadyBlocked"
-assert_contains "    DE-03 [blocked] ProposedBlocked"
-assert_contains "  DE-04 [ready] Simple"
-assert_contains "  DE-05 [doing] Active  assigned:codex"
-assert_contains "  DE-06 [review] Review"
-assert_contains "  DE-07 [done] Done"
-assert_contains "  QA-01 [proposed] Other"
+assert_contains "  DE-01    ready      Root"
+assert_contains "  DE-02    blocked    AlreadyBlocked  depends_on:DE-01"
+assert_contains "  DE-03    blocked    ProposedBlocked  depends_on:DE-01"
+assert_contains "  DE-04    ready      Simple"
+assert_contains "  DE-05    doing      Active  assigned:codex"
+assert_contains "  DE-06    review     Review"
+assert_contains "  DE-07    done       Done"
+assert_contains "  QA-01    proposed   Other"
 
 expect_fail "$BIN" group ready Missing --actor user
 assert_contains "No group with id, prefix, or name Missing"
@@ -305,9 +305,9 @@ expect_ok "$BIN" dep add DE-01 DE-03
 expect_ok "$BIN" dep add DE-02 DE-04
 expect_ok "$BIN" dep add DE-03 DE-04
 expect_ok "$BIN" list DE
-assert_contains "  DE-01 [proposed] Root"
-assert_contains "    DE-02 [blocked] BranchA"
-assert_contains "      DE-04 [blocked] Join  also_depends_on: DE-03"
-assert_contains "    DE-03 [blocked] BranchB"
+assert_contains "  DE-01    proposed   Root"
+assert_contains "  DE-02    blocked    BranchA  depends_on:DE-01"
+assert_contains "  DE-03    blocked    BranchB  depends_on:DE-01"
+assert_contains "  DE-04    blocked    Join  depends_on:DE-02,DE-03"
 
 printf 'PASS: Dispatch CLI tests\n'

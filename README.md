@@ -152,7 +152,8 @@ unblock the next task without human acceptance.
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.
 
-`list` prints tasks as dependency trees grouped by Dispatch group. It can be
+`list` prints tasks once, grouped by Dispatch group and in task order.
+Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name.
 
 ### Dependencies
