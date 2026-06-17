@@ -1,6 +1,0 @@
-# Dispatch executable if copied or symlinked into this project.
-/dispatch
-/dispatch.exe
-
-# Dispatch local workflow state.
-/dispatch.json
