@@ -84,6 +84,9 @@ assert_contains "Added group Development (DE)"
 expect_fail "$BIN" group add Duplicate --prefix DE
 assert_contains "Could not add group"
 
+expect_fail "$BIN" task add DE "DE-99 Bad title"
+assert_contains "Task titles should not include Dispatch IDs"
+
 expect_ok "$BIN" task add DE First --description "First task"
 assert_contains "Added task DE-01"
 
@@ -182,6 +185,22 @@ assert_contains "Could not delete DE-01"
 
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
+
+case_dir="$(make_case_dir id-prefix-display)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/id-prefixed-title-board.json" dispatch.json
+
+expect_ok "$BIN" list FX
+assert_contains "  FX-01    proposed   First fixture task"
+assert_contains "  FX-02    blocked    Blocked fixture task  depends_on:FX-01"
+assert_not_contains "FX-01    proposed   FX-01"
+assert_not_contains "FX-02    blocked    FX-02"
+
+expect_ok "$BIN" show FX-01
+assert_contains "Title: First fixture task"
+
+expect_ok "$BIN" blocked
+assert_contains "FX-02    Blocked fixture task  blocked_by: FX-01"
 
 case_dir="$(make_case_dir group-ready)"
 cd "$case_dir"

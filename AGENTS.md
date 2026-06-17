@@ -70,8 +70,9 @@ Groups organize related work. Each group has a short prefix, and task IDs use
 that prefix, such as `DE-01` or `VD-03`.
 
 Tasks have a title, description, state, dependency list, review setting,
-assignment fields, and history. The task title is the human-readable name. The
-task ID is the stable identifier agents use in commands.
+assignment fields, and history. The task title is the human-readable name and
+must not include the generated task ID. The task ID is the stable identifier
+agents use in commands.
 
 Dependencies are stored as "this task depends on those task IDs". A task is
 blocked when any dependency is not done. Agents must treat blocked tasks as not
@@ -160,8 +161,8 @@ and wait.
 
 Every completed Dispatch task gets its own commit.
 
-Use the task title as the commit message. Include the ID when the title includes
-it, matching Dispatch task names such as:
+Use the task ID followed by the task title as the commit message, matching
+Dispatch task names such as:
 
 ```bash
 git commit -m "AD-01 Create CLAUDE.md"

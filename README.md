@@ -145,9 +145,11 @@ dispatch show <id>
 dispatch list [group]
 ```
 
-Tasks require a group and a title. By default, tasks require review after they
-are finished. Use `--no-review` only when the task can safely complete and
-unblock the next task without human acceptance.
+Tasks require a group and a title. Titles are human-readable labels and should
+not include generated Dispatch IDs such as `DE-01`; Dispatch prints the ID in
+its own column. By default, tasks require review after they are finished. Use
+`--no-review` only when the task can safely complete and unblock the next task
+without human acceptance.
 
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.

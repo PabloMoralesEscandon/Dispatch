@@ -1,5 +1,6 @@
 #include "dispatch_cli.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -136,6 +137,40 @@ static int reject_unknown_actor_options(int argc, char **argv, int start_index) 
         return 1;
     }
     return 0;
+}
+
+static int title_starts_with_dispatch_id(const char *title) {
+    size_t prefix_len = 0;
+    if (!title)
+        return 0;
+
+    while (prefix_len < 3 && isalnum((unsigned char)title[prefix_len]))
+        prefix_len++;
+    if (prefix_len == 0 || title[prefix_len] != '-')
+        return 0;
+    if (!isdigit((unsigned char)title[prefix_len + 1]) ||
+        !isdigit((unsigned char)title[prefix_len + 2])) {
+        return 0;
+    }
+
+    char next = title[prefix_len + 3];
+    return next == '\0' || isspace((unsigned char)next);
+}
+
+static const char *task_display_title(const DispatchTask *task) {
+    if (!task || !task->title || !task->id)
+        return "";
+
+    size_t id_len = strlen(task->id);
+    if (strncmp(task->title, task->id, id_len) != 0 ||
+        !isspace((unsigned char)task->title[id_len])) {
+        return task->title;
+    }
+
+    const char *title = task->title + id_len;
+    while (isspace((unsigned char)*title))
+        title++;
+    return title[0] ? title : task->title;
 }
 
 static int cmd_group_add(int argc, char **argv) {
@@ -277,6 +312,12 @@ static int cmd_task(int argc, char **argv) {
     const char *title = argv[4];
     const char *description = "";
     int requires_review = 1;
+
+    if (title_starts_with_dispatch_id(title)) {
+        fprintf(stderr,
+                "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
+        return 1;
+    }
 
     for (int i = 5; i < argc; i++) {
         if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
@@ -434,7 +475,8 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
     const char *meta_color = color ? "\033[2;37m" : "";
 
     printf("%s%s%-8s%s %s%-10s%s %s", indent, id_color, task->id, reset,
-           state_color, dispatch_state_name(state), reset, task->title);
+           state_color, dispatch_state_name(state), reset,
+           task_display_title(task));
     if (task->assigned_to)
         printf("  %sassigned:%s%s", meta_color, task->assigned_to, reset);
     if (task->depends_on.count > 0) {
@@ -541,7 +583,7 @@ static int cmd_show(int argc, char **argv) {
     }
 
     printf("ID: %s\n", task->id);
-    printf("Title: %s\n", task->title);
+    printf("Title: %s\n", task_display_title(task));
     printf("Description: %s\n", task->description);
     printf("Group: %s\n", task->group);
     printf("State: %s\n",
@@ -622,7 +664,7 @@ static int cmd_blocked(int argc, char **argv) {
             DISPATCH_STATE_BLOCKED) {
             continue;
         }
-        printf("%-8s %s  blocked_by:", task->id, task->title);
+        printf("%-8s %s  blocked_by:", task->id, task_display_title(task));
         for (size_t dep = 0; dep < task->depends_on.count; dep++) {
             DispatchTask *blocker =
                 dispatch_board_find_task(&board, task->depends_on.items[dep]);

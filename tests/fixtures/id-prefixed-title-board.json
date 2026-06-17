@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "workspace": {
+    "repo_path": "repo"
+  },
+  "board": {
+    "name": "Dispatch",
+    "groups": [
+      {
+        "id": "FX",
+        "name": "Fixtures",
+        "prefix": "FX"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "FX-01",
+        "title": "FX-01 First fixture task",
+        "description": "Legacy title with a duplicated ID prefix.",
+        "group": "FX",
+        "state": "proposed",
+        "depends_on": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "FX-02",
+        "title": "FX-02 Blocked fixture task",
+        "description": "Legacy blocked title with a duplicated ID prefix.",
+        "group": "FX",
+        "state": "ready",
+        "depends_on": ["FX-01"],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      }
+    ]
+  }
+}
