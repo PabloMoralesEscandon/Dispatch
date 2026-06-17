@@ -117,6 +117,11 @@ If multiple tasks are ready and the user did not name one, ask which task or
 sequence to prioritize. If the user asked you to continue all available work,
 choose a ready task that is not assigned and proceed in dependency order.
 
+Agents may create proposed tasks while planning. Only the user should approve
+proposed tasks by marking them ready, unless the user explicitly instructs an
+agent to ready a specific task or group. All readiness changes must include an
+actor so the approval is visible in task history.
+
 ## Task Execution Protocol
 
 For each task:
@@ -224,7 +229,8 @@ dispatch ready DE-01 --actor user
 ```
 
 The first task is ready after user approval. The implementation and test tasks
-wait behind dependencies.
+wait behind dependencies. If the user has not explicitly delegated readiness
+approval, leave newly planned tasks proposed.
 
 ## Executing A User-Named Task
 

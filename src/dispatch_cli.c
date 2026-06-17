@@ -177,8 +177,8 @@ static int cmd_group_add(int argc, char **argv) {
 }
 
 static int cmd_group_ready(int argc, char **argv) {
-    if (argc != 4 && argc != 6) {
-        fprintf(stderr, "Usage: dispatch group ready <group> [--actor name]\n");
+    if (argc != 6) {
+        fprintf(stderr, "Usage: dispatch group ready <group> --actor <name>\n");
         return 1;
     }
     if (reject_unknown_actor_options(argc, argv, 4))
@@ -228,7 +228,7 @@ static int cmd_group(int argc, char **argv) {
         return cmd_group_ready(argc, argv);
 
     fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
-    fprintf(stderr, "       dispatch group ready <group> [--actor name]\n");
+    fprintf(stderr, "       dispatch group ready <group> --actor <name>\n");
     return 1;
 }
 
@@ -701,8 +701,8 @@ static int cmd_blocked(int argc, char **argv) {
 static int cmd_ready(int argc, char **argv) {
     if (argc == 2)
         return cmd_ready_list();
-    if (argc != 3 && argc != 5) {
-        fprintf(stderr, "Usage: dispatch ready <id> [--actor name]\n");
+    if (argc != 5) {
+        fprintf(stderr, "Usage: dispatch ready <id> --actor <name>\n");
         return 1;
     }
     if (reject_unknown_actor_options(argc, argv, 3))

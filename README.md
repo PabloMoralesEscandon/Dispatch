@@ -124,7 +124,7 @@ path, normally `repo`, when using the recommended parent workflow layout.
 
 ```bash
 dispatch group add <name> [--prefix XX]
-dispatch group ready <group> [--actor <name>]
+dispatch group ready <group> --actor <name>
 ```
 
 Groups are workflow lanes or topics. Task IDs are generated from the group
@@ -133,7 +133,8 @@ prefix, for example `DE-01`.
 `group ready` marks every proposed task in the group as ready in one operation.
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
 Proposed tasks with unmet dependencies are approved but still display as blocked
-until their blockers are done.
+until their blockers are done. The actor should normally be the user; an agent
+should ready tasks only when the user explicitly asks it to do so.
 
 ### Tasks
 
@@ -170,7 +171,7 @@ is blocked when any dependency is not done. Dependency cycles are rejected.
 ### Lifecycle
 
 ```bash
-dispatch ready [<id> [--actor <name>]]
+dispatch ready [<id> --actor <name>]
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
 dispatch review <id> --actor <name>
@@ -188,8 +189,10 @@ Tasks without review gates go directly from `doing` to `done` when finished:
 proposed -> ready -> doing -> done
 ```
 
-Use `ready` with no ID to list work that can be started. Use `ready <id>` to
-approve a proposed task for work.
+Use `ready` with no ID to list work that can be started. Use
+`ready <id> --actor <name>` to approve a proposed task for work. The actor
+should normally be the user; an agent should mark tasks ready only when the user
+explicitly instructs it to do so.
 
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to
@@ -250,7 +253,9 @@ dispatch ready VD-01 --actor user
 ```
 
 This creates a sequence where implementation waits for planning, and final
-acceptance waits for implementation.
+acceptance waits for implementation. Agents create planned tasks as `proposed`;
+the user decides which proposed tasks become `ready` unless the user explicitly
+delegates that approval step.
 
 ## Storage
 
