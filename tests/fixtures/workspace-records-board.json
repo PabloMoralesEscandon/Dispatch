@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "workspace": {
+    "repo_path": "repo"
+  },
+  "board": {
+    "name": "Dispatch",
+    "groups": [
+      {
+        "id": "DE",
+        "name": "Development",
+        "prefix": "DE"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "DE-01",
+        "title": "Active workspace",
+        "description": "",
+        "group": "DE",
+        "state": "ready",
+        "depends_on": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "DE-02",
+        "title": "Creating workspace",
+        "description": "",
+        "group": "DE",
+        "state": "ready",
+        "depends_on": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      }
+    ],
+    "agents": [],
+    "workspaces": [
+      {
+        "id": "DE-01",
+        "task_id": "DE-01",
+        "actor": "codex",
+        "path": "/tmp/dispatch-wi10-missing-active",
+        "branch": "agent/codex/DE-01",
+        "repo_path": "repo",
+        "state": "active",
+        "sequence_tasks": [],
+        "review_gate": null,
+        "created_at": 1,
+        "updated_at": 2
+      },
+      {
+        "id": "DE-02",
+        "task_id": "DE-02",
+        "actor": "claude",
+        "path": "/tmp/dispatch-wi10-missing-creating",
+        "branch": "agent/claude/DE-02",
+        "repo_path": "repo",
+        "state": "creating",
+        "sequence_tasks": [],
+        "review_gate": null,
+        "created_at": 3,
+        "updated_at": 4
+      }
+    ]
+  }
+}

@@ -368,6 +368,20 @@ assert_contains "state: active"
 if [ ! -e repo-agent-codex_a-DE-01/.git ]; then
     fail "workspace worktree was not created"
 fi
+expect_ok "$BIN" workspace list
+assert_contains "DE-01"
+assert_contains "active"
+assert_contains "Codex_A"
+assert_contains "agent/codex_a/DE-01"
+
+expect_ok "$BIN" workspace show DE-01
+assert_contains "Task: DE-01"
+assert_contains "Task state: ready"
+assert_contains "Workspace state: active"
+assert_contains "Actor: Codex_A"
+assert_contains "Branch: agent/codex_a/DE-01"
+assert_contains "Git worktree: present"
+
 expect_ok "$BIN" show DE-01
 assert_contains "Workspace actor: Codex_A"
 assert_contains "Workspace path:"
@@ -413,6 +427,31 @@ expect_ok "$BIN" task add DE Third
 expect_ok "$BIN" ready DE-03 --actor user
 expect_fail "$BIN" workspace create DE-03 --actor other --dir custom-workspace
 assert_contains "Workspace path already reserved:"
+
+case_dir="$(make_case_dir workspace-inspect)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/workspace-records-board.json" dispatch.json
+
+expect_ok "$BIN" workspace list
+assert_contains "DE-01"
+assert_contains "active"
+assert_contains "codex"
+assert_contains "agent/codex/DE-01"
+assert_contains "DE-02"
+assert_contains "creating"
+
+expect_ok "$BIN" workspace show DE-01
+assert_contains "Task: DE-01"
+assert_contains "Workspace state: active"
+assert_contains "Git worktree: missing"
+
+expect_ok "$BIN" workspace show DE-02
+assert_contains "Task: DE-02"
+assert_contains "Workspace state: creating"
+assert_contains "Git worktree: missing"
+
+expect_fail "$BIN" workspace show Missing
+assert_contains "No workspace for Missing"
 
 case_dir="$(make_case_dir ready-no-review)"
 cd "$case_dir"

@@ -61,7 +61,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command, workspace create,");
+    puts("  init, agent create/list/show/command, workspace create/list/show,");
     puts("  group add/ready, task add, dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, show, blocked");
 }
@@ -1088,11 +1088,106 @@ static int cmd_workspace_create(int argc, char **argv) {
     return 0;
 }
 
+static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
+    if (!workspace || !workspace->path || workspace->path[0] == '\0')
+        return 0;
+
+    struct stat info;
+    if (stat(workspace->path, &info) != 0 || !S_ISDIR(info.st_mode))
+        return 0;
+
+    char *git_path = join_path2(workspace->path, ".git");
+    int present = stat(git_path, &info) == 0 &&
+                  (S_ISDIR(info.st_mode) || S_ISREG(info.st_mode));
+    free(git_path);
+    return present;
+}
+
+static int cmd_workspace_list(int argc, char **argv) {
+    (void)argv;
+    if (argc != 3) {
+        fprintf(stderr, "Usage: dispatch workspace list\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    if (board.workspaces.count == 0) {
+        printf("(no workspaces)\n");
+        dispatch_board_free(&board);
+        return 0;
+    }
+
+    for (size_t i = 0; i < board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        DispatchTask *task = dispatch_board_find_task(&board,
+                                                      workspace->task_id);
+        const char *task_state =
+            task ? dispatch_state_name(dispatch_task_effective_state(&board,
+                                                                     task))
+                 : "missing";
+        printf("%-8s %-10s %-10s %-16s %s  %s\n", workspace->task_id,
+               task_state, dispatch_workspace_state_name(workspace->state),
+               workspace->actor, workspace->branch, workspace->path);
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_workspace_show(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: dispatch workspace show <task-id-or-workspace>\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchWorkspace *workspace =
+        dispatch_board_find_workspace(&board, argv[3]);
+    if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No workspace for %s\n", argv[3]);
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, workspace->task_id);
+    const char *task_state =
+        task ? dispatch_state_name(dispatch_task_effective_state(&board, task))
+             : "missing";
+
+    printf("Task: %s\n", workspace->task_id);
+    printf("Task state: %s\n", task_state);
+    printf("Workspace state: %s\n",
+           dispatch_workspace_state_name(workspace->state));
+    printf("Actor: %s\n", workspace->actor);
+    printf("Branch: %s\n", workspace->branch);
+    printf("Path: %s\n", workspace->path);
+    printf("Repo: %s\n", workspace->repo_path);
+    printf("Git worktree: %s\n",
+           workspace_git_worktree_present(workspace) ? "present" : "missing");
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int cmd_workspace(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "create") == 0)
         return cmd_workspace_create(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "list") == 0)
+        return cmd_workspace_list(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "show") == 0)
+        return cmd_workspace_show(argc, argv);
 
     print_workspace_create_usage();
+    fprintf(stderr, "       dispatch workspace list\n");
+    fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
     return 1;
 }
 
