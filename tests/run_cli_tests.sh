@@ -359,11 +359,15 @@ assert_contains "No task with id Missing"
 expect_fail "$BIN" workspace create DE-01 --actor codex
 assert_contains "Configured repository is not a git repository: repo"
 
-mkdir repo/.git
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
 expect_ok "$BIN" workspace create DE-01 --actor Codex_A
 assert_contains "Created workspace DE-01 for Codex_A"
 assert_contains "branch: agent/codex_a/DE-01"
-assert_contains "state: creating"
+assert_contains "state: active"
+if [ ! -e repo-agent-codex_a-DE-01/.git ]; then
+    fail "workspace worktree was not created"
+fi
 
 expect_fail "$BIN" workspace create DE-01 --actor Codex_A
 assert_contains "Workspace already exists for DE-01"
@@ -379,9 +383,17 @@ assert_contains "Workspace branch already reserved: agent/codex_a/DE-01"
 expect_fail "$BIN" workspace create DE-02 --actor codex --dir repo
 assert_contains "Workspace path must not equal repository path"
 
+mkdir occupied-workspace
+expect_fail "$BIN" workspace create DE-02 --actor codex --dir occupied-workspace
+assert_contains "Workspace path already exists:"
+
 expect_ok "$BIN" workspace create DE-02 --actor codex --dir custom-workspace --branch agent/codex/DE-02
 assert_contains "Created workspace DE-02 for codex"
 assert_contains "branch: agent/codex/DE-02"
+assert_contains "state: active"
+if [ ! -e custom-workspace/.git ]; then
+    fail "custom workspace worktree was not created"
+fi
 
 expect_ok "$BIN" task add DE Third
 expect_ok "$BIN" ready DE-03 --actor user

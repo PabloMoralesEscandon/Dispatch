@@ -703,6 +703,34 @@ static int workspace_path_exists(const DispatchBoard *board, const char *path) {
     return 0;
 }
 
+static void workspace_free_fields(DispatchWorkspace *workspace) {
+    free(workspace->id);
+    free(workspace->task_id);
+    free(workspace->actor);
+    free(workspace->path);
+    free(workspace->branch);
+    free(workspace->repo_path);
+    for (size_t i = 0; i < workspace->sequence_tasks.count; i++)
+        free(workspace->sequence_tasks.items[i]);
+    free(workspace->sequence_tasks.items);
+    free(workspace->review_gate);
+}
+
+static int remove_workspace_record(DispatchBoard *board, const char *task_id) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (strcmp(workspace->task_id, task_id) != 0)
+            continue;
+
+        workspace_free_fields(workspace);
+        for (size_t j = i + 1; j < board->workspaces.count; j++)
+            board->workspaces.items[j - 1] = board->workspaces.items[j];
+        board->workspaces.count--;
+        return 1;
+    }
+    return 0;
+}
+
 static DispatchWorkspace *append_workspace_reservation(
     DispatchBoard *board, const char *task_id, const char *actor,
     const char *repo_path, const char *workspace_path, const char *branch) {
@@ -728,6 +756,137 @@ static DispatchWorkspace *append_workspace_reservation(
     workspace->created_at = time(NULL);
     workspace->updated_at = workspace->created_at;
     return workspace;
+}
+
+static char *shell_quote(const char *value) {
+    size_t size = 3;
+    for (size_t i = 0; value[i] != '\0'; i++)
+        size += value[i] == '\'' ? 4 : 1;
+
+    char *quoted = malloc(size);
+    if (!quoted) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    size_t out = 0;
+    quoted[out++] = '\'';
+    for (size_t i = 0; value[i] != '\0'; i++) {
+        if (value[i] == '\'') {
+            memcpy(quoted + out, "'\\''", 4);
+            out += 4;
+        } else {
+            quoted[out++] = value[i];
+        }
+    }
+    quoted[out++] = '\'';
+    quoted[out] = '\0';
+    return quoted;
+}
+
+static int run_shell_command_quiet(const char *command) {
+    int status = system(command);
+    return status == 0;
+}
+
+static int git_branch_exists(const char *repo_path, const char *branch) {
+    char *repo_q = shell_quote(repo_path);
+    char *branch_q = shell_quote(branch);
+    size_t size = strlen("git -C  rev-parse --verify --quiet refs/heads/ >/dev/null 2>&1") +
+                  strlen(repo_q) + strlen(branch_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size,
+             "git -C %s rev-parse --verify --quiet refs/heads/%s >/dev/null 2>&1",
+             repo_q, branch_q);
+    int exists = run_shell_command_quiet(command);
+    free(repo_q);
+    free(branch_q);
+    free(command);
+    return exists;
+}
+
+static int git_worktree_add(const char *repo_path, const char *workspace_path,
+                            const char *branch, int branch_exists) {
+    char *repo_q = shell_quote(repo_path);
+    char *workspace_q = shell_quote(workspace_path);
+    char *branch_q = shell_quote(branch);
+    const char *format_existing =
+        "git -C %s worktree add %s %s >/dev/null 2>&1";
+    const char *format_new =
+        "git -C %s worktree add -b %s %s HEAD >/dev/null 2>&1";
+    const char *format = branch_exists ? format_existing : format_new;
+    size_t size = strlen(format) + strlen(repo_q) + strlen(workspace_q) +
+                  strlen(branch_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    if (branch_exists) {
+        snprintf(command, size, format, repo_q, workspace_q, branch_q);
+    } else {
+        snprintf(command, size, format, repo_q, branch_q, workspace_q);
+    }
+    int ok = run_shell_command_quiet(command);
+    free(repo_q);
+    free(workspace_q);
+    free(branch_q);
+    free(command);
+    return ok;
+}
+
+static int git_worktree_remove_force(const char *repo_path,
+                                     const char *workspace_path) {
+    char *repo_q = shell_quote(repo_path);
+    char *workspace_q = shell_quote(workspace_path);
+    size_t size = strlen("git -C  worktree remove --force  >/dev/null 2>&1") +
+                  strlen(repo_q) + strlen(workspace_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size,
+             "git -C %s worktree remove --force %s >/dev/null 2>&1", repo_q,
+             workspace_q);
+    int ok = run_shell_command_quiet(command);
+    free(repo_q);
+    free(workspace_q);
+    free(command);
+    return ok;
+}
+
+static int mark_workspace_active(const char *task_id) {
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 0;
+
+    DispatchWorkspace *workspace =
+        dispatch_board_find_workspace(&locked.board, task_id);
+    if (!workspace) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace reservation disappeared for %s\n", task_id);
+        return 0;
+    }
+
+    workspace->state = DISPATCH_WORKSPACE_ACTIVE;
+    workspace->updated_at = time(NULL);
+    int ok = locked_board_save_or_error(&locked);
+    locked_board_close(&locked);
+    return ok;
+}
+
+static void remove_workspace_reservation_after_failure(const char *task_id) {
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return;
+    remove_workspace_record(&locked.board, task_id);
+    (void)locked_board_save_or_error(&locked);
+    locked_board_close(&locked);
 }
 
 static int cmd_workspace_create(int argc, char **argv) {
@@ -866,6 +1025,17 @@ static int cmd_workspace_create(int argc, char **argv) {
         free(workspace_path);
         return 1;
     }
+    struct stat workspace_info;
+    if (stat(workspace_path, &workspace_info) == 0) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace path already exists: %s\n",
+                workspace_path);
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
 
     append_workspace_reservation(board, task_id, actor, repo_path,
                                  workspace_path, branch);
@@ -878,12 +1048,39 @@ static int cmd_workspace_create(int argc, char **argv) {
         return 1;
     }
 
+    locked_board_close(&locked);
+
+    int branch_exists = git_branch_exists(repo_path, branch);
+    if (!git_worktree_add(repo_path, workspace_path, branch, branch_exists)) {
+        (void)git_worktree_remove_force(repo_path, workspace_path);
+        remove_workspace_reservation_after_failure(task_id);
+        fprintf(stderr, "Could not create git worktree for %s\n", task_id);
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
+
+    if (!mark_workspace_active(task_id)) {
+        if (!git_worktree_remove_force(repo_path, workspace_path)) {
+            fprintf(stderr,
+                    "Could not roll back git worktree %s; manual cleanup may be required\n",
+                    workspace_path);
+        }
+        remove_workspace_reservation_after_failure(task_id);
+        free(workflow_dir);
+        free(repo_path);
+        free(branch);
+        free(workspace_path);
+        return 1;
+    }
+
     printf("Created workspace %s for %s\n", task_id, actor);
     printf("  path: %s\n", workspace_path);
     printf("  branch: %s\n", branch);
-    printf("  state: creating\n");
+    printf("  state: active\n");
 
-    locked_board_close(&locked);
     free(workflow_dir);
     free(repo_path);
     free(branch);
