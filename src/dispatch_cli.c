@@ -23,7 +23,6 @@ static const DispatchCliCommand commands[] = {
     {"list", "List tasks as dependency trees"},
     {"tree", "List dependency trees, optionally for one group"},
     {"start", "Start and assign a ready task"},
-    {"pause", "Pause an in-progress task"},
     {"finish", "Finish a task"},
     {"review", "Accept a task in review"},
     {"normalize", "Repair IDs and derived state"},
@@ -50,7 +49,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, group add/ready, task add, dep add/remove, ready, start, pause,");
+    puts("  init, group add/ready, task add, dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, tree, show, blocked");
 }
 
@@ -753,31 +752,6 @@ static int cmd_start(int argc, char **argv) {
     return result;
 }
 
-static int cmd_pause(int argc, char **argv) {
-    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
-        fprintf(stderr, "Usage: dispatch pause <id> --actor <name>\n");
-        return 1;
-    }
-
-    const char *task_id = argv[2];
-    const char *actor = argv[4];
-
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
-        return 1;
-
-    DispatchTask *task = dispatch_board_find_task(&board, task_id);
-    if (!task || !dispatch_task_pause(task, actor)) {
-        dispatch_board_free(&board);
-        fprintf(stderr, "Could not pause %s\n", task_id);
-        return 1;
-    }
-
-    int result = save_task_transition(&board, "Paused", task_id);
-    dispatch_board_free(&board);
-    return result;
-}
-
 static int cmd_finish(int argc, char **argv) {
     if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
         fprintf(stderr, "Usage: dispatch finish <id> --actor <name>\n");
@@ -878,8 +852,6 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_ready(argc, argv);
     if (strcmp(command->name, "start") == 0)
         return cmd_start(argc, argv);
-    if (strcmp(command->name, "pause") == 0)
-        return cmd_pause(argc, argv);
     if (strcmp(command->name, "finish") == 0)
         return cmd_finish(argc, argv);
     if (strcmp(command->name, "review") == 0)

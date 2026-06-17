@@ -172,7 +172,6 @@ is blocked when any dependency is not done. Dependency cycles are rejected.
 ```bash
 dispatch ready [<id> [--actor <name>]]
 dispatch start <id> --actor <name>
-dispatch pause <id> --actor <name>
 dispatch finish <id> --actor <name>
 dispatch review <id> --actor <name>
 ```
@@ -193,9 +192,8 @@ Use `ready` with no ID to list work that can be started. Use `ready <id>` to
 approve a proposed task for work.
 
 `start` assigns the task to an actor and prevents a second actor from starting
-the same task. `pause` returns a doing task to ready. `finish` records the
-completing actor and moves the task to `review` or `done`. `review` accepts a
-review task as done.
+the same task. `finish` records the completing actor and moves the task to
+`review` or `done`. `review` accepts a review task as done.
 
 ## Agent Workflow
 
@@ -273,7 +271,7 @@ The test runner builds Dispatch, creates temporary boards under `/tmp`, and
 checks command behavior through the CLI.
 
 Current coverage includes initialization, groups, task creation, dependencies,
-blocked state, assignment lockout, pause/finish/review lifecycle, ungated
+blocked state, assignment lockout, finish/review lifecycle, ungated
 continuation, guarded delete, and rejection of removed TDL commands/options.
 
 ## Removed TDL Surface

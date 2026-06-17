@@ -161,12 +161,6 @@ assert_contains "ready"
 expect_ok "$BIN" start DE-02 --actor codex
 assert_contains "Started DE-02"
 
-expect_ok "$BIN" pause DE-02 --actor codex
-assert_contains "Paused DE-02"
-
-expect_ok "$BIN" start DE-02 --actor codex
-assert_contains "Started DE-02"
-
 expect_ok "$BIN" finish DE-02 --actor codex
 assert_contains "Finished DE-02 (review)"
 
@@ -264,6 +258,9 @@ assert_contains "Unknown Dispatch command: add"
 
 expect_fail "$BIN" clear
 assert_contains "Unknown Dispatch command: clear"
+
+expect_fail "$BIN" pause DE-01 --actor codex
+assert_contains "Unknown Dispatch command: pause"
 
 expect_fail "$BIN" list projects
 assert_contains "Usage: dispatch list"

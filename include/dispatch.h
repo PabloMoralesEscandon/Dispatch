@@ -110,7 +110,6 @@ int dispatch_task_mark_ready(DispatchBoard *board, DispatchTask *task,
                              const char *actor);
 int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
                         const char *actor);
-int dispatch_task_pause(DispatchTask *task, const char *actor);
 int dispatch_task_finish(DispatchTask *task, const char *actor);
 int dispatch_task_review(DispatchTask *task, const char *actor);
 

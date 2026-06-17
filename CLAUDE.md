@@ -44,7 +44,6 @@ dispatch list
 dispatch tree [group]
 dispatch show <TASK-ID>
 dispatch start <TASK-ID> --actor <agent-id>
-dispatch pause <TASK-ID> --actor <agent-id>
 dispatch finish <TASK-ID> --actor <agent-id>
 dispatch review <TASK-ID> --actor <user-or-reviewer-id>
 dispatch group add <name> --prefix <PREFIX>
@@ -251,14 +250,9 @@ going through available tasks, the agent may start `DE-03`.
 ## Failure Handling
 
 If a task cannot continue because of missing information, a broken assumption,
-an external dependency, or a failed check that needs user input, pause the task:
-
-```bash
-dispatch pause <TASK-ID> --actor <agent-id>
-```
-
-Then report the blocker clearly. Do not mark a task finished when the requested
-work is incomplete.
+an external dependency, or a failed check that needs user input, report the
+blocker clearly and leave the task assigned. Do not mark a task finished when
+the requested work is incomplete.
 
 If a task is finished but needs human acceptance, use `finish` and stop at the
 review gate. Do not perform human review on behalf of the user unless the user

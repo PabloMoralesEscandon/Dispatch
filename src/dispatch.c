@@ -446,18 +446,6 @@ int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
     return dispatch_task_append_history(task, actor, "started", "");
 }
 
-int dispatch_task_pause(DispatchTask *task, const char *actor) {
-    if (!task || !actor || actor[0] == '\0')
-        return 0;
-    if (task->state != DISPATCH_STATE_DOING)
-        return 0;
-
-    dispatch_task_clear_assignment(task);
-    task->state = DISPATCH_STATE_READY;
-    task->updated_at = time(NULL);
-    return dispatch_task_append_history(task, actor, "paused", "");
-}
-
 int dispatch_task_finish(DispatchTask *task, const char *actor) {
     if (!task || !actor || actor[0] == '\0')
         return 0;
