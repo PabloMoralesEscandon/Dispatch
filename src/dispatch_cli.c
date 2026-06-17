@@ -60,7 +60,8 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create, group add/ready, task add, dep add/remove, ready, start,");
+    puts("  init, agent create/list/show/command, group add/ready, task add,");
+    puts("  dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, show, blocked");
 }
 
@@ -508,12 +509,107 @@ static int cmd_agent_create(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_agent_list(int argc, char **argv) {
+    (void)argv;
+    if (argc != 3) {
+        fprintf(stderr, "Usage: dispatch agent list\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    if (board.agents.count == 0) {
+        printf("(no agents)\n");
+        dispatch_board_free(&board);
+        return 0;
+    }
+
+    for (size_t i = 0; i < board.agents.count; i++) {
+        DispatchAgent *agent = &board.agents.items[i];
+        printf("%-16s %-8s %s\n", agent->name, agent->runner,
+               agent->agent_dir);
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_agent_show(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: dispatch agent show <name>\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, argv[3]);
+    if (!agent) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No agent named %s\n", argv[3]);
+        return 1;
+    }
+
+    printf("Name: %s\n", agent->name);
+    printf("Runner: %s\n", agent->runner);
+    printf("Model: %s\n", agent->model ? agent->model : "-");
+    printf("Agent dir: %s\n", agent->agent_dir);
+    printf("Prompt: %s\n", agent->prompt_path);
+    printf("Run script: %s\n",
+           agent->run_script_path ? agent->run_script_path : "-");
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_agent_command(int argc, char **argv) {
+    if (argc != 4 && argc != 5) {
+        fprintf(stderr, "Usage: dispatch agent command <name> [--print-command]\n");
+        return 1;
+    }
+    if (argc == 5 && strcmp(argv[4], "--print-command") != 0) {
+        fprintf(stderr, "Unknown agent command option: %s\n", argv[4]);
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, argv[3]);
+    if (!agent) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No agent named %s\n", argv[3]);
+        return 1;
+    }
+
+    char *command =
+        agent_command_for(agent->runner, agent->model, agent->prompt_path);
+    printf("%s\n", command);
+    free(command);
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int cmd_agent(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "create") == 0)
         return cmd_agent_create(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "list") == 0)
+        return cmd_agent_list(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "show") == 0)
+        return cmd_agent_show(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "command") == 0)
+        return cmd_agent_command(argc, argv);
 
     fprintf(stderr,
             "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
+    fprintf(stderr, "       dispatch agent list\n");
+    fprintf(stderr, "       dispatch agent show <name>\n");
+    fprintf(stderr, "       dispatch agent command <name> [--print-command]\n");
     return 1;
 }
 

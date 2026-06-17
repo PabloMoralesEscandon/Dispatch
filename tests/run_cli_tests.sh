@@ -94,6 +94,9 @@ expect_fail "$BIN" normalize
 assert_contains "Dispatch board is locked by another process; retry shortly."
 rm -f dispatch.json.lock
 
+expect_ok "$BIN" agent list
+assert_contains "(no agents)"
+
 expect_fail "$BIN" agent create --runner codex
 assert_contains "Agent name must contain only letters, digits, '-' or '_'"
 
@@ -108,6 +111,31 @@ assert_contains "Created agent codex-a (codex)"
 assert_contains "prompt: .dispatch/agents/codex-a/AGENT.md"
 assert_contains "run script: .dispatch/agents/codex-a/run.sh"
 assert_contains "command: codex --model gpt-test --prompt-file \".dispatch/agents/codex-a/AGENT.md\""
+
+expect_ok "$BIN" agent list
+assert_contains "codex-a"
+assert_contains "codex"
+assert_contains ".dispatch/agents/codex-a"
+
+expect_ok "$BIN" agent show codex-a
+assert_contains "Name: codex-a"
+assert_contains "Runner: codex"
+assert_contains "Model: gpt-test"
+assert_contains "Agent dir: .dispatch/agents/codex-a"
+assert_contains "Prompt: .dispatch/agents/codex-a/AGENT.md"
+assert_contains "Run script: .dispatch/agents/codex-a/run.sh"
+
+expect_ok "$BIN" agent command codex-a
+assert_contains "codex --model gpt-test --prompt-file \".dispatch/agents/codex-a/AGENT.md\""
+
+expect_fail "$BIN" agent show missing-agent
+assert_contains "No agent named missing-agent"
+
+expect_fail "$BIN" agent command missing-agent
+assert_contains "No agent named missing-agent"
+
+expect_fail "$BIN" agent command codex-a --bad
+assert_contains "Unknown agent command option: --bad"
 
 if [ ! -f .dispatch/agents/codex-a/AGENT.md ]; then
     fail "agent prompt was not created"
@@ -128,6 +156,10 @@ assert_contains "Agent codex-a already exists"
 expect_ok "$BIN" agent create --name claude-a --runner claude --no-run-script --print-command
 assert_contains "Created agent claude-a (claude)"
 assert_contains "command: claude --prompt-file \".dispatch/agents/claude-a/AGENT.md\""
+expect_ok "$BIN" agent command claude-a --print-command
+assert_contains "claude --prompt-file \".dispatch/agents/claude-a/AGENT.md\""
+expect_ok "$BIN" agent show claude-a
+assert_contains "Run script: -"
 if [ -e .dispatch/agents/claude-a/run.sh ]; then
     fail "agent run script was created despite --no-run-script"
 fi
