@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "dispatch.h"
 #include "dispatch_store.h"
@@ -386,17 +387,61 @@ static int save_task_transition(DispatchBoard *board, const char *verb,
     return 0;
 }
 
+static int env_truthy(const char *name) {
+    const char *value = getenv(name);
+    return value && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+static int cli_color_enabled(void) {
+    const char *no_color = getenv("NO_COLOR");
+    if (no_color && no_color[0] != '\0')
+        return 0;
+    if (env_truthy("FORCE_COLOR") || env_truthy("CLICOLOR_FORCE"))
+        return 1;
+    const char *clicolor = getenv("CLICOLOR");
+    if (clicolor && strcmp(clicolor, "0") == 0)
+        return 0;
+    return isatty(fileno(stdout));
+}
+
+static const char *color_for_state(DispatchState state) {
+    switch (state) {
+    case DISPATCH_STATE_PROPOSED:
+        return "\033[2;37m";
+    case DISPATCH_STATE_READY:
+        return "\033[1;32m";
+    case DISPATCH_STATE_BLOCKED:
+        return "\033[1;33m";
+    case DISPATCH_STATE_DOING:
+        return "\033[1;34m";
+    case DISPATCH_STATE_REVIEW:
+        return "\033[1;35m";
+    case DISPATCH_STATE_DONE:
+        return "\033[1;30m";
+    case DISPATCH_STATE_PAUSED:
+        return "\033[1;36m";
+    }
+    return "";
+}
+
 static void print_task_line(const DispatchBoard *board, const DispatchTask *task,
                             const char *indent) {
     DispatchState state = dispatch_task_effective_state(board, task);
-    printf("%s%-8s %-10s %s", indent, task->id, dispatch_state_name(state),
-           task->title);
+    int color = cli_color_enabled();
+    const char *reset = color ? "\033[0m" : "";
+    const char *id_color = color ? "\033[1;37m" : "";
+    const char *state_color = color ? color_for_state(state) : "";
+    const char *meta_color = color ? "\033[2;37m" : "";
+
+    printf("%s%s%-8s%s %s%-10s%s %s", indent, id_color, task->id, reset,
+           state_color, dispatch_state_name(state), reset, task->title);
     if (task->assigned_to)
-        printf("  assigned:%s", task->assigned_to);
+        printf("  %sassigned:%s%s", meta_color, task->assigned_to, reset);
     if (task->depends_on.count > 0) {
-        printf("  depends_on:");
+        printf("  %sdepends_on:", meta_color);
         for (size_t i = 0; i < task->depends_on.count; i++)
             printf("%s%s", i == 0 ? "" : ",", task->depends_on.items[i]);
+        printf("%s", reset);
     }
     printf("\n");
 }
@@ -426,7 +471,11 @@ static int ready_task_count(const DispatchBoard *board) {
 
 static void print_list_for_group(const DispatchBoard *board,
                                  const DispatchGroup *group) {
-    printf("[%s] %s\n", group->prefix, group->name);
+    int color = cli_color_enabled();
+    const char *group_color = color ? "\033[1;36m" : "";
+    const char *reset = color ? "\033[0m" : "";
+
+    printf("%s[%s] %s%s\n", group_color, group->prefix, group->name, reset);
 
     int any = 0;
     for (size_t i = 0; i < board->tasks.count; i++) {

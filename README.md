@@ -156,6 +156,10 @@ delete also removes that task from other tasks' dependency lists.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name.
 
+When stdout is a terminal, `list` uses ANSI color to distinguish group headings,
+task IDs, states, and metadata. Set `FORCE_COLOR=1` to force color in captured
+output, or `NO_COLOR=1` to disable it.
+
 ### Dependencies
 
 ```bash

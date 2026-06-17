@@ -6,6 +6,7 @@ BIN="$ROOT/dispatch"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-cli-tests.XXXXXX")"
 RUN_OUTPUT=""
 RUN_STATUS=0
+ESC=$'\033'
 
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -309,5 +310,13 @@ assert_contains "  DE-01    proposed   Root"
 assert_contains "  DE-02    blocked    BranchA  depends_on:DE-01"
 assert_contains "  DE-03    blocked    BranchB  depends_on:DE-01"
 assert_contains "  DE-04    blocked    Join  depends_on:DE-02,DE-03"
+
+expect_ok env -u NO_COLOR FORCE_COLOR=1 "$BIN" list DE
+assert_contains "${ESC}[1;36m[DE] Development${ESC}[0m"
+assert_contains "${ESC}[1;33mblocked   ${ESC}[0m Join"
+assert_contains "${ESC}[2;37mdepends_on:DE-02,DE-03${ESC}[0m"
+
+expect_ok env FORCE_COLOR=1 NO_COLOR=1 "$BIN" list DE
+assert_not_contains "${ESC}["
 
 printf 'PASS: Dispatch CLI tests\n'
