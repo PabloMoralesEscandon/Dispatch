@@ -99,7 +99,7 @@ assert_contains "State: proposed"
 assert_contains "Blocks: -"
 
 expect_ok "$BIN" dep add DE-01 DE-02
-assert_contains "Added dependency DE-01 -> DE-02"
+assert_contains "Added dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
 
 expect_ok "$BIN" tree
 assert_contains "[DE] Development"
@@ -110,7 +110,11 @@ expect_ok "$BIN" list
 assert_contains "    DE-02 [blocked] Second"
 
 expect_fail "$BIN" dep add DE-02 DE-01
-assert_contains "Could not add dependency DE-02 -> DE-01"
+assert_contains "Could not add dependency DE-02 -> DE-01 (DE-01 depends on DE-02)"
+
+expect_fail "$BIN" dep add DE-01
+assert_contains "Usage: dispatch dep add <dependency-id> <dependent-id>"
+assert_contains "Example: dispatch dep add DE-01 DE-02 means DE-02 depends on DE-01"
 
 expect_ok "$BIN" show DE-01
 assert_contains "Blocks: DE-02"

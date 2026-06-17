@@ -74,7 +74,7 @@ Add a group, add two tasks, and make the second task depend on the first:
 dispatch group add Development --prefix DE
 dispatch task add DE "Design storage model"
 dispatch task add DE "Implement storage model"
-dispatch dep add DE-01 DE-02
+dispatch dep add DE-01 DE-02  # DE-02 depends on DE-01
 dispatch ready DE-01 --actor user
 dispatch ready
 dispatch tree
@@ -158,13 +158,14 @@ same view and can be limited to one group by ID, prefix, or name.
 ### Dependencies
 
 ```bash
-dispatch dep add <from-id> <to-id>
-dispatch dep remove <from-id> <to-id>
+dispatch dep add <dependency-id> <dependent-id>
+dispatch dep remove <dependency-id> <dependent-id>
 dispatch blocked
 ```
 
-`dep add DE-01 DE-02` means `DE-02` depends on `DE-01`. A task is blocked when
-any dependency is not done. Dependency cycles are rejected.
+`dep add DE-01 DE-02` means `DE-02` depends on `DE-01`; the first argument is
+the prerequisite, and the second argument is the task that waits for it. A task
+is blocked when any dependency is not done. Dependency cycles are rejected.
 
 ### Lifecycle
 
@@ -240,8 +241,8 @@ dispatch group add Validation --prefix VD
 dispatch task add VD "Define CLI test scenarios"
 dispatch task add VD "Implement CLI test runner"
 dispatch task add VD "Run final acceptance pass"
-dispatch dep add VD-01 VD-02
-dispatch dep add VD-02 VD-03
+dispatch dep add VD-01 VD-02  # VD-02 depends on VD-01
+dispatch dep add VD-02 VD-03  # VD-03 depends on VD-02
 dispatch ready VD-01 --actor user
 ```
 

@@ -320,8 +320,13 @@ static int cmd_task(int argc, char **argv) {
 static int cmd_dep(int argc, char **argv) {
     if (argc != 5 ||
         (strcmp(argv[2], "add") != 0 && strcmp(argv[2], "remove") != 0)) {
-        fprintf(stderr, "Usage: dispatch dep add <from-id> <to-id>\n");
-        fprintf(stderr, "       dispatch dep remove <from-id> <to-id>\n");
+        fprintf(stderr,
+                "Usage: dispatch dep add <dependency-id> <dependent-id>\n");
+        fprintf(stderr,
+                "       dispatch dep remove <dependency-id> <dependent-id>\n");
+        fprintf(stderr,
+                "Example: dispatch dep add DE-01 DE-02 means DE-02 depends "
+                "on DE-01\n");
         return 1;
     }
 
@@ -341,8 +346,8 @@ static int cmd_dep(int argc, char **argv) {
 
     if (!ok) {
         dispatch_board_free(&board);
-        fprintf(stderr, "Could not %s dependency %s -> %s\n", argv[2],
-                from_id, to_id);
+        fprintf(stderr, "Could not %s dependency %s -> %s (%s depends on %s)\n",
+                argv[2], from_id, to_id, to_id, from_id);
         return 1;
     }
 
@@ -351,9 +356,9 @@ static int cmd_dep(int argc, char **argv) {
         return 1;
     }
 
-    printf("%s dependency %s -> %s\n",
+    printf("%s dependency %s -> %s (%s depends on %s)\n",
            strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
-           to_id);
+           to_id, to_id, from_id);
     dispatch_board_free(&board);
     return 0;
 }
