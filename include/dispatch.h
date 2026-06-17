@@ -181,4 +181,16 @@ void dispatch_board_normalize_states(DispatchBoard *board);
 
 char *dispatch_next_task_id(const DispatchBoard *board, const char *group_id);
 
+int dispatch_actor_label_is_valid(const char *actor);
+char *dispatch_actor_slug(const char *actor);
+char *dispatch_default_workspace_branch(const char *actor,
+                                        const char *task_id);
+char *dispatch_default_workspace_path(const char *repo_path,
+                                      const char *actor,
+                                      const char *task_id);
+char *dispatch_resolve_path(const char *workflow_dir, const char *path);
+int dispatch_path_is_git_repository(const char *path);
+int dispatch_workspace_path_conflicts(const char *repo_path,
+                                      const char *workspace_path);
+
 #endif

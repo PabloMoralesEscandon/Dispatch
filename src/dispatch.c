@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static char *dispatch_strdup(const char *value) {
     return strdup(value ? value : "");
@@ -54,6 +56,11 @@ static int string_list_remove(DispatchStringList *list, const char *value) {
         return 1;
     }
     return 0;
+}
+
+static int ascii_is_alnum(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9');
 }
 
 static void string_list_free(DispatchStringList *list) {
@@ -324,6 +331,206 @@ char *dispatch_next_task_id(const DispatchBoard *board, const char *group_id) {
     }
     snprintf(id, size, "%s-%02d", prefix, next);
     return id;
+}
+
+int dispatch_actor_label_is_valid(const char *actor) {
+    if (!actor || actor[0] == '\0')
+        return 0;
+
+    size_t length = strlen(actor);
+    if (length > 48)
+        return 0;
+
+    unsigned char first = (unsigned char)actor[0];
+    if (!ascii_is_alnum(first))
+        return 0;
+
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)actor[i];
+        if (!(ascii_is_alnum(c) || c == '.' || c == '_' || c == '-'))
+            return 0;
+    }
+    return 1;
+}
+
+char *dispatch_actor_slug(const char *actor) {
+    if (!dispatch_actor_label_is_valid(actor))
+        return NULL;
+
+    char *slug = dispatch_strdup(actor);
+    for (size_t i = 0; slug[i] != '\0'; i++)
+        slug[i] = (char)tolower((unsigned char)slug[i]);
+    return slug;
+}
+
+char *dispatch_default_workspace_branch(const char *actor,
+                                        const char *task_id) {
+    if (!task_id || task_id[0] == '\0')
+        return NULL;
+
+    char *slug = dispatch_actor_slug(actor);
+    if (!slug)
+        return NULL;
+
+    const char *prefix = "agent/";
+    size_t size = strlen(prefix) + strlen(slug) + 1 + strlen(task_id) + 1;
+    char *branch = malloc(size);
+    if (!branch) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(branch, size, "%s%s/%s", prefix, slug, task_id);
+    free(slug);
+    return branch;
+}
+
+static char *path_without_trailing_slashes(const char *path) {
+    if (!path || path[0] == '\0')
+        return dispatch_strdup(".");
+
+    size_t length = strlen(path);
+    while (length > 1 && path[length - 1] == '/')
+        length--;
+
+    char *copy = malloc(length + 1);
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(copy, path, length);
+    copy[length] = '\0';
+    return copy;
+}
+
+static const char *path_basename_const(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (!slash)
+        return path;
+    return slash[1] ? slash + 1 : path;
+}
+
+static char *path_parent(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (!slash)
+        return dispatch_strdup(".");
+    if (slash == path)
+        return dispatch_strdup("/");
+
+    size_t length = (size_t)(slash - path);
+    char *parent = malloc(length + 1);
+    if (!parent) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(parent, path, length);
+    parent[length] = '\0';
+    return parent;
+}
+
+char *dispatch_default_workspace_path(const char *repo_path,
+                                      const char *actor,
+                                      const char *task_id) {
+    if (!repo_path || repo_path[0] == '\0' || !task_id || task_id[0] == '\0')
+        return NULL;
+
+    char *slug = dispatch_actor_slug(actor);
+    if (!slug)
+        return NULL;
+
+    char *repo = path_without_trailing_slashes(repo_path);
+    char *parent = path_parent(repo);
+    const char *repo_name = path_basename_const(repo);
+
+    size_t leaf_size = strlen(repo_name) + strlen("-agent-") + strlen(slug) +
+                       1 + strlen(task_id) + 1;
+    char *leaf = malloc(leaf_size);
+    if (!leaf) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(leaf, leaf_size, "%s-agent-%s-%s", repo_name, slug, task_id);
+
+    size_t parent_len = strlen(parent);
+    int needs_slash = parent_len > 0 && parent[parent_len - 1] != '/';
+    size_t size = parent_len + (size_t)needs_slash + strlen(leaf) + 1;
+    char *path = malloc(size);
+    if (!path) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(path, size, "%s%s%s", parent, needs_slash ? "/" : "", leaf);
+
+    free(slug);
+    free(repo);
+    free(parent);
+    free(leaf);
+    return path;
+}
+
+char *dispatch_resolve_path(const char *workflow_dir, const char *path) {
+    if (!path || path[0] == '\0')
+        return NULL;
+    if (path[0] == '/')
+        return realpath(path, NULL);
+
+    const char *base = workflow_dir && workflow_dir[0] ? workflow_dir : ".";
+    char *base_real = realpath(base, NULL);
+    if (!base_real)
+        return NULL;
+
+    size_t base_len = strlen(base_real);
+    int needs_slash = base_len > 0 && base_real[base_len - 1] != '/';
+    size_t joined_size = base_len + (size_t)needs_slash + strlen(path) + 1;
+    char *joined = malloc(joined_size);
+    if (!joined) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(joined, joined_size, "%s%s%s", base_real,
+             needs_slash ? "/" : "", path);
+    free(base_real);
+
+    char *resolved = realpath(joined, NULL);
+    free(joined);
+    return resolved;
+}
+
+int dispatch_path_is_git_repository(const char *path) {
+    if (!path || path[0] == '\0')
+        return 0;
+
+    char *repo = path_without_trailing_slashes(path);
+    size_t size = strlen(repo) + strlen("/.git") + 1;
+    char *git_path = malloc(size);
+    if (!git_path) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(git_path, size, "%s/.git", repo);
+
+    struct stat info;
+    int result = stat(git_path, &info) == 0 &&
+                 (S_ISDIR(info.st_mode) || S_ISREG(info.st_mode));
+
+    free(repo);
+    free(git_path);
+    return result;
+}
+
+int dispatch_workspace_path_conflicts(const char *repo_path,
+                                      const char *workspace_path) {
+    char *repo = dispatch_resolve_path(".", repo_path);
+    char *workspace = dispatch_resolve_path(".", workspace_path);
+    if (!repo || !workspace) {
+        free(repo);
+        free(workspace);
+        return 0;
+    }
+
+    int conflicts = strcmp(repo, workspace) == 0;
+    free(repo);
+    free(workspace);
+    return conflicts;
 }
 
 DispatchTask *dispatch_board_add_task(DispatchBoard *board,

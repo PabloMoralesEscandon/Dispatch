@@ -73,6 +73,10 @@ cc -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c \
 "$TMP_ROOT/store_records_test" "$TMP_ROOT/empty-records.json" \
     "$TMP_ROOT/populated-records.json" >/dev/null
 
+cc -Iinclude tests/workspace_naming_test.c src/dispatch.c \
+    -o "$TMP_ROOT/workspace_naming_test"
+"$TMP_ROOT/workspace_naming_test" "$TMP_ROOT/workspace-naming" >/dev/null
+
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
 mkdir repo
