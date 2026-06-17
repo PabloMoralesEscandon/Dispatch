@@ -428,6 +428,51 @@ expect_ok "$BIN" ready DE-03 --actor user
 expect_fail "$BIN" workspace create DE-03 --actor other --dir custom-workspace
 assert_contains "Workspace path already reserved:"
 
+expect_fail "$BIN" workspace remove DE-01
+assert_contains "Workspace task DE-01 is doing"
+
+expect_ok "$BIN" workspace remove DE-02
+assert_contains "Removed workspace DE-02"
+if [ -e custom-workspace ]; then
+    fail "custom workspace worktree was not removed"
+fi
+expect_fail "$BIN" workspace show DE-02
+assert_contains "No workspace for DE-02"
+
+case_dir="$(make_case_dir workspace-remove)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Dirty
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" workspace create DE-01 --actor codex
+printf 'dirty\n' >repo-agent-codex-DE-01/dirty.txt
+
+expect_fail "$BIN" workspace remove DE-01
+assert_contains "Workspace has uncommitted changes"
+
+expect_ok "$BIN" workspace remove DE-01 --force
+assert_contains "Removed workspace DE-01"
+if [ -e repo-agent-codex-DE-01 ]; then
+    fail "dirty workspace worktree was not force removed"
+fi
+
+expect_ok "$BIN" task add DE Active
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" workspace create DE-02 --actor codex
+expect_ok "$BIN" start DE-02 --actor codex
+expect_fail "$BIN" workspace remove DE-02
+assert_contains "Workspace task DE-02 is doing"
+expect_ok "$BIN" workspace remove DE-02 --force
+assert_contains "Removed workspace DE-02"
+if [ -e repo-agent-codex-DE-02 ]; then
+    fail "active workspace worktree was not force removed"
+fi
+
 case_dir="$(make_case_dir workspace-inspect)"
 cd "$case_dir"
 cp "$ROOT/tests/fixtures/workspace-records-board.json" dispatch.json
@@ -452,6 +497,9 @@ assert_contains "Git worktree: missing"
 
 expect_fail "$BIN" workspace show Missing
 assert_contains "No workspace for Missing"
+
+expect_fail "$BIN" workspace remove DE-01 --force
+assert_contains "Workspace path is not a git worktree"
 
 case_dir="$(make_case_dir workspace-sequence)"
 cd "$case_dir"

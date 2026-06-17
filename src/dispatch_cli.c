@@ -61,7 +61,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command, workspace create/list/show,");
+    puts("  init, agent create/list/show/command, workspace create/list/show/remove,");
     puts("  group add/ready, task add, dep add/remove, ready, start,");
     puts("  finish, review, normalize, list, show, blocked");
 }
@@ -619,6 +619,11 @@ static void print_workspace_create_usage(void) {
             "Usage: dispatch workspace create <task-id> --actor <name> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]\n");
 }
 
+static void print_workspace_remove_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch workspace remove <task-id-or-workspace> [--force]\n");
+}
+
 static char *current_workflow_path(void) {
     char *path = getcwd(NULL, 0);
     if (!path) {
@@ -978,6 +983,77 @@ static int git_worktree_remove_force(const char *repo_path,
     free(workspace_q);
     free(command);
     return ok;
+}
+
+static int git_worktree_remove(const char *repo_path,
+                               const char *workspace_path) {
+    char *repo_q = shell_quote(repo_path);
+    char *workspace_q = shell_quote(workspace_path);
+    size_t size = strlen("git -C  worktree remove  >/dev/null 2>&1") +
+                  strlen(repo_q) + strlen(workspace_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "git -C %s worktree remove %s >/dev/null 2>&1",
+             repo_q, workspace_q);
+    int ok = run_shell_command_quiet(command);
+    free(repo_q);
+    free(workspace_q);
+    free(command);
+    return ok;
+}
+
+static int git_worktree_is_registered(const char *repo_path,
+                                      const char *workspace_path) {
+    char *repo_q = shell_quote(repo_path);
+    size_t line_size = strlen("worktree ") + strlen(workspace_path) + 1;
+    char *line = malloc(line_size);
+    if (!line) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(line, line_size, "worktree %s", workspace_path);
+    char *line_q = shell_quote(line);
+    const char *format =
+        "git -C %s worktree list --porcelain | grep -Fx %s >/dev/null 2>&1";
+    size_t size = strlen(format) + strlen(repo_q) + strlen(line_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, format, repo_q, line_q);
+    int registered = run_shell_command_quiet(command);
+    free(repo_q);
+    free(line);
+    free(line_q);
+    free(command);
+    return registered;
+}
+
+static int git_worktree_is_dirty(const char *workspace_path) {
+    char *workspace_q = shell_quote(workspace_path);
+    size_t size = strlen("git -C  status --porcelain 2>/dev/null") +
+                  strlen(workspace_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "git -C %s status --porcelain 2>/dev/null",
+             workspace_q);
+
+    FILE *pipe = popen(command, "r");
+    free(workspace_q);
+    free(command);
+    if (!pipe)
+        return 1;
+
+    int ch = fgetc(pipe);
+    int status = pclose(pipe);
+    return ch != EOF || status != 0;
 }
 
 static int mark_workspace_active(const char *task_id) {
@@ -1373,6 +1449,114 @@ static int cmd_workspace_show(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_workspace_remove(int argc, char **argv) {
+    if (argc < 4 || argc > 5) {
+        print_workspace_remove_usage();
+        return 1;
+    }
+
+    const char *target = argv[3];
+    int force = 0;
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--force") == 0) {
+            force = 1;
+        } else {
+            print_workspace_remove_usage();
+            return 1;
+        }
+    }
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+
+    DispatchWorkspace *workspace = live_workspace_for_task(&locked.board,
+                                                           target);
+    if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No workspace for %s\n", target);
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&locked.board,
+                                                  workspace->task_id);
+    DispatchState task_state = task ? dispatch_task_effective_state(&locked.board,
+                                                                    task)
+                                    : DISPATCH_STATE_PROPOSED;
+    if (!force && task_state == DISPATCH_STATE_DOING) {
+        fprintf(stderr,
+                "Workspace task %s is doing; use --force to remove\n",
+                workspace->task_id);
+        locked_board_close(&locked);
+        return 1;
+    }
+
+    char *record_task_id = cli_strdup(workspace->task_id);
+    char *repo_path = cli_strdup(workspace->repo_path);
+    char *workspace_path = cli_strdup(workspace->path);
+    locked_board_close(&locked);
+
+    if (!git_worktree_is_registered(repo_path, workspace_path)) {
+        fprintf(stderr, "Workspace path is not a git worktree: %s\n",
+                workspace_path);
+        free(record_task_id);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+
+    if (!force && git_worktree_is_dirty(workspace_path)) {
+        fprintf(stderr, "Workspace has uncommitted changes: %s\n",
+                workspace_path);
+        free(record_task_id);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+
+    int removed = force ? git_worktree_remove_force(repo_path, workspace_path)
+                        : git_worktree_remove(repo_path, workspace_path);
+    if (!removed) {
+        fprintf(stderr, "Could not remove git worktree: %s\n",
+                workspace_path);
+        free(record_task_id);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+
+    if (!locked_board_load_or_error(&locked)) {
+        free(record_task_id);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+    if (!remove_workspace_record(&locked.board, record_task_id)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace record disappeared for %s\n",
+                record_task_id);
+        free(record_task_id);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        free(record_task_id);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+    locked_board_close(&locked);
+
+    printf("Removed workspace %s\n", record_task_id);
+    printf("  path: %s\n", workspace_path);
+    free(record_task_id);
+    free(repo_path);
+    free(workspace_path);
+    return 0;
+}
+
 static int cmd_workspace(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "create") == 0)
         return cmd_workspace_create(argc, argv);
@@ -1380,10 +1564,14 @@ static int cmd_workspace(int argc, char **argv) {
         return cmd_workspace_list(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "show") == 0)
         return cmd_workspace_show(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "remove") == 0)
+        return cmd_workspace_remove(argc, argv);
 
     print_workspace_create_usage();
     fprintf(stderr, "       dispatch workspace list\n");
     fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
+    fprintf(stderr,
+            "       dispatch workspace remove <task-id-or-workspace> [--force]\n");
     return 1;
 }
 
