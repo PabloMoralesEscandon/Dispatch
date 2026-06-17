@@ -1,13 +1,22 @@
 #include "dispatch_store.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <jansson.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void set_error(char *error, size_t error_size, const char *message) {
     if (error && error_size > 0)
         snprintf(error, error_size, "%s", message);
+}
+
+static void set_error_errno(char *error, size_t error_size,
+                            const char *message) {
+    if (error && error_size > 0)
+        snprintf(error, error_size, "%s: %s", message, strerror(errno));
 }
 
 static char *store_strdup(const char *value) {
@@ -29,6 +38,82 @@ static int file_exists(const char *path) {
         return 0;
     fclose(file);
     return 1;
+}
+
+static char *lock_path_for_store(const char *path) {
+    size_t path_len = strlen(path);
+    const char *suffix = ".lock";
+    size_t suffix_len = strlen(suffix);
+    char *lock_path = malloc(path_len + suffix_len + 1);
+    if (!lock_path) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(lock_path, path, path_len);
+    memcpy(lock_path + path_len, suffix, suffix_len + 1);
+    return lock_path;
+}
+
+int dispatch_store_lock_acquire(DispatchStoreLock *lock, const char *path,
+                                int timeout_ms, char *error,
+                                size_t error_size) {
+    if (!lock || !path || path[0] == '\0') {
+        set_error(error, error_size, "invalid lock path");
+        return 0;
+    }
+
+    memset(lock, 0, sizeof(*lock));
+    lock->fd = -1;
+    lock->path = lock_path_for_store(path);
+
+    const int sleep_ms = 10;
+    int waited_ms = 0;
+    for (;;) {
+        int fd = open(lock->path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+        if (fd >= 0) {
+            char buffer[64];
+            int length = snprintf(buffer, sizeof(buffer), "%ld\n",
+                                  (long)getpid());
+            if (length > 0)
+                (void)write(fd, buffer, (size_t)length);
+            lock->fd = fd;
+            lock->acquired = 1;
+            return 1;
+        }
+
+        if (errno != EEXIST) {
+            set_error_errno(error, error_size, "could not acquire board lock");
+            free(lock->path);
+            memset(lock, 0, sizeof(*lock));
+            lock->fd = -1;
+            return 0;
+        }
+
+        if (waited_ms >= timeout_ms) {
+            set_error(error, error_size,
+                      "Dispatch board is locked by another process; retry shortly.");
+            free(lock->path);
+            memset(lock, 0, sizeof(*lock));
+            lock->fd = -1;
+            return 0;
+        }
+
+        usleep((useconds_t)sleep_ms * 1000);
+        waited_ms += sleep_ms;
+    }
+}
+
+void dispatch_store_lock_release(DispatchStoreLock *lock) {
+    if (!lock || !lock->acquired)
+        return;
+
+    if (lock->fd >= 0)
+        close(lock->fd);
+    if (lock->path)
+        unlink(lock->path);
+    free(lock->path);
+    memset(lock, 0, sizeof(*lock));
+    lock->fd = -1;
 }
 
 static time_t json_time_or_zero(json_t *object, const char *key) {
