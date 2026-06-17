@@ -368,9 +368,23 @@ assert_contains "state: active"
 if [ ! -e repo-agent-codex_a-DE-01/.git ]; then
     fail "workspace worktree was not created"
 fi
+expect_ok "$BIN" show DE-01
+assert_contains "Workspace actor: Codex_A"
+assert_contains "Workspace path:"
+assert_contains "Workspace branch: agent/codex_a/DE-01"
+
+expect_ok "$BIN" list DE
+assert_contains "workspace:"
+assert_contains "branch: agent/codex_a/DE-01"
 
 expect_fail "$BIN" workspace create DE-01 --actor Codex_A
 assert_contains "Workspace already exists for DE-01"
+
+expect_fail "$BIN" start DE-01 --actor other
+assert_contains "Workspace for DE-01 belongs to Codex_A"
+
+expect_ok "$BIN" start DE-01 --actor Codex_A
+assert_contains "Started DE-01"
 
 expect_ok "$BIN" task add DE Second
 expect_fail "$BIN" workspace create DE-02 --actor codex

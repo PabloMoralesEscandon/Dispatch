@@ -1392,6 +1392,22 @@ static const char *color_for_state(DispatchState state) {
     return "";
 }
 
+static DispatchWorkspace *task_workspace(const DispatchBoard *board,
+                                         const char *task_id,
+                                         int active_only) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (strcmp(workspace->task_id, task_id) != 0)
+            continue;
+        if (active_only && workspace->state != DISPATCH_WORKSPACE_ACTIVE)
+            continue;
+        if (!active_only && workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        return workspace;
+    }
+    return NULL;
+}
+
 static void print_task_line(const DispatchBoard *board, const DispatchTask *task,
                             const char *indent) {
     DispatchState state = dispatch_task_effective_state(board, task);
@@ -1413,6 +1429,12 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
         printf("%s", reset);
     }
     printf("\n");
+
+    DispatchWorkspace *workspace = task_workspace(board, task->id, 1);
+    if (workspace) {
+        printf("%s  workspace: %s\n", indent, workspace->path);
+        printf("%s  branch: %s\n", indent, workspace->branch);
+    }
 }
 
 static int print_ready_tasks_from_board(const DispatchBoard *board,
@@ -1520,6 +1542,12 @@ static int cmd_show(int argc, char **argv) {
     printf("Started by: %s\n", task->started_by ? task->started_by : "-");
     printf("Completed by: %s\n",
            task->completed_by ? task->completed_by : "-");
+    DispatchWorkspace *workspace = task_workspace(&board, task->id, 1);
+    if (workspace) {
+        printf("Workspace actor: %s\n", workspace->actor);
+        printf("Workspace path: %s\n", workspace->path);
+        printf("Workspace branch: %s\n", workspace->branch);
+    }
 
     printf("Depends on:");
     if (task->depends_on.count == 0) {
@@ -1672,7 +1700,19 @@ static int cmd_start(int argc, char **argv) {
     DispatchBoard *board = &locked.board;
 
     DispatchTask *task = dispatch_board_find_task(board, task_id);
-    if (!task || !dispatch_task_start(board, task, actor)) {
+    if (!task) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Could not start %s\n", task_id);
+        return 1;
+    }
+    DispatchWorkspace *workspace = task_workspace(board, task_id, 0);
+    if (workspace && strcmp(workspace->actor, actor) != 0) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Workspace for %s belongs to %s\n", task_id,
+                workspace->actor);
+        return 1;
+    }
+    if (!dispatch_task_start(board, task, actor)) {
         locked_board_close(&locked);
         fprintf(stderr, "Could not start %s\n", task_id);
         return 1;
