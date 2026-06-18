@@ -134,7 +134,8 @@ actor so the approval is visible in task history. Use `dispatch ready <id>
 --actor user --no-review` only when the user approves the task as safe to finish
 without a review gate. Use `dispatch group ready <group> --actor user
 --no-review` only when the user approves every readied task in the group as safe
-to finish without review.
+to finish without review. When used again on an already readied group, it also
+marks ready or blocked tasks that have not been started yet as no-review.
 
 ## Task Execution Protocol
 

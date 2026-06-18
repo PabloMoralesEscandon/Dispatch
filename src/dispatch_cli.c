@@ -1849,12 +1849,21 @@ static int cmd_group_ready(int argc, char **argv) {
         DispatchTask *task = &board->tasks.items[i];
         if (strcmp(task->group, group->id) != 0)
             continue;
-        if (task->state != DISPATCH_STATE_PROPOSED)
+
+        if (task->state == DISPATCH_STATE_PROPOSED) {
+            dispatch_task_mark_ready(board, task, actor);
+            if (no_review)
+                task->requires_review = 0;
+            readied++;
             continue;
-        dispatch_task_mark_ready(board, task, actor);
-        if (no_review)
+        }
+
+        if (no_review &&
+            (task->state == DISPATCH_STATE_READY ||
+             task->state == DISPATCH_STATE_BLOCKED) &&
+            !task->assigned_to && !task->started_by) {
             task->requires_review = 0;
-        readied++;
+        }
     }
 
     dispatch_board_normalize_states(board);

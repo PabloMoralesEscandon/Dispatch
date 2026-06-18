@@ -175,7 +175,9 @@ Proposed tasks with unmet dependencies are approved but still display as blocked
 until their blockers are done. The actor should normally be the user; an agent
 should ready tasks only when the user explicitly asks it to do so. Add
 `--no-review` only when the user approves every readied task as safe to finish
-without a review gate.
+without a review gate. If `--no-review` is used on a group that is already
+readied, it also applies to ready or blocked tasks in that group that have not
+been started yet.
 
 ### Tasks
 

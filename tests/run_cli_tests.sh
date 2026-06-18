@@ -335,6 +335,15 @@ assert_contains "  DE-06    review     Review"
 assert_contains "  DE-07    done       Done"
 assert_contains "  QA-01    proposed   Other"
 
+expect_ok "$BIN" group ready DE --actor user --no-review
+assert_contains "Readied 0 tasks in group DE"
+expect_ok "$BIN" show DE-04
+assert_contains "Requires review: no"
+expect_ok "$BIN" show DE-05
+assert_contains "Requires review: yes"
+expect_ok "$BIN" show DE-06
+assert_contains "Requires review: yes"
+
 expect_fail "$BIN" group ready Missing --actor user
 assert_contains "No group with id, prefix, or name Missing"
 
