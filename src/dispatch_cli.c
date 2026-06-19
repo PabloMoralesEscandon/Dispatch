@@ -2042,6 +2042,7 @@ static void print_completion_usage(void) {
     fprintf(stderr,
             "Usage: dispatch completion candidates "
             "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+    fprintf(stderr, "       dispatch completion bash\n");
     fprintf(stderr, "       dispatch completion zsh\n");
 }
 
@@ -2114,7 +2115,7 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "\n"
         "_dispatch_completion_command() {\n"
         "  local -a subcommands kinds\n"
-        "  subcommands=(candidates zsh)\n"
+        "  subcommands=(candidates bash zsh)\n"
         "  kinds=(\"${(@f)$(_dispatch_candidate_values candidate-kinds)}\")\n"
         "\n"
         "  if (( CURRENT == 3 )); then\n"
@@ -2214,9 +2215,132 @@ static int cmd_completion_zsh(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_completion_bash(int argc, char **argv) {
+    (void)argv;
+    if (argc != 3) {
+        print_completion_usage();
+        return 1;
+    }
+
+    fputs(
+        "_dispatch_candidate_values() {\n"
+        "  dispatch completion candidates \"$1\" 2>/dev/null\n"
+        "}\n"
+        "\n"
+        "_dispatch_complete_words() {\n"
+        "  COMPREPLY=( $(compgen -W \"$1\" -- \"$cur\") )\n"
+        "}\n"
+        "\n"
+        "_dispatch_complete_candidates() {\n"
+        "  _dispatch_complete_words \"$(_dispatch_candidate_values \"$1\")\"\n"
+        "}\n"
+        "\n"
+        "_dispatch_complete() {\n"
+        "  local cur prev cmd sub\n"
+        "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+        "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
+        "  cmd=\"${COMP_WORDS[1]}\"\n"
+        "  sub=\"${COMP_WORDS[2]}\"\n"
+        "  COMPREPLY=()\n"
+        "\n"
+        "  if (( COMP_CWORD == 1 )); then\n"
+        "    _dispatch_complete_candidates commands\n"
+        "    return\n"
+        "  fi\n"
+        "\n"
+        "  if [[ ${cur} == --* ]]; then\n"
+        "    case \"$cmd\" in\n"
+        "      agent)\n"
+        "        case \"$sub\" in\n"
+        "          create) _dispatch_complete_words \"--name --runner --model "
+        "--no-run-script --print-command\" ;;\n"
+        "          command) _dispatch_complete_words \"--print-command\" ;;\n"
+        "        esac\n"
+        "        ;;\n"
+        "      workspace)\n"
+        "        case \"$sub\" in\n"
+        "          create) _dispatch_complete_words \"--actor --repo --dir "
+        "--branch --sequence\" ;;\n"
+        "          remove) _dispatch_complete_words \"--force\" ;;\n"
+        "          prune) _dispatch_complete_words \"--done --stale --dry-run\" ;;\n"
+        "        esac\n"
+        "        ;;\n"
+        "      group) [[ $sub == ready ]] && _dispatch_complete_words "
+        "\"--actor --no-review\" ;;\n"
+        "      task) [[ $sub == delete ]] && _dispatch_complete_words "
+        "\"--force\" || _dispatch_complete_words \"--description --no-review\" ;;\n"
+        "      ready) _dispatch_complete_words \"--actor --no-review\" ;;\n"
+        "      start|finish|review) _dispatch_complete_words \"--actor\" ;;\n"
+        "    esac\n"
+        "    return\n"
+        "  fi\n"
+        "\n"
+        "  case \"$cmd\" in\n"
+        "    completion)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"candidates bash zsh\"\n"
+        "      elif [[ $sub == candidates && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates candidate-kinds\n"
+        "      fi\n"
+        "      ;;\n"
+        "    show|start|finish|review|ready)\n"
+        "      (( COMP_CWORD == 2 )) && _dispatch_complete_candidates tasks\n"
+        "      ;;\n"
+        "    list)\n"
+        "      (( COMP_CWORD == 2 )) && _dispatch_complete_candidates groups\n"
+        "      ;;\n"
+        "    group)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"add ready\"\n"
+        "      elif [[ $sub == ready && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates groups\n"
+        "      fi\n"
+        "      ;;\n"
+        "    task)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"add delete\"\n"
+        "      elif [[ $sub == delete && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates tasks\n"
+        "      fi\n"
+        "      ;;\n"
+        "    dep)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"add remove\"\n"
+        "      elif (( COMP_CWORD == 3 || COMP_CWORD == 4 )); then\n"
+        "        _dispatch_complete_candidates tasks\n"
+        "      fi\n"
+        "      ;;\n"
+        "    agent)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"create list show command\"\n"
+        "      elif [[ ( $sub == show || $sub == command ) && "
+        "$COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates agents\n"
+        "      fi\n"
+        "      ;;\n"
+        "    workspace)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"create list show remove prune\"\n"
+        "      elif [[ $sub == create && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates tasks\n"
+        "      elif [[ ( $sub == show || $sub == remove ) && "
+        "$COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates workspaces\n"
+        "      fi\n"
+        "      ;;\n"
+        "  esac\n"
+        "}\n"
+        "\n"
+        "complete -F _dispatch_complete dispatch\n",
+        stdout);
+    return 0;
+}
+
 static int cmd_completion(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "candidates") == 0)
         return cmd_completion_candidates(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "bash") == 0)
+        return cmd_completion_bash(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "zsh") == 0)
         return cmd_completion_zsh(argc, argv);
 
