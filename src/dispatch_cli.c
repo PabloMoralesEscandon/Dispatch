@@ -30,6 +30,7 @@ static const DispatchCliCommand commands[] = {
     {"group", "Manage groups"},
     {"task", "Manage tasks"},
     {"dep", "Manage dependencies"},
+    {"completion", "Print shell completion candidates"},
     {"ready", "List ready work or mark a task ready"},
     {"blocked", "List blocked work and blockers"},
     {"show", "Show one task"},
@@ -62,8 +63,8 @@ void dispatch_cli_print_help(void) {
     puts("");
     puts("Implemented now:");
     puts("  init, agent create/list/show/command, workspace create/list/show/remove/prune,");
-    puts("  group add/ready, task add, dep add/remove, ready, start,");
-    puts("  finish, review, normalize, list, show, blocked");
+    puts("  group add/ready, task add, dep add/remove, completion candidates,");
+    puts("  ready, start, finish, review, normalize, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -2028,6 +2029,76 @@ static int cmd_dep(int argc, char **argv) {
     return 0;
 }
 
+static void print_completion_candidate_kinds(void) {
+    puts("commands");
+    puts("candidate-kinds");
+    puts("tasks");
+    puts("groups");
+    puts("agents");
+    puts("workspaces");
+}
+
+static int cmd_completion_candidates(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr,
+                "Usage: dispatch completion candidates "
+                "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+        return 1;
+    }
+
+    const char *kind = argv[3];
+    if (strcmp(kind, "commands") == 0) {
+        for (int i = 0; commands[i].name != NULL; i++)
+            puts(commands[i].name);
+        return 0;
+    }
+
+    if (strcmp(kind, "candidate-kinds") == 0) {
+        print_completion_candidate_kinds();
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    if (strcmp(kind, "tasks") == 0) {
+        for (size_t i = 0; i < board.tasks.count; i++)
+            puts(board.tasks.items[i].id);
+    } else if (strcmp(kind, "groups") == 0) {
+        for (size_t i = 0; i < board.groups.count; i++)
+            puts(board.groups.items[i].id);
+    } else if (strcmp(kind, "agents") == 0) {
+        for (size_t i = 0; i < board.agents.count; i++)
+            puts(board.agents.items[i].name);
+    } else if (strcmp(kind, "workspaces") == 0) {
+        for (size_t i = 0; i < board.workspaces.count; i++) {
+            DispatchWorkspace *workspace = &board.workspaces.items[i];
+            if (workspace->state != DISPATCH_WORKSPACE_REMOVED)
+                puts(workspace->id);
+        }
+    } else {
+        dispatch_board_free(&board);
+        fprintf(stderr,
+                "Usage: dispatch completion candidates "
+                "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+        return 1;
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_completion(int argc, char **argv) {
+    if (argc >= 3 && strcmp(argv[2], "candidates") == 0)
+        return cmd_completion_candidates(argc, argv);
+
+    fprintf(stderr,
+            "Usage: dispatch completion candidates "
+            "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+    return 1;
+}
+
 static int cmd_normalize(void) {
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
@@ -2513,6 +2584,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_task(argc, argv);
     if (strcmp(command->name, "dep") == 0)
         return cmd_dep(argc, argv);
+    if (strcmp(command->name, "completion") == 0)
+        return cmd_completion(argc, argv);
     if (strcmp(command->name, "normalize") == 0)
         return cmd_normalize();
     if (strcmp(command->name, "list") == 0)

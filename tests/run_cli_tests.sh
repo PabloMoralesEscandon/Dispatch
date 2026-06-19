@@ -45,6 +45,12 @@ assert_contains() {
     fi
 }
 
+assert_line() {
+    if ! printf '%s\n' "$RUN_OUTPUT" | grep -Fxq -- "$1"; then
+        fail "expected output to contain line: $1"
+    fi
+}
+
 assert_not_contains() {
     if printf '%s\n' "$RUN_OUTPUT" | grep -Fq -- "$1"; then
         fail "expected output not to contain: $1"
@@ -580,6 +586,48 @@ expect_fail "$BIN" workspace show DE-02
 assert_contains "No workspace for DE-02"
 expect_ok "$BIN" workspace show DE-01
 
+case_dir="$(make_case_dir completion-candidates)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" agent create --name codex-a --runner codex
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" group add QA --prefix QA
+expect_ok "$BIN" task add DE Root
+expect_ok "$BIN" task add QA Check
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" workspace create DE-01 --actor codex-a
+
+expect_ok "$BIN" completion candidates commands
+assert_line "completion"
+assert_line "workspace"
+
+expect_ok "$BIN" completion candidates candidate-kinds
+assert_line "tasks"
+assert_line "groups"
+assert_line "agents"
+assert_line "workspaces"
+
+expect_ok "$BIN" completion candidates tasks
+assert_line "DE-01"
+assert_line "QA-01"
+
+expect_ok "$BIN" completion candidates groups
+assert_line "DE"
+assert_line "QA"
+
+expect_ok "$BIN" completion candidates agents
+assert_line "codex-a"
+
+expect_ok "$BIN" completion candidates workspaces
+assert_line "DE-01"
+
+expect_fail "$BIN" completion candidates unknown
+assert_contains "Usage: dispatch completion candidates"
+
 case_dir="$(make_case_dir workspace-sequence)"
 cd "$case_dir"
 mkdir repo
@@ -680,6 +728,7 @@ expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
 assert_contains "agent create/list/show/command"
 assert_contains "workspace create/list/show/remove/prune"
+assert_contains "completion candidates"
 assert_not_contains "--json"
 assert_not_contains "clear"
 assert_not_contains "project"
