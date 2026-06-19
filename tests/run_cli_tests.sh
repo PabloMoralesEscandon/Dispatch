@@ -338,7 +338,7 @@ assert_contains "  DE-03    blocked    ProposedBlocked  depends_on:DE-01"
 assert_contains "  DE-04    ready      Simple"
 assert_contains "  DE-05    doing      Active  assigned:codex"
 assert_contains "  DE-06    review     Review"
-assert_contains "  DE-07    done       Done"
+assert_not_contains "  DE-07    done       Done"
 assert_contains "  QA-01    proposed   Other"
 
 expect_ok "$BIN" group ready DE --actor user --no-review
@@ -730,6 +730,11 @@ assert_contains "Started DE-01"
 
 expect_ok "$BIN" finish DE-01 --actor codex
 assert_contains "Finished DE-01 (done)"
+
+expect_ok "$BIN" list DE
+assert_contains "[DE] Development"
+assert_contains "  (done)"
+assert_not_contains "  DE-01    done       DirectFinish"
 
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"

@@ -2597,17 +2597,27 @@ static void print_list_for_group(const DispatchBoard *board,
 
     printf("%s[%s] %s%s\n", group_color, group->prefix, group->name, reset);
 
-    int any = 0;
+    int any_tasks = 0;
+    int any_visible = 0;
+    int all_done = 1;
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
         if (strcmp(task->group, group->id) != 0)
             continue;
+        any_tasks = 1;
+        DispatchState state = dispatch_task_effective_state(board, task);
+        if (state != DISPATCH_STATE_DONE)
+            all_done = 0;
+        if (state == DISPATCH_STATE_DONE)
+            continue;
         print_task_line(board, task, "  ");
-        any = 1;
+        any_visible = 1;
     }
 
-    if (!any)
+    if (!any_tasks)
         printf("  (no tasks)\n");
+    else if (!any_visible && all_done)
+        printf("  (done)\n");
 }
 
 static int cmd_list(int argc, char **argv) {

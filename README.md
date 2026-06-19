@@ -271,7 +271,9 @@ without human acceptance.
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.
 
-`list` prints tasks once, grouped by Dispatch group and in task order.
+`list` prints active tasks once, grouped by Dispatch group and in task order.
+Completed tasks are hidden by default. If every task in a group is completed,
+the group prints a single `(done)` marker instead of every completed task row.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name.
 
