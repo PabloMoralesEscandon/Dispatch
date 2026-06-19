@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static void set_error(char *error, size_t error_size, const char *message) {
@@ -114,6 +115,98 @@ void dispatch_store_lock_release(DispatchStoreLock *lock) {
     free(lock->path);
     memset(lock, 0, sizeof(*lock));
     lock->fd = -1;
+}
+
+static json_t *log_fields_to_json(const DispatchLogField *fields,
+                                  size_t field_count) {
+    json_t *object = json_object();
+    if (!object)
+        return NULL;
+
+    for (size_t i = 0; i < field_count; i++) {
+        const DispatchLogField *field = &fields[i];
+        if (!field->key || field->key[0] == '\0' || !field->value)
+            continue;
+        json_object_set_new(object, field->key, json_string(field->value));
+    }
+    return object;
+}
+
+static int utc_timestamp(char *buffer, size_t buffer_size) {
+    time_t now = time(NULL);
+    struct tm utc;
+    if (gmtime_r(&now, &utc) == NULL)
+        return 0;
+    return strftime(buffer, buffer_size, "%Y-%m-%dT%H:%M:%SZ", &utc) > 0;
+}
+
+int dispatch_store_log_append(const char *path, const DispatchLogRecord *record,
+                              char *error, size_t error_size) {
+    if (!path || path[0] == '\0' || !record) {
+        set_error(error, error_size, "invalid log record");
+        return 0;
+    }
+
+    char timestamp[32] = {0};
+    if (!utc_timestamp(timestamp, sizeof(timestamp))) {
+        set_error(error, error_size, "could not format log timestamp");
+        return 0;
+    }
+
+    json_t *entry = json_object();
+    if (!entry) {
+        set_error(error, error_size, "could not create log entry");
+        return 0;
+    }
+
+    json_object_set_new(entry, "version", json_integer(1));
+    json_object_set_new(entry, "timestamp", json_string(timestamp));
+    json_object_set_new(entry, "actor",
+                        json_string(record->actor ? record->actor : "unknown"));
+    json_object_set_new(entry, "command",
+                        json_string(record->command ? record->command : ""));
+    json_object_set_new(entry, "action",
+                        json_string(record->action ? record->action : ""));
+    json_object_set_new(entry, "outcome",
+                        json_string(record->outcome ? record->outcome : ""));
+    json_object_set_new(entry, "message",
+                        json_string(record->message ? record->message : ""));
+
+    json_t *targets =
+        log_fields_to_json(record->targets, record->target_count);
+    if (!targets) {
+        json_decref(entry);
+        set_error(error, error_size, "could not create log targets");
+        return 0;
+    }
+    json_object_set_new(entry, "targets", targets);
+
+    if (record->context_count > 0) {
+        json_t *context =
+            log_fields_to_json(record->context, record->context_count);
+        if (!context) {
+            json_decref(entry);
+            set_error(error, error_size, "could not create log context");
+            return 0;
+        }
+        json_object_set_new(entry, "context", context);
+    }
+
+    FILE *file = fopen(path, "a");
+    if (!file) {
+        json_decref(entry);
+        set_error_errno(error, error_size, "could not open dispatch log");
+        return 0;
+    }
+
+    int ok = json_dumpf(entry, file, JSON_COMPACT) == 0 &&
+             fputc('\n', file) != EOF && fclose(file) == 0;
+    json_decref(entry);
+    if (!ok) {
+        set_error_errno(error, error_size, "could not append dispatch log");
+        return 0;
+    }
+    return 1;
 }
 
 static time_t json_time_or_zero(json_t *object, const char *key) {
