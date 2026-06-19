@@ -471,6 +471,49 @@ Agents should treat `dispatch.json` as an implementation detail. Do not read or
 edit it directly during normal workflow. Use Dispatch commands to inspect and
 change board state.
 
+## Dispatch Log
+
+Mutating Dispatch commands append audit records to `dispatch.log` in the
+workflow directory, next to `dispatch.json`. The log is append-only JSON Lines:
+one UTF-8 JSON object per line, with no surrounding array. Readers should ignore
+unknown fields so the format can grow without breaking older tooling.
+
+Each record contains these fields:
+
+- `version`: integer log schema version. The initial version is `1`.
+- `timestamp`: UTC timestamp in RFC 3339 format, such as
+  `2026-06-19T12:34:56Z`.
+- `actor`: actor responsible for the workflow change. Commands with an omitted
+  user-facing actor record `user`; agent ownership commands should pass the
+  agent's explicit actor name.
+- `command`: CLI command family that caused the change, such as `task`,
+  `ready`, `start`, `finish`, `review`, `dep`, `group`, `workspace`, or
+  `normalize`.
+- `action`: specific action within the command, such as `add`, `delete`,
+  `ready`, `start`, `finish`, `review`, `dependency_add`, or
+  `workspace_create`.
+- `targets`: object containing relevant stable IDs. Use keys such as `task`,
+  `group`, `dependency`, `dependent`, `agent`, and `workspace`.
+- `outcome`: `success` or `failure`.
+- `message`: short human-readable result or error summary.
+
+Records may include a `context` object for structured details that support
+auditing but are not primary IDs. Examples include `requires_review`,
+`no_review`, `force`, `sequence`, `repo_path`, `workspace_path`,
+`workspace_branch`, `previous_state`, and `new_state`.
+
+Example records:
+
+```json
+{"version":1,"timestamp":"2026-06-19T12:34:56Z","actor":"user","command":"ready","action":"ready","targets":{"task":"DE-01"},"outcome":"success","message":"Readied DE-01","context":{"no_review":false,"new_state":"ready"}}
+{"version":1,"timestamp":"2026-06-19T12:35:20Z","actor":"codex","command":"start","action":"start","targets":{"task":"DE-01"},"outcome":"success","message":"Started DE-01","context":{"previous_state":"ready","new_state":"doing"}}
+```
+
+The log complements task history stored in the board. Task history remains the
+authoritative per-task lifecycle summary; `dispatch.log` is the broader command
+audit trail, including dependency, group, workspace, and failed mutation
+attempts.
+
 ## Tests
 
 Run the automated CLI tests:
