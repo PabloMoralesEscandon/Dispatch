@@ -2188,7 +2188,12 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "      (( CURRENT == 3 )) && _dispatch_compadd_candidates tasks\n"
         "      ;;\n"
         "    list)\n"
-        "      (( CURRENT == 3 )) && _dispatch_compadd_candidates groups\n"
+        "      if (( CURRENT == 3 )); then\n"
+        "        compadd -- all\n"
+        "        _dispatch_compadd_candidates groups\n"
+        "      elif [[ ${words[3]} == all && CURRENT == 4 ]]; then\n"
+        "        _dispatch_compadd_candidates groups\n"
+        "      fi\n"
         "      ;;\n"
         "    group)\n"
         "      _dispatch_group_command\n"
@@ -2288,7 +2293,11 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      (( COMP_CWORD == 2 )) && _dispatch_complete_candidates tasks\n"
         "      ;;\n"
         "    list)\n"
-        "      (( COMP_CWORD == 2 )) && _dispatch_complete_candidates groups\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"all $(_dispatch_candidate_values groups)\"\n"
+        "      elif [[ $sub == all && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates groups\n"
+        "      fi\n"
         "      ;;\n"
         "    group)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
@@ -2363,7 +2372,9 @@ static int cmd_completion_fish(int argc, char **argv) {
         "complete -c dispatch -f -n '__fish_seen_subcommand_from show start "
         "finish review ready' -a '(__dispatch_candidates tasks)'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from list' -a "
-        "'(__dispatch_candidates groups)'\n"
+        "'all (__dispatch_candidates groups)'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from list; and "
+        "__fish_seen_subcommand_from all' -a '(__dispatch_candidates groups)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from group; and "
         "not __fish_seen_subcommand_from add ready' -a 'add ready'\n"
@@ -2590,7 +2601,8 @@ static int ready_task_count(const DispatchBoard *board) {
 }
 
 static void print_list_for_group(const DispatchBoard *board,
-                                 const DispatchGroup *group) {
+                                 const DispatchGroup *group,
+                                 int include_done) {
     int color = cli_color_enabled();
     const char *group_color = color ? "\033[1;36m" : "";
     const char *reset = color ? "\033[0m" : "";
@@ -2608,7 +2620,7 @@ static void print_list_for_group(const DispatchBoard *board,
         DispatchState state = dispatch_task_effective_state(board, task);
         if (state != DISPATCH_STATE_DONE)
             all_done = 0;
-        if (state == DISPATCH_STATE_DONE)
+        if (!include_done && state == DISPATCH_STATE_DONE)
             continue;
         print_task_line(board, task, "  ");
         any_visible = 1;
@@ -2621,8 +2633,19 @@ static void print_list_for_group(const DispatchBoard *board,
 }
 
 static int cmd_list(int argc, char **argv) {
-    if (argc != 2 && argc != 3) {
-        fprintf(stderr, "Usage: dispatch list [group]\n");
+    if (argc != 2 && argc != 3 && argc != 4) {
+        fprintf(stderr, "Usage: dispatch list [all] [group]\n");
+        return 1;
+    }
+
+    int include_done = 0;
+    int group_arg = 2;
+    if (argc >= 3 && strcmp(argv[2], "all") == 0) {
+        include_done = 1;
+        group_arg = 3;
+    }
+    if (argc == 4 && !include_done) {
+        fprintf(stderr, "Usage: dispatch list [all] [group]\n");
         return 1;
     }
 
@@ -2630,14 +2653,16 @@ static int cmd_list(int argc, char **argv) {
     if (!load_board_or_error(&board))
         return 1;
 
-    if (argc == 3) {
-        DispatchGroup *group = dispatch_board_find_group(&board, argv[2]);
+    if (argc > group_arg) {
+        DispatchGroup *group =
+            dispatch_board_find_group(&board, argv[group_arg]);
         if (!group) {
             dispatch_board_free(&board);
-            fprintf(stderr, "No group with id, prefix, or name %s\n", argv[2]);
+            fprintf(stderr, "No group with id, prefix, or name %s\n",
+                    argv[group_arg]);
             return 1;
         }
-        print_list_for_group(&board, group);
+        print_list_for_group(&board, group, include_done);
         dispatch_board_free(&board);
         return 0;
     }
@@ -2646,7 +2671,7 @@ static int cmd_list(int argc, char **argv) {
         printf("(no groups)\n");
     } else {
         for (size_t g = 0; g < board.groups.count; g++)
-            print_list_for_group(&board, &board.groups.items[g]);
+            print_list_for_group(&board, &board.groups.items[g], include_done);
     }
 
     dispatch_board_free(&board);

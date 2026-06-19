@@ -341,6 +341,14 @@ assert_contains "  DE-06    review     Review"
 assert_not_contains "  DE-07    done       Done"
 assert_contains "  QA-01    proposed   Other"
 
+expect_ok "$BIN" list all
+assert_contains "  DE-07    done       Done"
+assert_contains "  QA-01    proposed   Other"
+
+expect_ok "$BIN" list all DE
+assert_contains "  DE-07    done       Done"
+assert_not_contains "  QA-01    proposed   Other"
+
 expect_ok "$BIN" group ready DE --actor user --no-review
 assert_contains "Readied 0 tasks in group DE"
 expect_ok "$BIN" show DE-04
@@ -632,6 +640,7 @@ expect_ok "$BIN" completion zsh
 assert_contains "#compdef dispatch"
 assert_contains "subcommands=(candidates bash fish zsh)"
 assert_contains 'dispatch completion candidates "$1"'
+assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
 
 expect_fail "$BIN" completion zsh extra
@@ -641,6 +650,7 @@ expect_ok "$BIN" completion bash
 assert_contains "complete -F _dispatch_complete dispatch"
 assert_contains 'dispatch completion candidates "$1"'
 assert_contains "candidates bash fish zsh"
+assert_contains "all \$(_dispatch_candidate_values groups)"
 assert_contains "_dispatch_complete_candidates tasks"
 assert_contains "--actor --no-review"
 
@@ -651,6 +661,7 @@ expect_ok "$BIN" completion fish
 assert_contains "function __dispatch_candidates"
 assert_contains "dispatch completion candidates \$argv[1]"
 assert_contains "candidates bash fish zsh"
+assert_contains "all (__dispatch_candidates groups)"
 assert_contains "(__dispatch_candidates tasks)"
 assert_contains "(__dispatch_candidates workspaces)"
 
@@ -784,7 +795,7 @@ expect_fail "$BIN" tree
 assert_contains "Unknown Dispatch command: tree"
 
 expect_fail "$BIN" list projects extra
-assert_contains "Usage: dispatch list [group]"
+assert_contains "Usage: dispatch list [all] [group]"
 
 mkdir repo
 expect_ok "$BIN" init repo

@@ -259,7 +259,7 @@ been started yet.
 dispatch task add <group> <title> [--description <text>] [--no-review]
 dispatch task delete <id> [--force]
 dispatch show <id>
-dispatch list [group]
+dispatch list [all] [group]
 ```
 
 Tasks require a group and a title. Titles are human-readable labels and should
@@ -275,7 +275,8 @@ delete also removes that task from other tasks' dependency lists.
 Completed tasks are hidden by default. If every task in a group is completed,
 the group prints a single `(done)` marker instead of every completed task row.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
-limited to one group by ID, prefix, or name.
+limited to one group by ID, prefix, or name. Use `list all` to include
+completed tasks, optionally scoped to a group with `list all <group>`.
 
 When stdout is a terminal, `list` uses ANSI color to distinguish group headings,
 task IDs, states, and metadata. Set `FORCE_COLOR=1` to force color in captured
