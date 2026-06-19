@@ -630,7 +630,7 @@ assert_contains "Usage: dispatch completion candidates"
 
 expect_ok "$BIN" completion zsh
 assert_contains "#compdef dispatch"
-assert_contains "subcommands=(candidates bash zsh)"
+assert_contains "subcommands=(candidates bash fish zsh)"
 assert_contains 'dispatch completion candidates "$1"'
 assert_contains "_dispatch_compadd_candidates tasks"
 
@@ -640,10 +640,21 @@ assert_contains "Usage: dispatch completion candidates"
 expect_ok "$BIN" completion bash
 assert_contains "complete -F _dispatch_complete dispatch"
 assert_contains 'dispatch completion candidates "$1"'
+assert_contains "candidates bash fish zsh"
 assert_contains "_dispatch_complete_candidates tasks"
 assert_contains "--actor --no-review"
 
 expect_fail "$BIN" completion bash extra
+assert_contains "Usage: dispatch completion candidates"
+
+expect_ok "$BIN" completion fish
+assert_contains "function __dispatch_candidates"
+assert_contains "dispatch completion candidates \$argv[1]"
+assert_contains "candidates bash fish zsh"
+assert_contains "(__dispatch_candidates tasks)"
+assert_contains "(__dispatch_candidates workspaces)"
+
+expect_fail "$BIN" completion fish extra
 assert_contains "Usage: dispatch completion candidates"
 
 case_dir="$(make_case_dir workspace-sequence)"

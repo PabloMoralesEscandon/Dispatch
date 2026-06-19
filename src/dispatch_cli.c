@@ -2043,6 +2043,7 @@ static void print_completion_usage(void) {
             "Usage: dispatch completion candidates "
             "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
     fprintf(stderr, "       dispatch completion bash\n");
+    fprintf(stderr, "       dispatch completion fish\n");
     fprintf(stderr, "       dispatch completion zsh\n");
 }
 
@@ -2115,7 +2116,7 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "\n"
         "_dispatch_completion_command() {\n"
         "  local -a subcommands kinds\n"
-        "  subcommands=(candidates bash zsh)\n"
+        "  subcommands=(candidates bash fish zsh)\n"
         "  kinds=(\"${(@f)$(_dispatch_candidate_values candidate-kinds)}\")\n"
         "\n"
         "  if (( CURRENT == 3 )); then\n"
@@ -2278,7 +2279,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "  case \"$cmd\" in\n"
         "    completion)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
-        "        _dispatch_complete_words \"candidates bash zsh\"\n"
+        "        _dispatch_complete_words \"candidates bash fish zsh\"\n"
         "      elif [[ $sub == candidates && $COMP_CWORD -eq 3 ]]; then\n"
         "        _dispatch_complete_candidates candidate-kinds\n"
         "      fi\n"
@@ -2336,11 +2337,121 @@ static int cmd_completion_bash(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_completion_fish(int argc, char **argv) {
+    (void)argv;
+    if (argc != 3) {
+        print_completion_usage();
+        return 1;
+    }
+
+    fputs(
+        "function __dispatch_candidates\n"
+        "    dispatch completion candidates $argv[1] 2>/dev/null\n"
+        "end\n"
+        "\n"
+        "complete -c dispatch -f\n"
+        "complete -c dispatch -f -n 'not __fish_seen_subcommand_from "
+        "(__dispatch_candidates commands)' -a '(__dispatch_candidates commands)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from completion; "
+        "and not __fish_seen_subcommand_from candidates bash fish zsh' -a "
+        "'candidates bash fish zsh'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from completion; "
+        "and __fish_seen_subcommand_from candidates' -a '(__dispatch_candidates "
+        "candidate-kinds)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from show start "
+        "finish review ready' -a '(__dispatch_candidates tasks)'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from list' -a "
+        "'(__dispatch_candidates groups)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from group; and "
+        "not __fish_seen_subcommand_from add ready' -a 'add ready'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from group; and "
+        "__fish_seen_subcommand_from ready' -a '(__dispatch_candidates groups)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
+        "not __fish_seen_subcommand_from add delete' -a 'add delete'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
+        "__fish_seen_subcommand_from delete' -a '(__dispatch_candidates tasks)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from dep; and not "
+        "__fish_seen_subcommand_from add remove' -a 'add remove'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from dep; and "
+        "__fish_seen_subcommand_from add remove' -a '(__dispatch_candidates tasks)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and not "
+        "__fish_seen_subcommand_from create list show command' -a 'create list "
+        "show command'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from show command' -a '(__dispatch_candidates "
+        "agents)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "not __fish_seen_subcommand_from create list show remove prune' -a "
+        "'create list show remove prune'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from create' -a '(__dispatch_candidates tasks)'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from show remove' -a '(__dispatch_candidates "
+        "workspaces)'\n"
+        "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from ready' -l actor\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from ready' -l "
+        "no-review\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from start finish "
+        "review' -l actor\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from group; and "
+        "__fish_seen_subcommand_from ready' -l actor\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from group; and "
+        "__fish_seen_subcommand_from ready' -l no-review\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
+        "__fish_seen_subcommand_from add' -l description\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
+        "__fish_seen_subcommand_from add' -l no-review\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
+        "__fish_seen_subcommand_from delete' -l force\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from create' -l actor\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from create' -l repo\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from create' -l dir\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from create' -l branch\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from create' -l sequence\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from remove' -l force\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from prune' -l done\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from prune' -l stale\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
+        "__fish_seen_subcommand_from prune' -l dry-run\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from create' -l name\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from create' -l runner\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from create' -l model\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from create' -l no-run-script\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from create' -l print-command\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from command' -l print-command\n",
+        stdout);
+    return 0;
+}
+
 static int cmd_completion(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "candidates") == 0)
         return cmd_completion_candidates(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "bash") == 0)
         return cmd_completion_bash(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "fish") == 0)
+        return cmd_completion_fish(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "zsh") == 0)
         return cmd_completion_zsh(argc, argv);
 
