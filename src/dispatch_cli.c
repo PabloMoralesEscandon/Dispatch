@@ -2038,11 +2038,16 @@ static void print_completion_candidate_kinds(void) {
     puts("workspaces");
 }
 
+static void print_completion_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch completion candidates "
+            "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+    fprintf(stderr, "       dispatch completion zsh\n");
+}
+
 static int cmd_completion_candidates(int argc, char **argv) {
     if (argc != 4) {
-        fprintf(stderr,
-                "Usage: dispatch completion candidates "
-                "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+        print_completion_usage();
         return 1;
     }
 
@@ -2079,9 +2084,7 @@ static int cmd_completion_candidates(int argc, char **argv) {
         }
     } else {
         dispatch_board_free(&board);
-        fprintf(stderr,
-                "Usage: dispatch completion candidates "
-                "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+        print_completion_usage();
         return 1;
     }
 
@@ -2089,13 +2092,135 @@ static int cmd_completion_candidates(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_completion_zsh(int argc, char **argv) {
+    (void)argv;
+    if (argc != 3) {
+        print_completion_usage();
+        return 1;
+    }
+
+    fputs(
+        "#compdef dispatch\n"
+        "\n"
+        "_dispatch_candidate_values() {\n"
+        "  dispatch completion candidates \"$1\" 2>/dev/null\n"
+        "}\n"
+        "\n"
+        "_dispatch_compadd_candidates() {\n"
+        "  local -a values\n"
+        "  values=(\"${(@f)$(_dispatch_candidate_values \"$1\")}\")\n"
+        "  (( ${#values} )) && compadd -- \"${values[@]}\"\n"
+        "}\n"
+        "\n"
+        "_dispatch_completion_command() {\n"
+        "  local -a subcommands kinds\n"
+        "  subcommands=(candidates zsh)\n"
+        "  kinds=(\"${(@f)$(_dispatch_candidate_values candidate-kinds)}\")\n"
+        "\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- \"${subcommands[@]}\"\n"
+        "  elif [[ ${words[3]} == candidates && CURRENT == 4 ]]; then\n"
+        "    compadd -- \"${kinds[@]}\"\n"
+        "  fi\n"
+        "}\n"
+        "\n"
+        "_dispatch_group_command() {\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- add ready\n"
+        "  elif [[ ${words[3]} == ready && CURRENT == 4 ]]; then\n"
+        "    _dispatch_compadd_candidates groups\n"
+        "  fi\n"
+        "}\n"
+        "\n"
+        "_dispatch_task_command() {\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- add delete\n"
+        "  elif [[ ${words[3]} == delete && CURRENT == 4 ]]; then\n"
+        "    _dispatch_compadd_candidates tasks\n"
+        "  fi\n"
+        "}\n"
+        "\n"
+        "_dispatch_dep_command() {\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- add remove\n"
+        "  elif (( CURRENT == 4 || CURRENT == 5 )); then\n"
+        "    _dispatch_compadd_candidates tasks\n"
+        "  fi\n"
+        "}\n"
+        "\n"
+        "_dispatch_agent_command() {\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- create list show command\n"
+        "  elif [[ ${words[3]} == show || ${words[3]} == command ]] && "
+        "(( CURRENT == 4 )); then\n"
+        "    _dispatch_compadd_candidates agents\n"
+        "  fi\n"
+        "}\n"
+        "\n"
+        "_dispatch_workspace_command() {\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- create list show remove prune\n"
+        "  else\n"
+        "    case ${words[3]} in\n"
+        "      create)\n"
+        "        (( CURRENT == 4 )) && _dispatch_compadd_candidates tasks\n"
+        "        ;;\n"
+        "      show|remove)\n"
+        "        (( CURRENT == 4 )) && _dispatch_compadd_candidates workspaces\n"
+        "        ;;\n"
+        "    esac\n"
+        "  fi\n"
+        "}\n"
+        "\n"
+        "_dispatch() {\n"
+        "  local -a commands\n"
+        "  commands=(\"${(@f)$(_dispatch_candidate_values commands)}\")\n"
+        "\n"
+        "  if (( CURRENT == 2 )); then\n"
+        "    compadd -- \"${commands[@]}\"\n"
+        "    return\n"
+        "  fi\n"
+        "\n"
+        "  case ${words[2]} in\n"
+        "    show|start|finish|review|ready)\n"
+        "      (( CURRENT == 3 )) && _dispatch_compadd_candidates tasks\n"
+        "      ;;\n"
+        "    list)\n"
+        "      (( CURRENT == 3 )) && _dispatch_compadd_candidates groups\n"
+        "      ;;\n"
+        "    group)\n"
+        "      _dispatch_group_command\n"
+        "      ;;\n"
+        "    task)\n"
+        "      _dispatch_task_command\n"
+        "      ;;\n"
+        "    dep)\n"
+        "      _dispatch_dep_command\n"
+        "      ;;\n"
+        "    agent)\n"
+        "      _dispatch_agent_command\n"
+        "      ;;\n"
+        "    workspace)\n"
+        "      _dispatch_workspace_command\n"
+        "      ;;\n"
+        "    completion)\n"
+        "      _dispatch_completion_command\n"
+        "      ;;\n"
+        "  esac\n"
+        "}\n"
+        "\n"
+        "_dispatch \"$@\"\n",
+        stdout);
+    return 0;
+}
+
 static int cmd_completion(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "candidates") == 0)
         return cmd_completion_candidates(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "zsh") == 0)
+        return cmd_completion_zsh(argc, argv);
 
-    fprintf(stderr,
-            "Usage: dispatch completion candidates "
-            "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+    print_completion_usage();
     return 1;
 }
 

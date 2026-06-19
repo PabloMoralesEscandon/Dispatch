@@ -628,6 +628,15 @@ assert_line "DE-01"
 expect_fail "$BIN" completion candidates unknown
 assert_contains "Usage: dispatch completion candidates"
 
+expect_ok "$BIN" completion zsh
+assert_contains "#compdef dispatch"
+assert_contains "subcommands=(candidates zsh)"
+assert_contains 'dispatch completion candidates "$1"'
+assert_contains "_dispatch_compadd_candidates tasks"
+
+expect_fail "$BIN" completion zsh extra
+assert_contains "Usage: dispatch completion candidates"
+
 case_dir="$(make_case_dir workspace-sequence)"
 cd "$case_dir"
 mkdir repo
