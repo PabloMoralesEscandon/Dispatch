@@ -655,12 +655,19 @@ expect_fail "$BIN" completion bash extra
 assert_contains "Usage: dispatch completion candidates"
 
 expect_ok "$BIN" completion fish
+assert_contains "function __dispatch_command"
 assert_contains "function __dispatch_candidates"
-assert_contains "dispatch completion candidates \$argv[1]"
+assert_contains "command \$cmd completion candidates \$argv[1]"
 assert_contains "candidates bash fish zsh"
 assert_contains "all (__dispatch_candidates groups)"
 assert_contains "(__dispatch_candidates tasks)"
 assert_contains "(__dispatch_candidates workspaces)"
+
+if command -v fish >/dev/null 2>&1; then
+    "$BIN" completion fish > "$TMP_ROOT/dispatch-completion.fish"
+    expect_ok fish -c "cd '$ROOT'; source '$TMP_ROOT/dispatch-completion.fish'; complete -C './dispatch '"
+    assert_line "show"
+fi
 
 expect_fail "$BIN" completion fish extra
 assert_contains "Usage: dispatch completion candidates"

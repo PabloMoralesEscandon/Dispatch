@@ -101,6 +101,14 @@ mkdir -p ~/.config/fish/completions
 dispatch completion fish > ~/.config/fish/completions/dispatch.fish
 ```
 
+Fish autoloads that file when the command is available as `dispatch` on
+`PATH`. If you are developing from a checkout and invoking `./dispatch`, source
+the generated script in the session instead:
+
+```fish
+./dispatch completion fish | source
+```
+
 The scripts ask Dispatch for dynamic candidates instead of reading
 `dispatch.json` directly. Task IDs, groups, agents, and workspaces come from
 line-oriented CLI commands such as:

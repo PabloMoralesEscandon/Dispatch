@@ -2348,8 +2348,18 @@ static int cmd_completion_fish(int argc, char **argv) {
     }
 
     fputs(
+        "function __dispatch_command\n"
+        "    set -l tokens (commandline -opc)\n"
+        "    if test (count $tokens) -gt 0\n"
+        "        echo $tokens[1]\n"
+        "    else\n"
+        "        echo dispatch\n"
+        "    end\n"
+        "end\n"
+        "\n"
         "function __dispatch_candidates\n"
-        "    dispatch completion candidates $argv[1] 2>/dev/null\n"
+        "    set -l cmd (__dispatch_command)\n"
+        "    command $cmd completion candidates $argv[1] 2>/dev/null\n"
         "end\n"
         "\n"
         "complete -c dispatch -f\n"
