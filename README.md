@@ -473,10 +473,11 @@ change board state.
 
 ## Dispatch Log
 
-Mutating Dispatch commands append audit records to `dispatch.log` in the
-workflow directory, next to `dispatch.json`. The log is append-only JSON Lines:
-one UTF-8 JSON object per line, with no surrounding array. Readers should ignore
-unknown fields so the format can grow without breaking older tooling.
+Successful mutating Dispatch commands append audit records to `dispatch.log` in
+the workflow directory, next to `dispatch.json`. Failed validation and rejected
+mutations do not append records. The log is append-only JSON Lines: one UTF-8
+JSON object per line, with no surrounding array. Readers should ignore unknown
+fields so the format can grow without breaking older tooling.
 
 Each record contains these fields:
 
@@ -494,7 +495,8 @@ Each record contains these fields:
   `workspace_create`.
 - `targets`: object containing relevant stable IDs. Use keys such as `task`,
   `group`, `dependency`, `dependent`, `agent`, and `workspace`.
-- `outcome`: `success` or `failure`.
+- `outcome`: command outcome. Dispatch currently writes `success` records after
+  completed mutations.
 - `message`: short human-readable result or error summary.
 
 Records may include a `context` object for structured details that support
@@ -511,8 +513,29 @@ Example records:
 
 The log complements task history stored in the board. Task history remains the
 authoritative per-task lifecycle summary; `dispatch.log` is the broader command
-audit trail, including dependency, group, workspace, and failed mutation
-attempts.
+audit trail for successful dependency, group, task, lifecycle, agent, and
+workspace changes.
+
+Use normal line-oriented tools to inspect the log:
+
+```bash
+tail -n 20 dispatch.log
+```
+
+Because each line is a standalone JSON object, JSON Lines-aware tools can filter
+or transform it without loading the board. For example, a reviewer can look for
+all lifecycle changes for a task by filtering records whose `targets.task`
+matches the task ID.
+
+Actor attribution follows the same rules as the workflow commands. User-facing
+approval and review commands that omit `--actor` record `user`. Agent ownership
+and execution commands, such as `workspace create`, `start`, and `finish`,
+should pass the agent's explicit actor name so the audit trail identifies the
+actor that performed the change.
+
+Agents must still use the Dispatch CLI for workflow changes. `dispatch.log` is
+an audit artifact, not an alternate command interface; do not edit it directly,
+and do not edit `dispatch.json` to create log entries.
 
 ## Tests
 
