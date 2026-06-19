@@ -57,6 +57,18 @@ assert_not_contains() {
     fi
 }
 
+assert_file_contains() {
+    local file="$1"
+    local text="$2"
+    if ! grep -Fq -- "$text" "$file"; then
+        fail "expected $file to contain: $text"
+    fi
+}
+
+line_count() {
+    wc -l < "$1" | tr -d ' '
+}
+
 make_case_dir() {
     local name="$1"
     local dir="$TMP_ROOT/$name"
@@ -285,6 +297,43 @@ assert_contains "Could not delete DE-01"
 
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
+
+case_dir="$(make_case_dir dispatch-log)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+if [ ! -f dispatch.log ]; then
+    fail "dispatch init did not create dispatch.log"
+fi
+assert_file_contains dispatch.log '"command":"init"'
+assert_file_contains dispatch.log '"outcome":"success"'
+
+expect_ok "$BIN" group add Development --prefix DE
+assert_file_contains dispatch.log '"actor":"user"'
+assert_file_contains dispatch.log '"command":"group"'
+assert_file_contains dispatch.log '"action":"add"'
+assert_file_contains dispatch.log '"group":"DE"'
+
+before_failed="$(line_count dispatch.log)"
+expect_fail "$BIN" group add Duplicate --prefix DE
+after_failed="$(line_count dispatch.log)"
+if [ "$before_failed" -ne "$after_failed" ]; then
+    fail "failed mutation appended to dispatch.log"
+fi
+
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" ready DE-01 --actor alice --no-review
+assert_file_contains dispatch.log '"actor":"alice"'
+assert_file_contains dispatch.log '"command":"ready"'
+assert_file_contains dispatch.log '"task":"DE-01"'
+assert_file_contains dispatch.log '"no_review":"true"'
+
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+assert_file_contains dispatch.log '"actor":"codex"'
+assert_file_contains dispatch.log '"command":"finish"'
+assert_file_contains dispatch.log '"new_state":"done"'
 
 case_dir="$(make_case_dir id-prefix-display)"
 cd "$case_dir"
