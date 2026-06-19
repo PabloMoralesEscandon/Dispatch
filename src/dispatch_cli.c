@@ -23,6 +23,14 @@ typedef struct {
     int loaded;
 } LockedBoard;
 
+static void append_dispatch_log(const char *actor, const char *command,
+                                const char *action,
+                                const DispatchLogField *targets,
+                                size_t target_count,
+                                const DispatchLogField *context,
+                                size_t context_count,
+                                const char *message);
+
 static const DispatchCliCommand commands[] = {
     {"init", "Create dispatch.json for a target repository"},
     {"agent", "Manage agents"},
@@ -114,6 +122,11 @@ static int cmd_init(int argc, char **argv) {
     }
 
     printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
+    DispatchLogField targets[] = {
+        {"repo_path", repo_path},
+    };
+    append_dispatch_log("user", "init", "init", targets, 1, NULL, 0,
+                        "Created dispatch.json");
     dispatch_store_lock_release(&lock);
     return 0;
 }
@@ -222,6 +235,37 @@ static char *cli_strdup(const char *value) {
         exit(1);
     }
     return copy;
+}
+
+static const char *bool_string(int value) {
+    return value ? "true" : "false";
+}
+
+static void append_dispatch_log(const char *actor, const char *command,
+                                const char *action,
+                                const DispatchLogField *targets,
+                                size_t target_count,
+                                const DispatchLogField *context,
+                                size_t context_count,
+                                const char *message) {
+    DispatchLogRecord record = {
+        .actor = actor && actor[0] ? actor : "user",
+        .command = command,
+        .action = action,
+        .outcome = "success",
+        .message = message,
+        .targets = targets,
+        .target_count = target_count,
+        .context = context,
+        .context_count = context_count,
+    };
+
+    char error[256] = {0};
+    if (!dispatch_store_log_append(DISPATCH_LOG_FILE, &record, error,
+                                   sizeof(error))) {
+        fprintf(stderr, "Warning: could not append %s: %s\n",
+                DISPATCH_LOG_FILE, error);
+    }
 }
 
 static void *cli_realloc_array(void *items, size_t count, size_t item_size) {
@@ -480,6 +524,20 @@ static int cmd_agent_create(int argc, char **argv) {
         printf("  run script: %s\n", run_script_path);
     if (print_command)
         printf("  command: %s\n", command);
+
+    DispatchLogField targets[] = {
+        {"agent", name},
+    };
+    DispatchLogField context[] = {
+        {"runner", runner},
+        {"model", model && model[0] ? model : ""},
+        {"agent_dir", agent_dir_base},
+        {"run_script", bool_string(!no_run_script)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Created agent %s", name);
+    append_dispatch_log("user", "agent", "create", targets, 1, context, 4,
+                        message);
 
     locked_board_close(&locked);
     free(agent_dir_base);
@@ -1353,6 +1411,21 @@ static int cmd_workspace_create(int argc, char **argv) {
         printf("  review gate: %s\n", review_gate ? review_gate : "-");
     }
 
+    DispatchLogField targets[] = {
+        {"task", task_id},
+        {"workspace", task_id},
+    };
+    DispatchLogField context[] = {
+        {"workspace_path", workspace_path},
+        {"workspace_branch", branch},
+        {"repo_path", repo_path},
+        {"sequence", bool_string(sequence)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Created workspace %s", task_id);
+    append_dispatch_log(actor, "workspace", "workspace_create", targets, 2,
+                        context, 4, message);
+
     string_list_free_cli(&sequence_tasks);
     free(review_gate);
     free(sequence_name);
@@ -1562,6 +1635,18 @@ static int cmd_workspace_remove(int argc, char **argv) {
 
     printf("Removed workspace %s\n", record_task_id);
     printf("  path: %s\n", workspace_path);
+    DispatchLogField targets[] = {
+        {"task", record_task_id},
+        {"workspace", record_task_id},
+    };
+    DispatchLogField context[] = {
+        {"workspace_path", workspace_path},
+        {"force", bool_string(force)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Removed workspace %s", record_task_id);
+    append_dispatch_log("user", "workspace", "workspace_remove", targets, 2,
+                        context, 2, message);
     free(record_task_id);
     free(repo_path);
     free(workspace_path);
@@ -1739,6 +1824,21 @@ static int cmd_workspace_prune(int argc, char **argv) {
     if (pruned == 0 && skipped == 0)
         printf("No workspaces pruned\n");
 
+    if (ok && !dry_run) {
+        char pruned_value[32];
+        char skipped_value[32];
+        snprintf(pruned_value, sizeof(pruned_value), "%zu", pruned);
+        snprintf(skipped_value, sizeof(skipped_value), "%zu", skipped);
+        DispatchLogField context[] = {
+            {"pruned", pruned_value},
+            {"skipped", skipped_value},
+            {"done", bool_string(prune_done)},
+            {"stale", bool_string(prune_stale)},
+        };
+        append_dispatch_log("user", "workspace", "workspace_prune", NULL, 0,
+                            context, 4, "Pruned workspaces");
+    }
+
     string_list_free_cli(&records_to_remove);
     prune_candidates_free(&candidates);
     return ok ? 0 : 1;
@@ -1801,6 +1901,17 @@ static int cmd_group_add(int argc, char **argv) {
     }
 
     printf("Added group %s (%s)\n", group->name, group->prefix);
+    DispatchLogField targets[] = {
+        {"group", group->id},
+    };
+    DispatchLogField context[] = {
+        {"name", group->name},
+        {"prefix", group->prefix},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Added group %s", group->name);
+    append_dispatch_log("user", "group", "add", targets, 1, context, 2,
+                        message);
     locked_board_close(&locked);
     return 0;
 }
@@ -1869,6 +1980,20 @@ static int cmd_group_ready(int argc, char **argv) {
 
     printf("Readied %d task%s in group %s\n", readied,
            readied == 1 ? "" : "s", group->prefix);
+    DispatchLogField targets[] = {
+        {"group", group->id},
+    };
+    char readied_value[32];
+    snprintf(readied_value, sizeof(readied_value), "%d", readied);
+    DispatchLogField context[] = {
+        {"readied", readied_value},
+        {"no_review", bool_string(no_review)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Readied %d task%s in group %s",
+             readied, readied == 1 ? "" : "s", group->prefix);
+    append_dispatch_log(actor, "group", "ready", targets, 1, context, 2,
+                        message);
     locked_board_close(&locked);
     return 0;
 }
@@ -1914,6 +2039,16 @@ static int cmd_task(int argc, char **argv) {
             return 1;
         }
         printf("Deleted task %s\n", task_id);
+        DispatchLogField targets[] = {
+            {"task", task_id},
+        };
+        DispatchLogField context[] = {
+            {"force", bool_string(force)},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Deleted task %s", task_id);
+        append_dispatch_log("user", "task", "delete", targets, 1, context, 1,
+                            message);
         locked_board_close(&locked);
         return 0;
     }
@@ -1971,6 +2106,18 @@ static int cmd_task(int argc, char **argv) {
     }
 
     printf("Added task %s\n", task_id);
+    DispatchLogField targets[] = {
+        {"task", task_id},
+        {"group", group},
+    };
+    DispatchLogField context[] = {
+        {"title", title},
+        {"requires_review", bool_string(requires_review)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Added task %s", task_id);
+    append_dispatch_log("user", "task", "add", targets, 2, context, 2,
+                        message);
     free(task_id);
     locked_board_close(&locked);
     return 0;
@@ -2019,6 +2166,18 @@ static int cmd_dep(int argc, char **argv) {
     printf("%s dependency %s -> %s (%s depends on %s)\n",
            strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
            to_id, to_id, from_id);
+    DispatchLogField targets[] = {
+        {"dependency", from_id},
+        {"dependent", to_id},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "%s dependency %s -> %s",
+             strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
+             to_id);
+    append_dispatch_log("user", "dep",
+                        strcmp(argv[2], "add") == 0 ? "dependency_add"
+                                                     : "dependency_remove",
+                        targets, 2, NULL, 0, message);
     locked_board_close(&locked);
     return 0;
 }
@@ -2486,6 +2645,8 @@ static int cmd_normalize(void) {
     }
 
     printf("Normalized %s\n", DISPATCH_STORE_FILE);
+    append_dispatch_log("user", "normalize", "normalize", NULL, 0, NULL, 0,
+                        "Normalized dispatch.json");
     locked_board_close(&locked);
     return 0;
 }
@@ -2849,6 +3010,20 @@ static int cmd_ready(int argc, char **argv) {
         task->requires_review = 0;
 
     int result = save_task_transition(&locked, "Readied", task_id);
+    if (result == 0) {
+        DispatchLogField targets[] = {
+            {"task", task_id},
+        };
+        DispatchLogField context[] = {
+            {"no_review", bool_string(no_review)},
+            {"new_state",
+             dispatch_state_name(dispatch_task_effective_state(board, task))},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Readied %s", task_id);
+        append_dispatch_log(actor, "ready", "ready", targets, 1, context, 2,
+                            message);
+    }
     locked_board_close(&locked);
     return result;
 }
@@ -2887,6 +3062,18 @@ static int cmd_start(int argc, char **argv) {
     }
 
     int result = save_task_transition(&locked, "Started", task_id);
+    if (result == 0) {
+        DispatchLogField targets[] = {
+            {"task", task_id},
+        };
+        DispatchLogField context[] = {
+            {"new_state", "doing"},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Started %s", task_id);
+        append_dispatch_log(actor, "start", "start", targets, 1, context, 1,
+                            message);
+    }
     locked_board_close(&locked);
     return result;
 }
@@ -2920,6 +3107,17 @@ static int cmd_finish(int argc, char **argv) {
     }
 
     printf("Finished %s (%s)\n", task_id, dispatch_state_name(finished_state));
+    DispatchLogField targets[] = {
+        {"task", task_id},
+    };
+    DispatchLogField context[] = {
+        {"new_state", dispatch_state_name(finished_state)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Finished %s (%s)", task_id,
+             dispatch_state_name(finished_state));
+    append_dispatch_log(actor, "finish", "finish", targets, 1, context, 1,
+                        message);
     if (finished_state == DISPATCH_STATE_REVIEW) {
         puts("Review required before continuing this sequence.");
     } else if (finished_state == DISPATCH_STATE_DONE &&
@@ -2961,6 +3159,18 @@ static int cmd_review(int argc, char **argv) {
     }
 
     int result = save_task_transition(&locked, "Reviewed", task_id);
+    if (result == 0) {
+        DispatchLogField targets[] = {
+            {"task", task_id},
+        };
+        DispatchLogField context[] = {
+            {"new_state", "done"},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Reviewed %s", task_id);
+        append_dispatch_log(actor, "review", "review", targets, 1, context, 1,
+                            message);
+    }
     locked_board_close(&locked);
     return result;
 }
