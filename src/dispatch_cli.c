@@ -2526,6 +2526,13 @@ static const char *color_for_state(DispatchState state) {
     return "";
 }
 
+static DispatchState task_presentation_state(const DispatchBoard *board,
+                                             const DispatchTask *task) {
+    if (task && task->state == DISPATCH_STATE_PROPOSED)
+        return DISPATCH_STATE_PROPOSED;
+    return dispatch_task_effective_state(board, task);
+}
+
 static DispatchWorkspace *task_workspace(const DispatchBoard *board,
                                          const char *task_id,
                                          int active_only) {
@@ -2544,7 +2551,7 @@ static DispatchWorkspace *task_workspace(const DispatchBoard *board,
 
 static void print_task_line(const DispatchBoard *board, const DispatchTask *task,
                             const char *indent) {
-    DispatchState state = dispatch_task_effective_state(board, task);
+    DispatchState state = task_presentation_state(board, task);
     int color = cli_color_enabled();
     const char *reset = color ? "\033[0m" : "";
     const char *id_color = color ? "\033[1;37m" : "";
@@ -2611,7 +2618,7 @@ static void print_list_for_group(const DispatchBoard *board,
         if (strcmp(task->group, group->id) != 0)
             continue;
         any_tasks = 1;
-        DispatchState state = dispatch_task_effective_state(board, task);
+        DispatchState state = task_presentation_state(board, task);
         if (state != DISPATCH_STATE_DONE)
             all_done = 0;
         if (!include_done && state == DISPATCH_STATE_DONE)
@@ -2694,7 +2701,7 @@ static int cmd_show(int argc, char **argv) {
     printf("Description: %s\n", task->description);
     printf("Group: %s\n", task->group);
     printf("State: %s\n",
-           dispatch_state_name(dispatch_task_effective_state(&board, task)));
+           dispatch_state_name(task_presentation_state(&board, task)));
     printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
     printf("Assigned to: %s\n", task->assigned_to ? task->assigned_to : "-");
     printf("Started by: %s\n", task->started_by ? task->started_by : "-");
@@ -2773,8 +2780,7 @@ static int cmd_blocked(int argc, char **argv) {
 
     for (size_t i = 0; i < board.tasks.count; i++) {
         DispatchTask *task = &board.tasks.items[i];
-        if (dispatch_task_effective_state(&board, task) !=
-            DISPATCH_STATE_BLOCKED) {
+        if (task_presentation_state(&board, task) != DISPATCH_STATE_BLOCKED) {
             continue;
         }
         printf("%-8s %s  blocked_by:", task->id, task_display_title(task));

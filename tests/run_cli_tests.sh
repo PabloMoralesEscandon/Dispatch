@@ -204,10 +204,13 @@ assert_contains "Added dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
 expect_ok "$BIN" list
 assert_contains "[DE] Development"
 assert_contains "  DE-01    proposed   First"
-assert_contains "  DE-02    blocked    Second  depends_on:DE-01"
+assert_contains "  DE-02    proposed   Second  depends_on:DE-01"
 
 expect_ok "$BIN" list
-assert_contains "  DE-02    blocked    Second  depends_on:DE-01"
+assert_contains "  DE-02    proposed   Second  depends_on:DE-01"
+
+expect_ok "$BIN" blocked
+assert_not_contains "DE-02"
 
 expect_fail "$BIN" dep add DE-02 DE-01
 assert_contains "Could not add dependency DE-02 -> DE-01 (DE-01 depends on DE-02)"
@@ -822,13 +825,13 @@ expect_ok "$BIN" dep add DE-02 DE-04
 expect_ok "$BIN" dep add DE-03 DE-04
 expect_ok "$BIN" list DE
 assert_contains "  DE-01    proposed   Root"
-assert_contains "  DE-02    blocked    BranchA  depends_on:DE-01"
-assert_contains "  DE-03    blocked    BranchB  depends_on:DE-01"
-assert_contains "  DE-04    blocked    Join  depends_on:DE-02,DE-03"
+assert_contains "  DE-02    proposed   BranchA  depends_on:DE-01"
+assert_contains "  DE-03    proposed   BranchB  depends_on:DE-01"
+assert_contains "  DE-04    proposed   Join  depends_on:DE-02,DE-03"
 
 expect_ok env -u NO_COLOR FORCE_COLOR=1 "$BIN" list DE
 assert_contains "${ESC}[1;36m[DE] Development${ESC}[0m"
-assert_contains "${ESC}[1;33mblocked   ${ESC}[0m Join"
+assert_contains "${ESC}[2;37mproposed  ${ESC}[0m Join"
 assert_contains "${ESC}[2;37mdepends_on:DE-02,DE-03${ESC}[0m"
 
 expect_ok env FORCE_COLOR=1 NO_COLOR=1 "$BIN" list DE

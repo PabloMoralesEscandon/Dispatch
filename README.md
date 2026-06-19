@@ -293,7 +293,9 @@ dispatch blocked
 
 `dep add DE-01 DE-02` means `DE-02` depends on `DE-01`; the first argument is
 the prerequisite, and the second argument is the task that waits for it. A task
-is blocked when any dependency is not done. Dependency cycles are rejected.
+that has been approved for work is blocked when any dependency is not done.
+Tasks that have not been readied yet still display as proposed, even when they
+have unmet dependencies. Dependency cycles are rejected.
 
 ### Lifecycle
 
