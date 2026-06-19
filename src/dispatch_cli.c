@@ -1806,14 +1806,14 @@ static int cmd_group_add(int argc, char **argv) {
 }
 
 static int cmd_group_ready(int argc, char **argv) {
-    if (argc < 6) {
+    if (argc < 4) {
         fprintf(stderr,
-                "Usage: dispatch group ready <group> --actor <name> [--no-review]\n");
+                "Usage: dispatch group ready <group> [--actor <name>] [--no-review]\n");
         return 1;
     }
 
     const char *group_id = argv[3];
-    const char *actor = NULL;
+    const char *actor = "user";
     int no_review = 0;
 
     for (int i = 4; i < argc; i++) {
@@ -1825,12 +1825,6 @@ static int cmd_group_ready(int argc, char **argv) {
             fprintf(stderr, "Unknown group ready option: %s\n", argv[i]);
             return 1;
         }
-    }
-
-    if (!actor || actor[0] == '\0') {
-        fprintf(stderr,
-                "Usage: dispatch group ready <group> --actor <name> [--no-review]\n");
-        return 1;
     }
 
     LockedBoard locked;
@@ -1887,7 +1881,7 @@ static int cmd_group(int argc, char **argv) {
 
     fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
     fprintf(stderr,
-            "       dispatch group ready <group> --actor <name> [--no-review]\n");
+            "       dispatch group ready <group> [--actor <name>] [--no-review]\n");
     return 1;
 }
 
@@ -2803,14 +2797,14 @@ static int cmd_blocked(int argc, char **argv) {
 static int cmd_ready(int argc, char **argv) {
     if (argc == 2)
         return cmd_ready_list();
-    if (argc < 5) {
+    if (argc < 3) {
         fprintf(stderr,
-                "Usage: dispatch ready <id> --actor <name> [--no-review]\n");
+                "Usage: dispatch ready <id> [--actor <name>] [--no-review]\n");
         return 1;
     }
 
     const char *task_id = argv[2];
-    const char *actor = NULL;
+    const char *actor = "user";
     int no_review = 0;
 
     for (int i = 3; i < argc; i++) {
@@ -2822,12 +2816,6 @@ static int cmd_ready(int argc, char **argv) {
             fprintf(stderr, "Unknown ready option: %s\n", argv[i]);
             return 1;
         }
-    }
-
-    if (!actor || actor[0] == '\0') {
-        fprintf(stderr,
-                "Usage: dispatch ready <id> --actor <name> [--no-review]\n");
-        return 1;
     }
 
     LockedBoard locked;
@@ -2929,13 +2917,20 @@ static int cmd_finish(int argc, char **argv) {
 }
 
 static int cmd_review(int argc, char **argv) {
-    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
-        fprintf(stderr, "Usage: dispatch review <id> --actor <name>\n");
+    if (argc != 3 && argc != 5) {
+        fprintf(stderr, "Usage: dispatch review <id> [--actor <name>]\n");
         return 1;
     }
 
     const char *task_id = argv[2];
-    const char *actor = argv[4];
+    const char *actor = "user";
+    if (argc == 5) {
+        if (strcmp(argv[3], "--actor") != 0 || argv[4][0] == '\0') {
+            fprintf(stderr, "Usage: dispatch review <id> [--actor <name>]\n");
+            return 1;
+        }
+        actor = argv[4];
+    }
 
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))

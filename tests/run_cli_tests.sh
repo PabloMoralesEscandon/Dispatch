@@ -216,13 +216,10 @@ expect_fail "$BIN" dep add DE-01
 assert_contains "Usage: dispatch dep add <dependency-id> <dependent-id>"
 assert_contains "Example: dispatch dep add DE-01 DE-02 means DE-02 depends on DE-01"
 
-expect_fail "$BIN" ready DE-01
-assert_contains "Usage: dispatch ready <id> --actor <name> [--no-review]"
-
 expect_ok "$BIN" show DE-01
 assert_contains "Blocks: DE-02"
 
-expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" ready DE-01
 assert_contains "Readied DE-01"
 
 expect_ok "$BIN" ready DE-02 --actor user
@@ -254,7 +251,7 @@ expect_ok "$BIN" blocked
 assert_contains "DE-02"
 assert_contains "blocked_by: DE-01"
 
-expect_ok "$BIN" review DE-01 --actor user
+expect_ok "$BIN" review DE-01
 assert_contains "Reviewed DE-01"
 
 expect_ok "$BIN" ready
@@ -325,10 +322,7 @@ expect_ok "$BIN" ready DE-07 --actor user
 expect_ok "$BIN" start DE-07 --actor codex
 expect_ok "$BIN" finish DE-07 --actor codex
 
-expect_fail "$BIN" group ready DE
-assert_contains "Usage: dispatch group ready <group> --actor <name> [--no-review]"
-
-expect_ok "$BIN" group ready DE --actor user
+expect_ok "$BIN" group ready DE
 assert_contains "Readied 3 tasks in group DE"
 
 expect_ok "$BIN" list

@@ -237,7 +237,7 @@ worktree. Use `--dry-run` to preview prune actions.
 
 ```bash
 dispatch group add <name> [--prefix XX]
-dispatch group ready <group> --actor <name> [--no-review]
+dispatch group ready <group> [--actor <name>] [--no-review]
 ```
 
 Groups are workflow lanes or topics. Task IDs are generated from the group
@@ -246,12 +246,13 @@ prefix, for example `DE-01`.
 `group ready` marks every proposed task in the group as ready in one operation.
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
 Proposed tasks with unmet dependencies are approved but still display as blocked
-until their blockers are done. The actor should normally be the user; an agent
-should ready tasks only when the user explicitly asks it to do so. Add
-`--no-review` only when the user approves every readied task as safe to finish
-without a review gate. If `--no-review` is used on a group that is already
-readied, it also applies to ready or blocked tasks in that group that have not
-been started yet.
+until their blockers are done. If `--actor` is omitted, Dispatch records the
+actor as `user`. An agent should still pass its explicit actor name when the
+agent is performing the approval at the user's instruction. Add `--no-review`
+only when the user approves every readied task as safe to finish without a
+review gate. If `--no-review` is used on a group that is already readied, it
+also applies to ready or blocked tasks in that group that have not been started
+yet.
 
 ### Tasks
 
@@ -297,10 +298,10 @@ is blocked when any dependency is not done. Dependency cycles are rejected.
 ### Lifecycle
 
 ```bash
-dispatch ready [<id> --actor <name> [--no-review]]
+dispatch ready [<id> [--actor <name>] [--no-review]]
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
-dispatch review <id> --actor <name>
+dispatch review <id> [--actor <name>]
 ```
 
 The normal lifecycle is:
@@ -315,11 +316,12 @@ Tasks without review gates go directly from `doing` to `done` when finished:
 proposed -> ready -> doing -> done
 ```
 
-Use `ready` with no ID to list work that can be started. Use
-`ready <id> --actor <name>` to approve a proposed task for work. The actor
-should normally be the user; an agent should mark tasks ready only when the user
-explicitly instructs it to do so. Add `--no-review` when approving a task that
-can safely move directly from `doing` to `done` after the agent finishes it.
+Use `ready` with no ID to list work that can be started. Use `ready <id>` to
+approve a proposed task for work. Omitted actors on user-facing approval and
+review commands default to `user`; agents should still pass their explicit
+actor name when acting on the user's instruction. Add `--no-review` when
+approving a task that can safely move directly from `doing` to `done` after the
+agent finishes it.
 
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to
