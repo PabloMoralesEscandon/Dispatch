@@ -55,6 +55,67 @@ To clean generated build output:
 ./nob clean
 ```
 
+## Shell Completion
+
+Dispatch can print completion scripts for bash, zsh, and fish:
+
+```bash
+dispatch completion bash
+dispatch completion zsh
+dispatch completion fish
+```
+
+For a one-off bash or zsh session, source the generated script:
+
+```bash
+source <(dispatch completion bash)
+source <(dispatch completion zsh)
+```
+
+To install bash completion, write the generated script to your bash-completion
+directory:
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+dispatch completion bash > ~/.local/share/bash-completion/completions/dispatch
+```
+
+To install zsh completion, write the generated script as `_dispatch` somewhere
+in `fpath`, then initialize completions from your shell startup file:
+
+```bash
+mkdir -p ~/.zfunc
+dispatch completion zsh > ~/.zfunc/_dispatch
+```
+
+```zsh
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit
+compinit
+```
+
+To install fish completion:
+
+```bash
+mkdir -p ~/.config/fish/completions
+dispatch completion fish > ~/.config/fish/completions/dispatch.fish
+```
+
+The scripts ask Dispatch for dynamic candidates instead of reading
+`dispatch.json` directly. Task IDs, groups, agents, and workspaces come from
+line-oriented CLI commands such as:
+
+```bash
+dispatch completion candidates tasks
+dispatch completion candidates groups
+dispatch completion candidates agents
+dispatch completion candidates workspaces
+```
+
+Run completions from the workflow directory that contains the board, or make
+sure `dispatch` is invoked from that directory, so dynamic candidates come from
+the intended board.
+
 ## Quick Start
 
 Create a workflow directory, put or clone the code repository inside it, then
@@ -119,6 +180,19 @@ dispatch normalize
 `init` creates `dispatch.json` if it does not already exist. Pass the repository
 path, normally `repo`, when using the recommended parent workflow layout.
 `normalize` recomputes derived states such as blocked and ready.
+
+### Completion
+
+```bash
+dispatch completion candidates commands|candidate-kinds|tasks|groups|agents|workspaces
+dispatch completion bash
+dispatch completion zsh
+dispatch completion fish
+```
+
+`completion candidates` prints line-separated values for shell completion.
+Generated shell scripts use those candidate commands for board-specific task,
+group, agent, and workspace values.
 
 ### Agents
 
