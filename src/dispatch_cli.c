@@ -408,6 +408,84 @@ static char *codex_agent_resume_command_for(const DispatchAgent *agent,
     return command;
 }
 
+static char *generate_uuid_v4(void) {
+    unsigned char bytes[16];
+    FILE *random = fopen("/dev/urandom", "rb");
+    if (!random)
+        return NULL;
+
+    size_t count = fread(bytes, 1, sizeof(bytes), random);
+    fclose(random);
+    if (count != sizeof(bytes))
+        return NULL;
+
+    bytes[6] = (unsigned char)((bytes[6] & 0x0f) | 0x40);
+    bytes[8] = (unsigned char)((bytes[8] & 0x3f) | 0x80);
+
+    char *uuid = malloc(37);
+    if (!uuid) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(uuid, 37,
+             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
+             "%02x%02x%02x%02x%02x%02x",
+             (unsigned int)bytes[0], (unsigned int)bytes[1],
+             (unsigned int)bytes[2], (unsigned int)bytes[3],
+             (unsigned int)bytes[4], (unsigned int)bytes[5],
+             (unsigned int)bytes[6], (unsigned int)bytes[7],
+             (unsigned int)bytes[8], (unsigned int)bytes[9],
+             (unsigned int)bytes[10], (unsigned int)bytes[11],
+             (unsigned int)bytes[12], (unsigned int)bytes[13],
+             (unsigned int)bytes[14], (unsigned int)bytes[15]);
+    return uuid;
+}
+
+static char *claude_agent_resume_command_for(const DispatchAgent *agent,
+                                             const DispatchWorkspace *workspace,
+                                             int start_with_session_id) {
+    char *model_q = agent->model && agent->model[0] ? shell_quote(agent->model) : NULL;
+    char *workspace_q = workspace && workspace->path && workspace->path[0]
+                            ? shell_quote(workspace->path)
+                            : NULL;
+    char *session_q = shell_quote(agent->session_id);
+    char *prompt_q = start_with_session_id ? shell_quote(agent->prompt_path) : NULL;
+
+    size_t size = strlen("claude") + 1;
+    if (workspace_q)
+        size += strlen("cd ") + strlen(workspace_q) + strlen(" && ");
+    if (model_q)
+        size += strlen(" --model ") + strlen(model_q);
+    size += strlen(start_with_session_id ? " --session-id " : " --resume ") +
+            strlen(session_q);
+    if (prompt_q)
+        size += strlen(" \"$(cat )\"") + strlen(prompt_q);
+
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    size_t out = 0;
+    if (workspace_q)
+        out += snprintf(command + out, size - out, "cd %s && ", workspace_q);
+    out += snprintf(command + out, size - out, "claude");
+    if (model_q)
+        out += snprintf(command + out, size - out, " --model %s", model_q);
+    out += snprintf(command + out, size - out, "%s %s",
+                    start_with_session_id ? " --session-id" : " --resume",
+                    session_q);
+    if (prompt_q)
+        snprintf(command + out, size - out, " \"$(cat %s)\"", prompt_q);
+
+    free(model_q);
+    free(workspace_q);
+    free(session_q);
+    free(prompt_q);
+    return command;
+}
+
 static int write_agent_prompt(const char *path, const char *name,
                               const char *runner) {
     FILE *file = fopen(path, "w");
@@ -807,39 +885,91 @@ static int cmd_agent_resume(int argc, char **argv) {
         return 1;
     }
 
-    DispatchBoard board;
-    if (!load_board_or_error(&board))
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
         return 1;
 
-    DispatchAgent *agent = dispatch_board_find_agent(&board, argv[3]);
+    DispatchAgent *agent = dispatch_board_find_agent(&locked.board, argv[3]);
     if (!agent) {
-        dispatch_board_free(&board);
+        locked_board_close(&locked);
         fprintf(stderr, "No agent named %s\n", argv[3]);
-        return 1;
-    }
-    if (strcmp(agent->runner, "codex") != 0) {
-        dispatch_board_free(&board);
-        fprintf(stderr, "Agent resume is not implemented for runner %s\n",
-                agent->runner);
         return 1;
     }
 
     DispatchWorkspace *workspace = NULL;
     if (agent->last_workspace) {
-        workspace = dispatch_board_find_workspace(&board, agent->last_workspace);
+        workspace =
+            dispatch_board_find_workspace(&locked.board, agent->last_workspace);
         if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
-            dispatch_board_free(&board);
+            locked_board_close(&locked);
             fprintf(stderr, "No active workspace for %s\n",
                     agent->last_workspace);
             return 1;
         }
     }
 
-    char *command = codex_agent_resume_command_for(agent, workspace);
-    printf("%s\n", command);
-    free(command);
+    char *command = NULL;
+    char *resume_script_path = NULL;
+    int generated_session = 0;
+    if (strcmp(agent->runner, "codex") == 0) {
+        command = codex_agent_resume_command_for(agent, workspace);
+    } else if (strcmp(agent->runner, "claude") == 0) {
+        if (!agent->session_id || !agent->session_id[0]) {
+            char *uuid = generate_uuid_v4();
+            if (!uuid) {
+                locked_board_close(&locked);
+                fprintf(stderr, "Could not generate Claude session UUID\n");
+                return 1;
+            }
+            replace_optional_string(&agent->session_id, uuid);
+            free(uuid);
+            agent->updated_at = time(NULL);
+            generated_session = 1;
+            if (!locked_board_save_or_error(&locked)) {
+                locked_board_close(&locked);
+                return 1;
+            }
+        }
 
-    dispatch_board_free(&board);
+        command =
+            claude_agent_resume_command_for(agent, workspace, generated_session);
+        resume_script_path = join_path2(agent->agent_dir, "resume.sh");
+        if (!write_agent_run_script(resume_script_path, command)) {
+            locked_board_close(&locked);
+            free(command);
+            free(resume_script_path);
+            return 1;
+        }
+    } else {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent resume is not implemented for runner %s\n",
+                agent->runner);
+        return 1;
+    }
+
+    printf("%s\n", command);
+    if (resume_script_path)
+        printf("resume script: %s\n", resume_script_path);
+
+    if (generated_session) {
+        DispatchLogField targets[] = {
+            {"agent", agent->name},
+        };
+        DispatchLogField context[] = {
+            {"session_id", agent->session_id},
+            {"runner", agent->runner},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Generated Claude session %s",
+                 agent->name);
+        append_dispatch_log("user", "agent", "resume", targets, 1, context, 2,
+                            message);
+    }
+
+    free(command);
+    free(resume_script_path);
+
+    locked_board_close(&locked);
     return 0;
 }
 

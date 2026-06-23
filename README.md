@@ -229,7 +229,10 @@ are used by runner-specific resume commands.
 `agent resume` prints a runner-specific shell command for continuing an agent.
 Codex agents use the stored session ID when present. Without one, Dispatch emits
 a `codex resume --last` command scoped to the agent's remembered workspace when
-`last_workspace` is set.
+`last_workspace` is set. Claude agents use `claude --resume` when a session ID
+is stored. If no Claude session ID exists yet, Dispatch generates a UUID, stores
+it on the agent, prints a `claude --session-id` startup command, and writes the
+same command to `.dispatch/agents/<name>/resume.sh`.
 
 ### Workspaces
 

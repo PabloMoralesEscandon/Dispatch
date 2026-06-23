@@ -198,6 +198,18 @@ expect_ok "$BIN" agent command claude-a --print-command
 assert_contains "claude --prompt-file \".dispatch/agents/claude-a/AGENT.md\""
 expect_ok "$BIN" agent show claude-a
 assert_contains "Run script: -"
+expect_ok "$BIN" agent resume claude-a
+assert_contains "claude --session-id '"
+assert_contains "\"\$(cat '.dispatch/agents/claude-a/AGENT.md')\""
+assert_contains "resume script: .dispatch/agents/claude-a/resume.sh"
+if [ ! -x .dispatch/agents/claude-a/resume.sh ]; then
+    fail "agent resume script was not created executable"
+fi
+expect_ok "$BIN" agent show claude-a
+assert_not_contains "Session ID: -"
+expect_ok "$BIN" agent resume claude-a --print-command
+assert_contains "claude --resume '"
+assert_contains "resume script: .dispatch/agents/claude-a/resume.sh"
 if [ -e .dispatch/agents/claude-a/run.sh ]; then
     fail "agent run script was created despite --no-run-script"
 fi
@@ -489,6 +501,11 @@ assert_contains "Last workspace: DE-01"
 expect_ok "$BIN" agent resume Codex_A
 assert_contains "codex resume --cd '"
 assert_contains "repo-agent-codex_a-DE-01' --last"
+expect_ok "$BIN" agent create --name Claude_A --runner claude --no-run-script
+expect_ok "$BIN" agent session Claude_A --session-id 123e4567-e89b-42d3-a456-426614174000 --last-workspace DE-01
+expect_ok "$BIN" agent resume Claude_A
+assert_contains "cd '"
+assert_contains "repo-agent-codex_a-DE-01' && claude --resume '123e4567-e89b-42d3-a456-426614174000'"
 expect_ok "$BIN" workspace list
 assert_contains "DE-01"
 assert_contains "active"
