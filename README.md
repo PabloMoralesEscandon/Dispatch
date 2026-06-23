@@ -187,7 +187,10 @@ dispatch normalize
 
 `init` creates `dispatch.json` if it does not already exist. Pass the repository
 path, normally `repo`, when using the recommended parent workflow layout.
-`normalize` recomputes derived states such as blocked and ready.
+`normalize` recomputes derived states such as blocked and ready. It also repairs
+older agent prompt records by moving them to the canonical
+`.dispatch/agents/<name>/<name>-PROMPT.md` prompt path and regenerating affected
+agent run scripts.
 
 ### Completion
 
@@ -214,11 +217,13 @@ dispatch agent resume <name> [--print-command]
 ```
 
 `agent create` registers a named agent and creates local support files under
-`.dispatch/agents/<name>/`. The generated prompt file explains the shared
-Dispatch workflow, and the optional `run.sh` starts the selected runner from the
-workflow directory. Agent directories are for prompt material, scratch notes,
-and local decisions; task state remains in Dispatch and product changes belong
-in task worktrees.
+`.dispatch/agents/<name>/`. The generated prompt is named
+`.dispatch/agents/<name>/<name>-PROMPT.md`; it includes the workflow
+`AGENTS.md` instructions plus agent identity, runner, scratch/decision paths,
+and explicit workspace isolation rules. The optional `run.sh` starts the
+selected runner from the workflow directory. Agent directories are for prompt
+material, scratch notes, and local decisions; task state remains in Dispatch and
+product changes belong in task worktrees.
 
 `agent session` records runner session metadata on the agent record. The
 session ID identifies the runner session to resume, `current_task` records the

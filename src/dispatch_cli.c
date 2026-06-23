@@ -309,6 +309,25 @@ static int make_dir_if_needed(const char *path) {
     return 0;
 }
 
+static char *agent_prompt_filename(const char *name) {
+    const char *suffix = "-PROMPT.md";
+    size_t size = strlen(name) + strlen(suffix) + 1;
+    char *filename = malloc(size);
+    if (!filename) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(filename, size, "%s%s", name, suffix);
+    return filename;
+}
+
+static char *agent_prompt_path_for(const char *agent_dir, const char *name) {
+    char *filename = agent_prompt_filename(name);
+    char *path = join_path2(agent_dir, filename);
+    free(filename);
+    return path;
+}
+
 static int create_agent_dirs(const char *agent_dir, char **scratch_dir,
                              char **decisions_dir) {
     if (!make_dir_if_needed(".dispatch") ||
@@ -486,29 +505,65 @@ static char *claude_agent_resume_command_for(const DispatchAgent *agent,
     return command;
 }
 
+static int copy_file_contents(FILE *out, const char *path) {
+    FILE *in = fopen(path, "r");
+    if (!in)
+        return 0;
+
+    char buffer[4096];
+    size_t count;
+    while ((count = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+        if (fwrite(buffer, 1, count, out) != count) {
+            fclose(in);
+            return 0;
+        }
+    }
+    int ok = ferror(in) == 0;
+    fclose(in);
+    return ok;
+}
+
 static int write_agent_prompt(const char *path, const char *name,
-                              const char *runner) {
+                              const char *runner, const char *model,
+                              const char *agent_dir, const char *scratch_dir,
+                              const char *decisions_dir) {
     FILE *file = fopen(path, "w");
     if (!file) {
         fprintf(stderr, "Could not write %s: %s\n", path, strerror(errno));
         return 0;
     }
 
-    fprintf(file, "# Dispatch Agent: %s\n\n", name);
-    fprintf(file, "You are the `%s` agent running with `%s`.\n\n", name,
-            runner);
-    fprintf(file, "Rules:\n");
-    fprintf(file, "- Work from the workflow directory that contains dispatch.json.\n");
-    fprintf(file, "- Use the Dispatch CLI for all workflow state.\n");
-    fprintf(file, "- Never read or edit dispatch.json directly.\n");
-    fprintf(file, "- Start only ready, unassigned tasks assigned to your work.\n");
-    fprintf(file, "- Assume other agents may be working in parallel.\n");
-    fprintf(file, "- Do not edit another agent's task worktree or scratch directory.\n");
-    fprintf(file, "- Keep temporary notes in .dispatch/agents/%s/scratch/.\n",
-            name);
-    fprintf(file, "- Keep agent-local decisions in .dispatch/agents/%s/decisions/.\n",
-            name);
-    fprintf(file, "- Write repository documentation only when the user asks or a Dispatch task requires it.\n");
+    fprintf(file, "# Dispatch Agent Prompt: %s\n\n", name);
+    fprintf(file, "## Agent Identity\n\n");
+    fprintf(file, "- Agent name: `%s`\n", name);
+    fprintf(file, "- Runner: `%s`\n", runner);
+    fprintf(file, "- Model: `%s`\n", model && model[0] ? model : "runner default");
+    fprintf(file, "- Workflow directory: the directory containing `dispatch.json`\n");
+    fprintf(file, "- Agent directory: `%s`\n", agent_dir);
+    fprintf(file, "- Prompt file: `%s`\n", path);
+    fprintf(file, "- Scratch directory: `%s`\n", scratch_dir);
+    fprintf(file, "- Decisions directory: `%s`\n\n", decisions_dir);
+
+    fprintf(file, "## Agent-Specific Operating Rules\n\n");
+    fprintf(file, "- Use the Dispatch CLI for all workflow state. Never read, parse, or edit `dispatch.json` directly.\n");
+    fprintf(file, "- Start only ready, unassigned tasks. Do not work on blocked, review, proposed, or already assigned tasks.\n");
+    fprintf(file, "- Use `%s` as the `--actor` value when starting, finishing, reviewing by explicit assignment, or recording workspace ownership.\n", name);
+    fprintf(file, "- Keep temporary notes in `%s` and durable agent-local decisions in `%s`.\n", scratch_dir, decisions_dir);
+    fprintf(file, "- Do not edit another agent's prompt, scratch directory, decisions directory, task worktree, or branch.\n");
+    fprintf(file, "- Commit each completed Dispatch task separately using the Dispatch task title as the commit message.\n\n");
+
+    fprintf(file, "## Workspace Rules\n\n");
+    fprintf(file, "- Use one Git worktree and branch per agent or task sequence when parallel agents are active.\n");
+    fprintf(file, "- Prefer `dispatch workspace create <task-id> --actor %s` for owned task workspaces.\n", name);
+    fprintf(file, "- Do not switch branches, stage files, amend commits, or merge branches in a shared worktree while another agent may be using it.\n");
+    fprintf(file, "- Do not remove or prune another agent's workspace unless the user explicitly asks.\n");
+    fprintf(file, "- Treat Dispatch workspace records as ownership metadata and Git worktrees as the file isolation boundary.\n\n");
+
+    fprintf(file, "## Repository Instructions From AGENTS.md\n\n");
+    if (!copy_file_contents(file, "AGENTS.md")) {
+        fprintf(file, "`AGENTS.md` was not found in the workflow directory when this prompt was generated. Follow the Dispatch rules above and inspect repository instructions through the normal runner context before changing files.\n");
+    }
+    fprintf(file, "\n");
     fclose(file);
     return 1;
 }
@@ -601,7 +656,7 @@ static int cmd_agent_create(int argc, char **argv) {
     }
 
     char *agent_dir_base = join_path2(".dispatch/agents", name);
-    char *prompt_path = join_path2(agent_dir_base, "AGENT.md");
+    char *prompt_path = agent_prompt_path_for(agent_dir_base, name);
     char *run_script_path = no_run_script ? NULL : join_path2(agent_dir_base, "run.sh");
     char *scratch_dir = NULL;
     char *decisions_dir = NULL;
@@ -626,7 +681,8 @@ static int cmd_agent_create(int argc, char **argv) {
     }
 
     if (!create_agent_dirs(agent_dir_base, &scratch_dir, &decisions_dir) ||
-        !write_agent_prompt(prompt_path, name, runner) ||
+        !write_agent_prompt(prompt_path, name, runner, model, agent_dir_base,
+                            scratch_dir, decisions_dir) ||
         (!no_run_script && !write_agent_run_script(run_script_path, command)) ||
         !append_agent_record(&locked.board, name, runner, model, agent_dir_base,
                              prompt_path, run_script_path) ||
@@ -2978,18 +3034,72 @@ static int cmd_completion(int argc, char **argv) {
     return 1;
 }
 
+static int normalize_agent_prompts(DispatchBoard *board) {
+    int changed = 0;
+    for (size_t i = 0; i < board->agents.count; i++) {
+        DispatchAgent *agent = &board->agents.items[i];
+        char *prompt_path = agent_prompt_path_for(agent->agent_dir, agent->name);
+        int needs_path_update = strcmp(agent->prompt_path, prompt_path) != 0;
+        if (!needs_path_update) {
+            free(prompt_path);
+            continue;
+        }
+
+        char *scratch_dir = NULL;
+        char *decisions_dir = NULL;
+        if (!create_agent_dirs(agent->agent_dir, &scratch_dir, &decisions_dir) ||
+            !write_agent_prompt(prompt_path, agent->name, agent->runner,
+                                agent->model, agent->agent_dir, scratch_dir,
+                                decisions_dir)) {
+            free(prompt_path);
+            free(scratch_dir);
+            free(decisions_dir);
+            return -1;
+        }
+
+        if (agent->run_script_path) {
+            char *command =
+                agent_command_for(agent->runner, agent->model, prompt_path);
+            int ok = write_agent_run_script(agent->run_script_path, command);
+            free(command);
+            if (!ok) {
+                free(prompt_path);
+                free(scratch_dir);
+                free(decisions_dir);
+                return -1;
+            }
+        }
+
+        free(agent->prompt_path);
+        agent->prompt_path = prompt_path;
+        agent->updated_at = time(NULL);
+        changed++;
+        free(scratch_dir);
+        free(decisions_dir);
+    }
+    return changed;
+}
+
 static int cmd_normalize(void) {
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
         return 1;
 
     dispatch_board_normalize_states(&locked.board);
+    int prompt_updates = normalize_agent_prompts(&locked.board);
+    if (prompt_updates < 0) {
+        locked_board_close(&locked);
+        return 1;
+    }
     if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
         return 1;
     }
 
     printf("Normalized %s\n", DISPATCH_STORE_FILE);
+    if (prompt_updates > 0)
+        printf("Updated %d agent prompt%s\n", prompt_updates,
+               prompt_updates == 1 ? "" : "s");
     append_dispatch_log("user", "normalize", "normalize", NULL, 0, NULL, 0,
                         "Normalized dispatch.json");
     locked_board_close(&locked);

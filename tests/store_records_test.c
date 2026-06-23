@@ -42,7 +42,8 @@ static void add_agent_record(DispatchBoard *board) {
     agent->runner = copy_string("codex");
     agent->model = copy_string("gpt-5.3-codex");
     agent->agent_dir = copy_string(".dispatch/agents/codex-server");
-    agent->prompt_path = copy_string(".dispatch/agents/codex-server/AGENT.md");
+    agent->prompt_path =
+        copy_string(".dispatch/agents/codex-server/codex-server-PROMPT.md");
     agent->run_script_path = copy_string(".dispatch/agents/codex-server/run.sh");
     agent->session_id = copy_string("codex-session-1");
     agent->current_task = copy_string("DE-01");

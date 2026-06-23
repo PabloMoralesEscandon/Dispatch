@@ -102,6 +102,12 @@ cc -Iinclude tests/workspace_naming_test.c src/dispatch.c \
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
 mkdir repo
+cat >AGENTS.md <<'AGENTS'
+# Dispatch Agent Instructions
+
+Use the Dispatch CLI for all workflow state.
+Never read dispatch.json directly.
+AGENTS
 
 expect_ok "$BIN" init repo
 assert_contains "Created dispatch.json for repo repo"
@@ -134,9 +140,9 @@ assert_contains "Agent runner must be codex or claude"
 
 expect_ok "$BIN" agent create --name codex-a --runner codex --model gpt-test --print-command
 assert_contains "Created agent codex-a (codex)"
-assert_contains "prompt: .dispatch/agents/codex-a/AGENT.md"
+assert_contains "prompt: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 assert_contains "run script: .dispatch/agents/codex-a/run.sh"
-assert_contains "command: codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/AGENT.md')\""
+assert_contains "command: codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/codex-a-PROMPT.md')\""
 
 expect_ok "$BIN" agent list
 assert_contains "codex-a"
@@ -148,14 +154,14 @@ assert_contains "Name: codex-a"
 assert_contains "Runner: codex"
 assert_contains "Model: gpt-test"
 assert_contains "Agent dir: .dispatch/agents/codex-a"
-assert_contains "Prompt: .dispatch/agents/codex-a/AGENT.md"
+assert_contains "Prompt: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 assert_contains "Run script: .dispatch/agents/codex-a/run.sh"
 assert_contains "Session ID: -"
 assert_contains "Current task: -"
 assert_contains "Last workspace: -"
 
 expect_ok "$BIN" agent command codex-a
-assert_contains "codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/AGENT.md')\""
+assert_contains "codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/codex-a-PROMPT.md')\""
 
 expect_ok "$BIN" agent resume codex-a
 assert_contains "codex resume --model 'gpt-test' --last"
@@ -175,9 +181,14 @@ assert_contains "Unknown agent command option: --bad"
 expect_fail "$BIN" agent resume codex-a --bad
 assert_contains "Unknown agent resume option: --bad"
 
-if [ ! -f .dispatch/agents/codex-a/AGENT.md ]; then
+if [ ! -f .dispatch/agents/codex-a/codex-a-PROMPT.md ]; then
     fail "agent prompt was not created"
 fi
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Prompt: codex-a"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "- Agent name: \`codex-a\`"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "## Workspace Rules"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Instructions"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "Never read dispatch.json directly."
 if [ ! -d .dispatch/agents/codex-a/scratch ]; then
     fail "agent scratch directory was not created"
 fi
@@ -191,21 +202,21 @@ mkdir -p fake-bin
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@"\n' > fake-bin/codex
 chmod +x fake-bin/codex
 PATH="$case_dir/fake-bin:$PATH" expect_ok .dispatch/agents/codex-a/run.sh
-assert_contains "# Dispatch Agent: codex-a"
+assert_contains "# Dispatch Agent Prompt: codex-a"
 
 expect_fail "$BIN" agent create --name codex-a --runner codex
 assert_contains "Agent codex-a already exists"
 
 expect_ok "$BIN" agent create --name claude-a --runner claude --no-run-script --print-command
 assert_contains "Created agent claude-a (claude)"
-assert_contains "command: claude --prompt-file \".dispatch/agents/claude-a/AGENT.md\""
+assert_contains "command: claude --prompt-file \".dispatch/agents/claude-a/claude-a-PROMPT.md\""
 expect_ok "$BIN" agent command claude-a --print-command
-assert_contains "claude --prompt-file \".dispatch/agents/claude-a/AGENT.md\""
+assert_contains "claude --prompt-file \".dispatch/agents/claude-a/claude-a-PROMPT.md\""
 expect_ok "$BIN" agent show claude-a
 assert_contains "Run script: -"
 expect_ok "$BIN" agent resume claude-a
 assert_contains "claude --session-id '"
-assert_contains "\"\$(cat '.dispatch/agents/claude-a/AGENT.md')\""
+assert_contains "\"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 assert_contains "resume script: .dispatch/agents/claude-a/resume.sh"
 if [ ! -x .dispatch/agents/claude-a/resume.sh ]; then
     fail "agent resume script was not created executable"
