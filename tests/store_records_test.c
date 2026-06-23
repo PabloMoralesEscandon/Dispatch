@@ -44,7 +44,11 @@ static void add_agent_record(DispatchBoard *board) {
     agent->agent_dir = copy_string(".dispatch/agents/codex-server");
     agent->prompt_path = copy_string(".dispatch/agents/codex-server/AGENT.md");
     agent->run_script_path = copy_string(".dispatch/agents/codex-server/run.sh");
+    agent->session_id = copy_string("codex-session-1");
+    agent->current_task = copy_string("DE-01");
+    agent->last_workspace = copy_string("DE-01");
     agent->created_at = 11;
+    agent->updated_at = 44;
 }
 
 static void add_workspace_record(DispatchBoard *board) {
@@ -137,6 +141,11 @@ static int verify_populated_round_trip(const char *path) {
 
     if (assert_string(agent->runner, "codex", "agent runner") ||
         assert_string(agent->model, "gpt-5.3-codex", "agent model") ||
+        assert_string(agent->session_id, "codex-session-1",
+                      "agent session id") ||
+        assert_string(agent->current_task, "DE-01", "agent current task") ||
+        assert_string(agent->last_workspace, "DE-01",
+                      "agent last workspace") ||
         assert_string(workspace->actor, "codex-server", "workspace actor") ||
         assert_string(workspace->branch, "agent/codex-server/DE-01",
                       "workspace branch") ||

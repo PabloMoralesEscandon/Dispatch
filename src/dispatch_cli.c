@@ -70,7 +70,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command, workspace create/list/show/remove/prune,");
+    puts("  init, agent create/list/show/command/session, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, completion candidates,");
     puts("  ready, start, finish, review, normalize, list, show, blocked");
 }
@@ -239,6 +239,11 @@ static char *cli_strdup(const char *value) {
 
 static const char *bool_string(int value) {
     return value ? "true" : "false";
+}
+
+static void replace_optional_string(char **target, const char *value) {
+    free(*target);
+    *target = value && value[0] ? cli_strdup(value) : NULL;
 }
 
 static void append_dispatch_log(const char *actor, const char *command,
@@ -437,6 +442,7 @@ static DispatchAgent *append_agent_record(DispatchBoard *board,
         run_script_path && run_script_path[0] ? cli_strdup(run_script_path)
                                               : NULL;
     agent->created_at = time(NULL);
+    agent->updated_at = agent->created_at;
     return agent;
 }
 
@@ -600,8 +606,123 @@ static int cmd_agent_show(int argc, char **argv) {
     printf("Prompt: %s\n", agent->prompt_path);
     printf("Run script: %s\n",
            agent->run_script_path ? agent->run_script_path : "-");
+    printf("Session ID: %s\n", agent->session_id ? agent->session_id : "-");
+    printf("Current task: %s\n",
+           agent->current_task ? agent->current_task : "-");
+    printf("Last workspace: %s\n",
+           agent->last_workspace ? agent->last_workspace : "-");
+    printf("Updated at: %ld\n", (long)agent->updated_at);
 
     dispatch_board_free(&board);
+    return 0;
+}
+
+static void print_agent_session_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]\n");
+}
+
+static int cmd_agent_session(int argc, char **argv) {
+    if (argc < 4) {
+        print_agent_session_usage();
+        return 1;
+    }
+
+    const char *name = argv[3];
+    const char *session_id = NULL;
+    const char *current_task = NULL;
+    const char *last_workspace = NULL;
+    int clear_session = 0;
+    int clear_current_task = 0;
+    int clear_last_workspace = 0;
+    int updates = 0;
+
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--session-id") == 0 && (i + 1) < argc) {
+            session_id = argv[++i];
+            updates++;
+        } else if (strcmp(argv[i], "--clear-session") == 0) {
+            clear_session = 1;
+            updates++;
+        } else if (strcmp(argv[i], "--current-task") == 0 && (i + 1) < argc) {
+            current_task = argv[++i];
+            updates++;
+        } else if (strcmp(argv[i], "--clear-current-task") == 0) {
+            clear_current_task = 1;
+            updates++;
+        } else if (strcmp(argv[i], "--last-workspace") == 0 &&
+                   (i + 1) < argc) {
+            last_workspace = argv[++i];
+            updates++;
+        } else if (strcmp(argv[i], "--clear-last-workspace") == 0) {
+            clear_last_workspace = 1;
+            updates++;
+        } else {
+            print_agent_session_usage();
+            return 1;
+        }
+    }
+
+    if (updates == 0) {
+        print_agent_session_usage();
+        return 1;
+    }
+    if ((session_id && clear_session) ||
+        (current_task && clear_current_task) ||
+        (last_workspace && clear_last_workspace)) {
+        fprintf(stderr, "Session metadata options conflict\n");
+        return 1;
+    }
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+
+    DispatchAgent *agent = dispatch_board_find_agent(&locked.board, name);
+    if (!agent) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No agent named %s\n", name);
+        return 1;
+    }
+    if (current_task && !dispatch_board_find_task(&locked.board, current_task)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No task with id %s\n", current_task);
+        return 1;
+    }
+    if (last_workspace &&
+        !dispatch_board_find_workspace(&locked.board, last_workspace)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No workspace for %s\n", last_workspace);
+        return 1;
+    }
+
+    if (session_id || clear_session)
+        replace_optional_string(&agent->session_id, session_id);
+    if (current_task || clear_current_task)
+        replace_optional_string(&agent->current_task, current_task);
+    if (last_workspace || clear_last_workspace)
+        replace_optional_string(&agent->last_workspace, last_workspace);
+    agent->updated_at = time(NULL);
+
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        return 1;
+    }
+
+    printf("Updated agent session %s\n", name);
+    DispatchLogField targets[] = {
+        {"agent", name},
+    };
+    DispatchLogField context[] = {
+        {"session_id", agent->session_id ? agent->session_id : ""},
+        {"current_task", agent->current_task ? agent->current_task : ""},
+        {"last_workspace", agent->last_workspace ? agent->last_workspace : ""},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Updated agent session %s", name);
+    append_dispatch_log("user", "agent", "session", targets, 1, context, 3,
+                        message);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -644,12 +765,16 @@ static int cmd_agent(int argc, char **argv) {
         return cmd_agent_show(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "command") == 0)
         return cmd_agent_command(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "session") == 0)
+        return cmd_agent_session(argc, argv);
 
     fprintf(stderr,
             "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
     fprintf(stderr, "       dispatch agent list\n");
     fprintf(stderr, "       dispatch agent show <name>\n");
     fprintf(stderr, "       dispatch agent command <name> [--print-command]\n");
+    fprintf(stderr,
+            "       dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]\n");
     return 1;
 }
 
@@ -2305,8 +2430,8 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "\n"
         "_dispatch_agent_command() {\n"
         "  if (( CURRENT == 3 )); then\n"
-        "    compadd -- create list show command\n"
-        "  elif [[ ${words[3]} == show || ${words[3]} == command ]] && "
+        "    compadd -- create list show command session\n"
+        "  elif [[ ${words[3]} == show || ${words[3]} == command || ${words[3]} == session ]] && "
         "(( CURRENT == 4 )); then\n"
         "    _dispatch_compadd_candidates agents\n"
         "  fi\n"
@@ -2475,8 +2600,8 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      ;;\n"
         "    agent)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
-        "        _dispatch_complete_words \"create list show command\"\n"
-        "      elif [[ ( $sub == show || $sub == command ) && "
+        "        _dispatch_complete_words \"create list show command session\"\n"
+        "      elif [[ ( $sub == show || $sub == command || $sub == session ) && "
         "$COMP_CWORD -eq 3 ]]; then\n"
         "        _dispatch_complete_candidates agents\n"
         "      fi\n"
@@ -2555,11 +2680,11 @@ static int cmd_completion_fish(int argc, char **argv) {
         "__fish_seen_subcommand_from add remove' -a '(__dispatch_candidates tasks)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and not "
-        "__fish_seen_subcommand_from create list show command' -a 'create list "
-        "show command'\n"
+        "__fish_seen_subcommand_from create list show command session' -a "
+        "'create list show command session'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
-        "__fish_seen_subcommand_from show command' -a '(__dispatch_candidates "
-        "agents)'\n"
+        "__fish_seen_subcommand_from show command session' -a "
+        "'(__dispatch_candidates agents)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
         "not __fish_seen_subcommand_from create list show remove prune' -a "

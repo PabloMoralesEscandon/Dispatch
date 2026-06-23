@@ -404,8 +404,16 @@ static json_t *agent_to_json(const DispatchAgent *agent) {
     json_object_set_new(object, "prompt_path", json_string(agent->prompt_path));
     json_object_set_new(object, "run_script_path",
                         json_optional_string(agent->run_script_path));
+    json_object_set_new(object, "session_id",
+                        json_optional_string(agent->session_id));
+    json_object_set_new(object, "current_task",
+                        json_optional_string(agent->current_task));
+    json_object_set_new(object, "last_workspace",
+                        json_optional_string(agent->last_workspace));
     json_object_set_new(object, "created_at",
                         json_time_or_null(agent->created_at));
+    json_object_set_new(object, "updated_at",
+                        json_time_or_null(agent->updated_at));
     return object;
 }
 
@@ -635,6 +643,10 @@ static int load_agents(DispatchBoard *board, json_t *agents, char *error,
         const char *model = json_string_or(value, "model", NULL);
         const char *run_script_path =
             json_string_or(value, "run_script_path", NULL);
+        const char *session_id = json_string_or(value, "session_id", NULL);
+        const char *current_task = json_string_or(value, "current_task", NULL);
+        const char *last_workspace =
+            json_string_or(value, "last_workspace", NULL);
 
         DispatchAgent agent = {0};
         agent.name = store_strdup(name);
@@ -644,7 +656,12 @@ static int load_agents(DispatchBoard *board, json_t *agents, char *error,
         agent.prompt_path = store_strdup(prompt_path);
         agent.run_script_path =
             run_script_path ? store_strdup(run_script_path) : NULL;
+        agent.session_id = session_id ? store_strdup(session_id) : NULL;
+        agent.current_task = current_task ? store_strdup(current_task) : NULL;
+        agent.last_workspace =
+            last_workspace ? store_strdup(last_workspace) : NULL;
         agent.created_at = json_time_or_zero(value, "created_at");
+        agent.updated_at = json_time_or_zero(value, "updated_at");
 
         append_loaded_agent(board, &agent);
     }

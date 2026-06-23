@@ -82,7 +82,11 @@ typedef struct {
     char *agent_dir;
     char *prompt_path;
     char *run_script_path;
+    char *session_id;
+    char *current_task;
+    char *last_workspace;
     time_t created_at;
+    time_t updated_at;
 } DispatchAgent;
 
 typedef struct {

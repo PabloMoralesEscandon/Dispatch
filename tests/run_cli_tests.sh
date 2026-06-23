@@ -150,6 +150,9 @@ assert_contains "Model: gpt-test"
 assert_contains "Agent dir: .dispatch/agents/codex-a"
 assert_contains "Prompt: .dispatch/agents/codex-a/AGENT.md"
 assert_contains "Run script: .dispatch/agents/codex-a/run.sh"
+assert_contains "Session ID: -"
+assert_contains "Current task: -"
+assert_contains "Last workspace: -"
 
 expect_ok "$BIN" agent command codex-a
 assert_contains 'codex --model gpt-test "$(cat \".dispatch/agents/codex-a/AGENT.md\")"'
@@ -201,6 +204,20 @@ assert_contains "Task titles should not include Dispatch IDs"
 
 expect_ok "$BIN" task add DE First --description "First task"
 assert_contains "Added task DE-01"
+
+expect_ok "$BIN" agent session codex-a --session-id session-1 --current-task DE-01
+assert_contains "Updated agent session codex-a"
+
+expect_ok "$BIN" agent show codex-a
+assert_contains "Session ID: session-1"
+assert_contains "Current task: DE-01"
+
+expect_ok "$BIN" agent session codex-a --clear-session --clear-current-task
+assert_contains "Updated agent session codex-a"
+
+expect_ok "$BIN" agent show codex-a
+assert_contains "Session ID: -"
+assert_contains "Current task: -"
 
 expect_fail "$BIN" task add DE ""
 assert_contains "Could not add task"
@@ -429,6 +446,7 @@ expect_ok "$BIN" init repo
 expect_ok "$BIN" group add Development --prefix DE
 expect_ok "$BIN" task add DE Root
 expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" agent create --name Codex_A --runner codex --no-run-script
 
 expect_fail "$BIN" workspace create DE-01
 assert_contains "Usage: dispatch workspace create <task-id> --actor <name>"
@@ -451,6 +469,11 @@ assert_contains "state: active"
 if [ ! -e repo-agent-codex_a-DE-01/.git ]; then
     fail "workspace worktree was not created"
 fi
+
+expect_ok "$BIN" agent session Codex_A --last-workspace DE-01
+assert_contains "Updated agent session Codex_A"
+expect_ok "$BIN" agent show Codex_A
+assert_contains "Last workspace: DE-01"
 expect_ok "$BIN" workspace list
 assert_contains "DE-01"
 assert_contains "active"
@@ -828,7 +851,7 @@ cd "$case_dir"
 
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
-assert_contains "agent create/list/show/command"
+assert_contains "agent create/list/show/command/session"
 assert_contains "workspace create/list/show/remove/prune"
 assert_contains "completion candidates"
 assert_not_contains "--json"

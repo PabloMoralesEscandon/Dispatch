@@ -209,6 +209,7 @@ dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no
 dispatch agent list
 dispatch agent show <name>
 dispatch agent command <name> [--print-command]
+dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]
 ```
 
 `agent create` registers a named agent and creates local support files under
@@ -217,6 +218,12 @@ Dispatch workflow, and the optional `run.sh` starts the selected runner from the
 workflow directory. Agent directories are for prompt material, scratch notes,
 and local decisions; task state remains in Dispatch and product changes belong
 in task worktrees.
+
+`agent session` records runner session metadata on the agent record. The
+session ID identifies the runner session to resume, `current_task` records the
+task the agent is actively handling, and `last_workspace` records the most
+recent workspace used by that agent. These fields are shown by `agent show` and
+are used by runner-specific resume commands.
 
 ### Workspaces
 

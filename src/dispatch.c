@@ -103,6 +103,9 @@ static void agent_free_fields(DispatchAgent *agent) {
     free(agent->agent_dir);
     free(agent->prompt_path);
     free(agent->run_script_path);
+    free(agent->session_id);
+    free(agent->current_task);
+    free(agent->last_workspace);
 }
 
 static void workspace_free_fields(DispatchWorkspace *workspace) {
