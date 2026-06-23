@@ -30,6 +30,7 @@ static void append_dispatch_log(const char *actor, const char *command,
                                 const DispatchLogField *context,
                                 size_t context_count,
                                 const char *message);
+static char *shell_quote(const char *value);
 
 static const DispatchCliCommand commands[] = {
     {"init", "Create dispatch.json for a target repository"},
@@ -70,7 +71,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command/session, workspace create/list/show/remove/prune,");
+    puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, completion candidates,");
     puts("  ready, start, finish, review, normalize, list, show, blocked");
 }
@@ -364,6 +365,46 @@ static char *agent_command_for(const char *runner, const char *model,
         exit(1);
     }
     snprintf(command, size, format, model_flag, model_value, prompt_path);
+    return command;
+}
+
+static char *codex_agent_resume_command_for(const DispatchAgent *agent,
+                                            const DispatchWorkspace *workspace) {
+    char *model_q = agent->model && agent->model[0] ? shell_quote(agent->model) : NULL;
+    char *workspace_q = workspace && workspace->path && workspace->path[0]
+                            ? shell_quote(workspace->path)
+                            : NULL;
+    char *session_q = agent->session_id && agent->session_id[0]
+                          ? shell_quote(agent->session_id)
+                          : NULL;
+
+    size_t size = strlen("codex resume") + 1;
+    if (model_q)
+        size += strlen(" --model ") + strlen(model_q);
+    if (workspace_q)
+        size += strlen(" --cd ") + strlen(workspace_q);
+    size += session_q ? strlen(" ") + strlen(session_q) : strlen(" --last");
+
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    size_t out = 0;
+    out += snprintf(command + out, size - out, "codex resume");
+    if (model_q)
+        out += snprintf(command + out, size - out, " --model %s", model_q);
+    if (workspace_q)
+        out += snprintf(command + out, size - out, " --cd %s", workspace_q);
+    if (session_q)
+        snprintf(command + out, size - out, " %s", session_q);
+    else
+        snprintf(command + out, size - out, " --last");
+
+    free(model_q);
+    free(workspace_q);
+    free(session_q);
     return command;
 }
 
@@ -756,6 +797,52 @@ static int cmd_agent_command(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_agent_resume(int argc, char **argv) {
+    if (argc != 4 && argc != 5) {
+        fprintf(stderr, "Usage: dispatch agent resume <name> [--print-command]\n");
+        return 1;
+    }
+    if (argc == 5 && strcmp(argv[4], "--print-command") != 0) {
+        fprintf(stderr, "Unknown agent resume option: %s\n", argv[4]);
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, argv[3]);
+    if (!agent) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No agent named %s\n", argv[3]);
+        return 1;
+    }
+    if (strcmp(agent->runner, "codex") != 0) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Agent resume is not implemented for runner %s\n",
+                agent->runner);
+        return 1;
+    }
+
+    DispatchWorkspace *workspace = NULL;
+    if (agent->last_workspace) {
+        workspace = dispatch_board_find_workspace(&board, agent->last_workspace);
+        if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
+            dispatch_board_free(&board);
+            fprintf(stderr, "No active workspace for %s\n",
+                    agent->last_workspace);
+            return 1;
+        }
+    }
+
+    char *command = codex_agent_resume_command_for(agent, workspace);
+    printf("%s\n", command);
+    free(command);
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int cmd_agent(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "create") == 0)
         return cmd_agent_create(argc, argv);
@@ -767,6 +854,8 @@ static int cmd_agent(int argc, char **argv) {
         return cmd_agent_command(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "session") == 0)
         return cmd_agent_session(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "resume") == 0)
+        return cmd_agent_resume(argc, argv);
 
     fprintf(stderr,
             "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
@@ -775,6 +864,7 @@ static int cmd_agent(int argc, char **argv) {
     fprintf(stderr, "       dispatch agent command <name> [--print-command]\n");
     fprintf(stderr,
             "       dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]\n");
+    fprintf(stderr, "       dispatch agent resume <name> [--print-command]\n");
     return 1;
 }
 
@@ -2430,8 +2520,8 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "\n"
         "_dispatch_agent_command() {\n"
         "  if (( CURRENT == 3 )); then\n"
-        "    compadd -- create list show command session\n"
-        "  elif [[ ${words[3]} == show || ${words[3]} == command || ${words[3]} == session ]] && "
+        "    compadd -- create list show command session resume\n"
+        "  elif [[ ${words[3]} == show || ${words[3]} == command || ${words[3]} == session || ${words[3]} == resume ]] && "
         "(( CURRENT == 4 )); then\n"
         "    _dispatch_compadd_candidates agents\n"
         "  fi\n"
@@ -2538,7 +2628,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "        case \"$sub\" in\n"
         "          create) _dispatch_complete_words \"--name --runner --model "
         "--no-run-script --print-command\" ;;\n"
-        "          command) _dispatch_complete_words \"--print-command\" ;;\n"
+        "          command|resume) _dispatch_complete_words \"--print-command\" ;;\n"
         "        esac\n"
         "        ;;\n"
         "      workspace)\n"
@@ -2600,8 +2690,8 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      ;;\n"
         "    agent)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
-        "        _dispatch_complete_words \"create list show command session\"\n"
-        "      elif [[ ( $sub == show || $sub == command || $sub == session ) && "
+        "        _dispatch_complete_words \"create list show command session resume\"\n"
+        "      elif [[ ( $sub == show || $sub == command || $sub == session || $sub == resume ) && "
         "$COMP_CWORD -eq 3 ]]; then\n"
         "        _dispatch_complete_candidates agents\n"
         "      fi\n"
@@ -2680,10 +2770,10 @@ static int cmd_completion_fish(int argc, char **argv) {
         "__fish_seen_subcommand_from add remove' -a '(__dispatch_candidates tasks)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and not "
-        "__fish_seen_subcommand_from create list show command session' -a "
-        "'create list show command session'\n"
+        "__fish_seen_subcommand_from create list show command session resume' -a "
+        "'create list show command session resume'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
-        "__fish_seen_subcommand_from show command session' -a "
+        "__fish_seen_subcommand_from show command session resume' -a "
         "'(__dispatch_candidates agents)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
@@ -2739,7 +2829,7 @@ static int cmd_completion_fish(int argc, char **argv) {
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
         "__fish_seen_subcommand_from create' -l print-command\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
-        "__fish_seen_subcommand_from command' -l print-command\n",
+        "__fish_seen_subcommand_from command resume' -l print-command\n",
         stdout);
     return 0;
 }

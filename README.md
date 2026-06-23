@@ -210,6 +210,7 @@ dispatch agent list
 dispatch agent show <name>
 dispatch agent command <name> [--print-command]
 dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]
+dispatch agent resume <name> [--print-command]
 ```
 
 `agent create` registers a named agent and creates local support files under
@@ -224,6 +225,11 @@ session ID identifies the runner session to resume, `current_task` records the
 task the agent is actively handling, and `last_workspace` records the most
 recent workspace used by that agent. These fields are shown by `agent show` and
 are used by runner-specific resume commands.
+
+`agent resume` prints a runner-specific shell command for continuing an agent.
+Codex agents use the stored session ID when present. Without one, Dispatch emits
+a `codex resume --last` command scoped to the agent's remembered workspace when
+`last_workspace` is set.
 
 ### Workspaces
 

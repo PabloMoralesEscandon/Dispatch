@@ -157,14 +157,23 @@ assert_contains "Last workspace: -"
 expect_ok "$BIN" agent command codex-a
 assert_contains 'codex --model gpt-test "$(cat \".dispatch/agents/codex-a/AGENT.md\")"'
 
+expect_ok "$BIN" agent resume codex-a
+assert_contains "codex resume --model 'gpt-test' --last"
+
 expect_fail "$BIN" agent show missing-agent
 assert_contains "No agent named missing-agent"
 
 expect_fail "$BIN" agent command missing-agent
 assert_contains "No agent named missing-agent"
 
+expect_fail "$BIN" agent resume missing-agent
+assert_contains "No agent named missing-agent"
+
 expect_fail "$BIN" agent command codex-a --bad
 assert_contains "Unknown agent command option: --bad"
+
+expect_fail "$BIN" agent resume codex-a --bad
+assert_contains "Unknown agent resume option: --bad"
 
 if [ ! -f .dispatch/agents/codex-a/AGENT.md ]; then
     fail "agent prompt was not created"
@@ -211,6 +220,9 @@ assert_contains "Updated agent session codex-a"
 expect_ok "$BIN" agent show codex-a
 assert_contains "Session ID: session-1"
 assert_contains "Current task: DE-01"
+
+expect_ok "$BIN" agent resume codex-a
+assert_contains "codex resume --model 'gpt-test' 'session-1'"
 
 expect_ok "$BIN" agent session codex-a --clear-session --clear-current-task
 assert_contains "Updated agent session codex-a"
@@ -474,6 +486,9 @@ expect_ok "$BIN" agent session Codex_A --last-workspace DE-01
 assert_contains "Updated agent session Codex_A"
 expect_ok "$BIN" agent show Codex_A
 assert_contains "Last workspace: DE-01"
+expect_ok "$BIN" agent resume Codex_A
+assert_contains "codex resume --cd '"
+assert_contains "repo-agent-codex_a-DE-01' --last"
 expect_ok "$BIN" workspace list
 assert_contains "DE-01"
 assert_contains "active"
@@ -851,7 +866,7 @@ cd "$case_dir"
 
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
-assert_contains "agent create/list/show/command/session"
+assert_contains "agent create/list/show/command/session/resume"
 assert_contains "workspace create/list/show/remove/prune"
 assert_contains "completion candidates"
 assert_not_contains "--json"
