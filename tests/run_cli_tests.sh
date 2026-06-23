@@ -136,7 +136,7 @@ expect_ok "$BIN" agent create --name codex-a --runner codex --model gpt-test --p
 assert_contains "Created agent codex-a (codex)"
 assert_contains "prompt: .dispatch/agents/codex-a/AGENT.md"
 assert_contains "run script: .dispatch/agents/codex-a/run.sh"
-assert_contains "command: codex --model gpt-test --prompt-file \".dispatch/agents/codex-a/AGENT.md\""
+assert_contains 'command: codex --model gpt-test "$(cat \".dispatch/agents/codex-a/AGENT.md\")"'
 
 expect_ok "$BIN" agent list
 assert_contains "codex-a"
@@ -152,7 +152,7 @@ assert_contains "Prompt: .dispatch/agents/codex-a/AGENT.md"
 assert_contains "Run script: .dispatch/agents/codex-a/run.sh"
 
 expect_ok "$BIN" agent command codex-a
-assert_contains "codex --model gpt-test --prompt-file \".dispatch/agents/codex-a/AGENT.md\""
+assert_contains 'codex --model gpt-test "$(cat \".dispatch/agents/codex-a/AGENT.md\")"'
 
 expect_fail "$BIN" agent show missing-agent
 assert_contains "No agent named missing-agent"

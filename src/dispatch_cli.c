@@ -346,7 +346,7 @@ static char *agent_command_for(const char *runner, const char *model,
     const char *model_value = model && model[0] ? model : "";
     const char *format = NULL;
     if (strcmp(runner, "codex") == 0) {
-        format = "codex%s%s --prompt-file \"%s\"";
+        format = "codex%s%s \"$(cat \\\"%s\\\")\"";
     } else {
         format = "claude%s%s --prompt-file \"%s\"";
     }
