@@ -136,7 +136,7 @@ expect_ok "$BIN" agent create --name codex-a --runner codex --model gpt-test --p
 assert_contains "Created agent codex-a (codex)"
 assert_contains "prompt: .dispatch/agents/codex-a/AGENT.md"
 assert_contains "run script: .dispatch/agents/codex-a/run.sh"
-assert_contains 'command: codex --model gpt-test "$(cat \".dispatch/agents/codex-a/AGENT.md\")"'
+assert_contains "command: codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/AGENT.md')\""
 
 expect_ok "$BIN" agent list
 assert_contains "codex-a"
@@ -155,7 +155,7 @@ assert_contains "Current task: -"
 assert_contains "Last workspace: -"
 
 expect_ok "$BIN" agent command codex-a
-assert_contains 'codex --model gpt-test "$(cat \".dispatch/agents/codex-a/AGENT.md\")"'
+assert_contains "codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/AGENT.md')\""
 
 expect_ok "$BIN" agent resume codex-a
 assert_contains "codex resume --model 'gpt-test' --last"
@@ -187,6 +187,11 @@ fi
 if [ ! -x .dispatch/agents/codex-a/run.sh ]; then
     fail "agent run script was not created executable"
 fi
+mkdir -p fake-bin
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@"\n' > fake-bin/codex
+chmod +x fake-bin/codex
+PATH="$case_dir/fake-bin:$PATH" expect_ok .dispatch/agents/codex-a/run.sh
+assert_contains "# Dispatch Agent: codex-a"
 
 expect_fail "$BIN" agent create --name codex-a --runner codex
 assert_contains "Agent codex-a already exists"
