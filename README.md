@@ -43,6 +43,17 @@ build/dispatch
 dispatch -> build/dispatch
 ```
 
+When developing from the recommended parent workflow layout, keep the workflow
+root command as a symlink to the checkout command:
+
+```bash
+cd work_dir
+ln -sf Dispatch/dispatch dispatch
+```
+
+Then rebuilding inside `Dispatch` with `./nob` updates both `Dispatch/dispatch`
+and the workflow-root `./dispatch`.
+
 For a release-style build:
 
 ```bash
