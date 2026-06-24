@@ -41,6 +41,8 @@ typedef struct {
     int running;
 } DispatchTui;
 
+static DispatchTask *selected_visible_task(DispatchTui *tui);
+
 static void tui_set_status(DispatchTui *tui, const char *message) {
     snprintf(tui->status, sizeof(tui->status), "%s", message ? message : "");
 }
@@ -271,6 +273,73 @@ static void clear_secondary_filters(DispatchTui *tui) {
     tui_set_status(tui, "Filters cleared");
 }
 
+static char *tui_shell_quote(const char *value) {
+    size_t len = strlen(value ? value : "");
+    size_t size = len * 4 + 3;
+    char *quoted = malloc(size);
+    if (!quoted) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    size_t out = 0;
+    quoted[out++] = '\'';
+    for (size_t i = 0; i < len; i++) {
+        if (value[i] == '\'') {
+            memcpy(quoted + out, "'\\''", 4);
+            out += 4;
+        } else {
+            quoted[out++] = value[i];
+        }
+    }
+    quoted[out++] = '\'';
+    quoted[out] = '\0';
+    return quoted;
+}
+
+static char *diff_command_for_task(const DispatchBoard *board,
+                                   const DispatchTask *task) {
+    if (!task || task->commits.count == 0)
+        return NULL;
+
+    char *repo_q = tui_shell_quote(board->repo_path ? board->repo_path : ".");
+    char *commit_q = tui_shell_quote(task->commits.items[0]);
+    size_t size = strlen("git -C  show ") + strlen(repo_q) + strlen(commit_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "git -C %s show %s", repo_q, commit_q);
+    free(repo_q);
+    free(commit_q);
+    return command;
+}
+
+static void run_selected_task_diff(DispatchTui *tui) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+    char *command = diff_command_for_task(&tui->board, task);
+    if (!command) {
+        tui_set_status(tui, "No commit metadata for selected task");
+        return;
+    }
+
+    def_prog_mode();
+    endwin();
+    int result = system(command);
+    reset_prog_mode();
+    refresh();
+
+    char message[256];
+    snprintf(message, sizeof(message), "Diff exited with status %d", result);
+    tui_set_status(tui, message);
+    free(command);
+}
+
 static DispatchTask *selected_visible_task(DispatchTui *tui) {
     if (!tui->board_loaded)
         return NULL;
@@ -426,6 +495,7 @@ static void tui_render_help(void) {
         "?        toggle help",
         "u        reload board",
         "r/s/f/v  ready/start/finish/review selected task",
+        "d        open selected task commit diff",
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
         "/        search tasks",
@@ -690,8 +760,8 @@ static void tui_render(DispatchTui *tui) {
         char status[512];
         snprintf(status, sizeof(status),
                  tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                     ? " %s | q/Esc back | r/s/f/v actions | ? help | u reload"
-                     : " %s | q quit | Enter/i inspect | r/s/f/v actions | 1-7/R filters | / search",
+                     ? " %s | q/Esc back | r/s/f/v actions | d diff | ? help"
+                     : " %s | q quit | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -774,6 +844,9 @@ static int tui_run(void) {
             break;
         case 'v':
             run_selected_task_action(&tui, TUI_ACTION_REVIEW);
+            break;
+        case 'd':
+            run_selected_task_diff(&tui);
             break;
         case 'G':
             cycle_group_filter(&tui);
@@ -982,6 +1055,38 @@ static int tui_action_smoke(const char *action_name, const char *task_id,
     return 0;
 }
 
+static int tui_diff_smoke(const char *task_id) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui diff smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        fprintf(stderr, "No task with id %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    char *command = diff_command_for_task(&board, task);
+    if (!command) {
+        fprintf(stderr, "No commit metadata for %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("%s\n", command);
+    free(command);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -990,6 +1095,7 @@ static void print_tui_help(void) {
     puts("  --inspect-smoke <task-id>  print task inspector data and exit");
     puts("  --filter-smoke <filter>    print visible row count and exit");
     puts("  --action-smoke <action> <task-id> [actor]  run lifecycle action and exit");
+    puts("  --diff-smoke <task-id>     print external diff command and exit");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1006,6 +1112,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_filter_smoke(argv[3]);
     if ((argc == 5 || argc == 6) && strcmp(argv[2], "--action-smoke") == 0)
         return tui_action_smoke(argv[3], argv[4], argc == 6 ? argv[5] : "user");
+    if (argc == 4 && strcmp(argv[2], "--diff-smoke") == 0)
+        return tui_diff_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;

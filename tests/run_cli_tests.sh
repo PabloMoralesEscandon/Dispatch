@@ -872,6 +872,12 @@ expect_ok "$BIN" tui --inspect-smoke DE-01
 assert_contains "Commits: 1"
 assert_contains "Commit: abcdef1"
 
+expect_ok "$BIN" tui --diff-smoke DE-01
+assert_contains "git -C 'repo' show 'abcdef1'"
+
+expect_fail "$BIN" tui --diff-smoke QA-01
+assert_contains "No commit metadata for QA-01"
+
 expect_ok "$BIN" tui --filter-smoke not-done
 assert_contains "Filter: not-done"
 assert_contains "Visible: 2"
