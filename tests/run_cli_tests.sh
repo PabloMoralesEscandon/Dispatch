@@ -1221,6 +1221,8 @@ assert_contains "DE"
 expect_ok "$BIN" tui --palette-complete-smoke "agent co"
 assert_contains "codex-a"
 expect_ok "$BIN" tui --help
+assert_contains "Interactive keys:"
+assert_contains "tmux: no control-prefix bindings"
 assert_contains "--palette-smoke"
 assert_contains "--logs-smoke"
 assert_contains "--workspaces-smoke"

@@ -2994,6 +2994,13 @@ static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
     puts("Open the ncurses Dispatch terminal UI.");
+    puts("");
+    puts("Interactive keys:");
+    puts("  b board, a/Tab agents, w workspaces, l logs, : command palette");
+    puts("  j/k or arrows move, Enter/i inspect, q/Esc backs out");
+    puts("  r/s/f/v ready/start/finish/review selected task");
+    puts("  tmux: no control-prefix bindings; run alongside tmux panes");
+    puts("");
     puts("  --smoke   load the board and exit without initializing ncurses");
     puts("  --inspect-smoke <task-id>  print task inspector data and exit");
     puts("  --filter-smoke <filter>    print visible row count and exit");

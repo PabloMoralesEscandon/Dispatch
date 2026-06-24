@@ -382,6 +382,20 @@ checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
 `--action-smoke`, `--diff-smoke`, `--agents-smoke`, `--workspaces-smoke`,
 `--logs-smoke`, `--palette-smoke`, and `--palette-complete-smoke`.
 
+Tmux keymap validation:
+
+```text
+No Dispatch action uses Ctrl-a, Ctrl-b, or any other control-prefix chord.
+Core movement uses arrows or j/k.
+Major views use b, a/Tab, w, and l.
+Mutations use printable single keys plus focused confirmations for destructive
+workspace actions.
+The command palette uses :, leaving tmux prefix handling entirely to tmux.
+```
+
+Dispatch does not launch or manage tmux panes in v1. Run `dispatch tui` in one
+pane and agent `run.sh` scripts or resume commands in other panes.
+
 ### Groups
 
 ```bash
