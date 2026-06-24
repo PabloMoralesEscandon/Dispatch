@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "dispatch.h"
 #include "dispatch_store.h"
@@ -362,6 +363,49 @@ static void run_selected_task_diff(DispatchTui *tui) {
     free(command);
 }
 
+static char *editor_command_for_path(const char *path) {
+    const char *editor = getenv("EDITOR");
+    if (!editor || !editor[0])
+        editor = "vi";
+    char *editor_q = tui_shell_quote(editor);
+    char *path_q = tui_shell_quote(path);
+    size_t size = strlen(editor_q) + strlen(path_q) + 2;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "%s %s", editor_q, path_q);
+    free(editor_q);
+    free(path_q);
+    return command;
+}
+
+static void edit_selected_agent_prompt(DispatchTui *tui) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        tui_set_status(tui, "No selected agent");
+        return;
+    }
+    if (!agent->prompt_path || access(agent->prompt_path, R_OK) != 0) {
+        tui_set_status(tui, "Prompt file missing");
+        return;
+    }
+
+    char *command = editor_command_for_path(agent->prompt_path);
+    def_prog_mode();
+    endwin();
+    int result = system(command);
+    reset_prog_mode();
+    refresh();
+
+    char message[256];
+    snprintf(message, sizeof(message), "Editor exited with status %d", result);
+    tui_set_status(tui, message);
+    free(command);
+    tui_load_board(tui);
+}
+
 static DispatchTask *selected_visible_task(DispatchTui *tui) {
     if (!tui->board_loaded)
         return NULL;
@@ -612,6 +656,7 @@ static void tui_render_help(void) {
         "u        reload board",
         "r/s/f/v  ready/start/finish/review selected task",
         "d        open selected task commit diff",
+        "e        edit selected agent prompt",
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
         "Tab/a    switch to agents",
@@ -964,7 +1009,7 @@ static void tui_render(DispatchTui *tui) {
                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
                      ? " %s | q/Esc back | r/s/f/v actions | d diff | ? help"
                      : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
-                           ? " %s | q/Esc back | x clear session | ? help"
+                           ? " %s | q/Esc back | e edit prompt | x clear session"
                      : tui->screen == TUI_SCREEN_AGENTS
                            ? " %s | Tab/b board | j/k move | q quit"
                            : " %s | Tab/a agents | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
@@ -1072,6 +1117,10 @@ static int tui_run(void) {
         case 'x':
             if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
                 clear_selected_agent_session(&tui);
+            break;
+        case 'e':
+            if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                edit_selected_agent_prompt(&tui);
             break;
         case 'G':
             cycle_group_filter(&tui);
@@ -1404,6 +1453,37 @@ static int tui_agent_session_smoke(const char *name, const char *session_id,
     return 0;
 }
 
+static int tui_prompt_edit_smoke(const char *name) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui prompt edit smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    if (!agent) {
+        fprintf(stderr, "No agent named %s\n", name);
+        dispatch_board_free(&board);
+        return 1;
+    }
+    if (!agent->prompt_path || access(agent->prompt_path, R_OK) != 0) {
+        fprintf(stderr, "Prompt file missing for %s\n", name);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    char *command = editor_command_for_path(agent->prompt_path);
+    printf("%s\n", command);
+    free(command);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -1416,6 +1496,7 @@ static void print_tui_help(void) {
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
+    puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1440,6 +1521,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_inspect_smoke(argv[3]);
     if (argc == 7 && strcmp(argv[2], "--agent-session-smoke") == 0)
         return tui_agent_session_smoke(argv[3], argv[4], argv[5], argv[6]);
+    if (argc == 4 && strcmp(argv[2], "--prompt-edit-smoke") == 0)
+        return tui_prompt_edit_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;
