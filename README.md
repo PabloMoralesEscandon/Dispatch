@@ -194,6 +194,7 @@ dispatch ready
 ```bash
 dispatch init [repo-path]
 dispatch normalize
+dispatch status
 ```
 
 `init` creates `dispatch.json` if it does not already exist. Pass the repository
@@ -207,6 +208,10 @@ Dispatch serializes board reads and writes through `dispatch.json.lock`. Saves
 are written to a temporary file and atomically moved into place, so concurrent
 commands either read a complete board or print a short retry message while
 another process updates it.
+
+`status` prints a compact board overview: task counts by state, ready and review
+queues, blocked count, enabled/archived agent counts, workspace counts, and
+warnings such as completed tasks without recorded commits.
 
 ### Completion
 

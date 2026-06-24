@@ -63,6 +63,7 @@ dispatch workspace remove <TASK-ID-or-workspace> [--force]
 dispatch workspace prune [--done] [--stale] [--dry-run]
 dispatch ready
 dispatch blocked
+dispatch status
 dispatch list
 dispatch show <TASK-ID>
 dispatch start <TASK-ID> --actor <agent-id>

@@ -43,6 +43,7 @@ static const DispatchCliCommand commands[] = {
     {"completion", "Print shell completion candidates"},
     {"ready", "List ready work or mark a task ready"},
     {"blocked", "List blocked work and blockers"},
+    {"status", "Show board overview and health warnings"},
     {"show", "Show one task"},
     {"list", "List tasks by group and workflow order"},
     {"start", "Start and assign a ready task"},
@@ -74,7 +75,7 @@ void dispatch_cli_print_help(void) {
     puts("Implemented now:");
     puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
-    puts("  ready, start, finish, review, normalize, list, show, blocked");
+    puts("  ready, start, finish, review, normalize, status, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -3780,6 +3781,114 @@ static int cmd_blocked(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_status(int argc, char **argv) {
+    (void)argv;
+    if (argc != 2) {
+        fprintf(stderr, "Usage: dispatch status\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    size_t state_counts[DISPATCH_STATE_PAUSED + 1] = {0};
+    size_t enabled_agents = 0;
+    size_t archived_agents = 0;
+    size_t active_agent_sessions = 0;
+    size_t active_workspaces = 0;
+    size_t removed_workspaces = 0;
+    size_t warnings = 0;
+
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchState state = task_presentation_state(&board, &board.tasks.items[i]);
+        state_counts[state]++;
+    }
+    for (size_t i = 0; i < board.agents.count; i++) {
+        DispatchAgent *agent = &board.agents.items[i];
+        if (agent->archived)
+            archived_agents++;
+        else
+            enabled_agents++;
+        if (agent->current_task && agent->current_task[0])
+            active_agent_sessions++;
+    }
+    for (size_t i = 0; i < board.workspaces.count; i++) {
+        if (board.workspaces.items[i].state == DISPATCH_WORKSPACE_REMOVED)
+            removed_workspaces++;
+        else
+            active_workspaces++;
+    }
+
+    printf("Dispatch status\n");
+    printf("Board: %s\n", board.name);
+    printf("Repo: %s\n", board.repo_path ? board.repo_path : ".");
+    printf("Tasks: %zu total", board.tasks.count);
+    for (int state = DISPATCH_STATE_PROPOSED; state <= DISPATCH_STATE_PAUSED;
+         state++) {
+        printf("  %s:%zu", dispatch_state_name((DispatchState)state),
+               state_counts[state]);
+    }
+    printf("\n");
+
+    printf("Ready:\n");
+    if (print_ready_tasks_from_board(&board, "  ") == 0)
+        printf("  -\n");
+
+    printf("Review:\n");
+    int review_count = 0;
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        if (task_presentation_state(&board, task) != DISPATCH_STATE_REVIEW)
+            continue;
+        print_task_line(&board, task, "  ");
+        review_count++;
+    }
+    if (review_count == 0)
+        printf("  -\n");
+
+    printf("Blocked: %zu\n", state_counts[DISPATCH_STATE_BLOCKED]);
+    printf("Agents: %zu enabled, %zu archived", enabled_agents,
+           archived_agents);
+    if (active_agent_sessions > 0)
+        printf(", %zu with current task", active_agent_sessions);
+    printf("\n");
+    printf("Workspaces: %zu active, %zu removed\n", active_workspaces,
+           removed_workspaces);
+
+    printf("Warnings:\n");
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        DispatchState state = task_presentation_state(&board, task);
+        if ((state == DISPATCH_STATE_DONE || state == DISPATCH_STATE_REVIEW) &&
+            task->commits.count == 0) {
+            printf("  %s has no recorded commits\n", task->id);
+            warnings++;
+        }
+        if (task->assigned_to &&
+            state != DISPATCH_STATE_DOING && state != DISPATCH_STATE_REVIEW) {
+            printf("  %s is assigned to %s but state is %s\n", task->id,
+                   task->assigned_to, dispatch_state_name(state));
+            warnings++;
+        }
+    }
+    for (size_t i = 0; i < board.agents.count; i++) {
+        DispatchAgent *agent = &board.agents.items[i];
+        if (!agent->current_task || !agent->current_task[0])
+            continue;
+        if (!dispatch_board_find_task(&board, agent->current_task)) {
+            printf("  agent %s references missing current task %s\n",
+                   agent->name, agent->current_task);
+            warnings++;
+        }
+    }
+    if (warnings == 0)
+        printf("  -\n");
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int cmd_ready(int argc, char **argv) {
     if (argc == 2)
         return cmd_ready_list();
@@ -4028,6 +4137,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_show(argc, argv);
     if (strcmp(command->name, "blocked") == 0)
         return cmd_blocked(argc, argv);
+    if (strcmp(command->name, "status") == 0)
+        return cmd_status(argc, argv);
     if (strcmp(command->name, "ready") == 0)
         return cmd_ready(argc, argv);
     if (strcmp(command->name, "start") == 0)

@@ -358,6 +358,16 @@ assert_contains "  DE-02    proposed   Second  depends_on:DE-01"
 expect_ok "$BIN" blocked
 assert_not_contains "DE-02"
 
+expect_ok "$BIN" status
+assert_contains "Dispatch status"
+assert_contains "Tasks: 2 total"
+assert_contains "Ready:"
+assert_contains "Review:"
+assert_contains "Blocked: 0"
+assert_contains "Agents:"
+assert_contains "Workspaces:"
+assert_contains "Warnings:"
+
 expect_fail "$BIN" dep add DE-02 DE-01
 assert_contains "Could not add dependency DE-02 -> DE-01 (DE-01 depends on DE-02)"
 
@@ -412,6 +422,10 @@ assert_contains "Started DE-02"
 
 expect_ok "$BIN" finish DE-02 --actor codex
 assert_contains "Finished DE-02 (review)"
+
+expect_ok "$BIN" status
+assert_contains "review:1"
+assert_contains "DE-02 has no recorded commits"
 
 expect_ok "$BIN" review DE-02 --actor user
 assert_contains "Reviewed DE-02"
@@ -809,6 +823,7 @@ assert_contains "Agent codex-a has active workspace"
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"
 assert_line "commit"
+assert_line "status"
 assert_line "workspace"
 
 expect_ok "$BIN" completion candidates candidate-kinds
