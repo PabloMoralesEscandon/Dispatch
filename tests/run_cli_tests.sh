@@ -835,6 +835,7 @@ assert_contains "Agent codex-a has active workspace"
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"
 assert_line "commit"
+assert_line "doctor"
 assert_line "status"
 assert_line "workspace"
 
@@ -845,6 +846,18 @@ assert_contains "Installed fish completion: $install_home/.config/fish/completio
 assert_contains "Warning: dispatch was not found on PATH"
 assert_contains "Run: exec fish"
 assert_file_contains "$install_home/.config/fish/completions/dispatch.fish" "function __dispatch_command"
+
+HOME="$install_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH="$ROOT:$PATH" expect_ok "$BIN" doctor
+assert_contains "Dispatch doctor"
+assert_contains "[ok] board loaded"
+assert_contains "[ok] configured repository is a git repository"
+assert_contains "[ok] dispatch found on PATH"
+assert_contains "[ok] fish completion installed"
+assert_contains "[warn] bash completion installed"
+assert_contains "[ok] agent codex-a prompt exists"
+assert_contains "[ok] agent codex-a run script is executable"
+assert_contains "[ok] workspace DE-01 path exists"
+assert_contains "Summary:"
 
 expect_ok "$BIN" completion candidates candidate-kinds
 assert_line "tasks"

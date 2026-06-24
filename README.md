@@ -195,6 +195,7 @@ dispatch ready
 dispatch init [repo-path]
 dispatch normalize
 dispatch status
+dispatch doctor
 ```
 
 `init` creates `dispatch.json` if it does not already exist. Pass the repository
@@ -212,6 +213,8 @@ another process updates it.
 `status` prints a compact board overview: task counts by state, ready and review
 queues, blocked count, enabled/archived agent counts, workspace counts, and
 warnings such as completed tasks without recorded commits.
+`doctor` checks board readability, repository layout, PATH/symlink setup,
+completion installation, generated agent prompt/run files, and workspace paths.
 
 ### Completion
 

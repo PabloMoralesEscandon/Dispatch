@@ -66,6 +66,7 @@ dispatch reviews
 dispatch proposed
 dispatch blocked
 dispatch status
+dispatch doctor
 dispatch list
 dispatch show <TASK-ID>
 dispatch start <TASK-ID> --actor <agent-id>

@@ -46,6 +46,7 @@ static const DispatchCliCommand commands[] = {
     {"proposed", "List tasks waiting for approval"},
     {"blocked", "List blocked work and blockers"},
     {"status", "Show board overview and health warnings"},
+    {"doctor", "Check Dispatch setup and diagnostics"},
     {"show", "Show one task"},
     {"list", "List tasks by group and workflow order"},
     {"start", "Start and assign a ready task"},
@@ -77,7 +78,7 @@ void dispatch_cli_print_help(void) {
     puts("Implemented now:");
     puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
-    puts("  ready, reviews, proposed, start, finish, review, normalize, status, list, show, blocked");
+    puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -3384,6 +3385,152 @@ static int cmd_completion(int argc, char **argv) {
     return 1;
 }
 
+static void doctor_ok(const char *message) {
+    printf("[ok] %s\n", message);
+}
+
+static void doctor_warn(size_t *warnings, const char *message,
+                        const char *fix) {
+    printf("[warn] %s\n", message);
+    if (fix && fix[0])
+        printf("       fix: %s\n", fix);
+    (*warnings)++;
+}
+
+static int path_exists(const char *path) {
+    struct stat info;
+    return path && stat(path, &info) == 0;
+}
+
+static int path_is_executable(const char *path) {
+    return path && access(path, X_OK) == 0;
+}
+
+static void doctor_check_completion(size_t *warnings, const char *shell_name) {
+    char *path = completion_install_path(shell_name);
+    if (!path) {
+        doctor_warn(warnings, "HOME is not set; cannot check completions",
+                    "set HOME or install completions manually");
+        return;
+    }
+
+    char message[512];
+    snprintf(message, sizeof(message), "%s completion installed at %s",
+             shell_name, path);
+    if (path_exists(path)) {
+        doctor_ok(message);
+    } else {
+        char fix[256];
+        snprintf(fix, sizeof(fix), "dispatch completion install %s",
+                 shell_name);
+        doctor_warn(warnings, message, fix);
+    }
+    free(path);
+}
+
+static int cmd_doctor(int argc, char **argv) {
+    (void)argv;
+    if (argc != 2) {
+        fprintf(stderr, "Usage: dispatch doctor\n");
+        return 1;
+    }
+
+    printf("Dispatch doctor\n");
+    size_t warnings = 0;
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board)) {
+        doctor_warn(&warnings, "could not load Dispatch board",
+                    "run dispatch normalize after resolving the load error");
+        return 1;
+    }
+    doctor_ok("board loaded");
+
+    if (board.repo_path && dispatch_path_is_git_repository(board.repo_path)) {
+        doctor_ok("configured repository is a git repository");
+    } else {
+        doctor_warn(&warnings, "configured repository is not a git repository",
+                    "run dispatch init <repo-path> from the workflow directory");
+    }
+
+    if (path_exists("AGENTS.md"))
+        doctor_ok("AGENTS.md found in workflow directory");
+    else
+        doctor_warn(&warnings, "AGENTS.md missing in workflow directory",
+                    "add repository workflow instructions for agents");
+
+    if (command_exists_on_path("dispatch"))
+        doctor_ok("dispatch found on PATH");
+    else
+        doctor_warn(&warnings, "dispatch not found on PATH",
+                    "add the workflow dispatch symlink or binary directory to PATH");
+
+    struct stat dispatch_link;
+    if (lstat("dispatch", &dispatch_link) == 0) {
+        if (S_ISLNK(dispatch_link.st_mode))
+            doctor_ok("workflow dispatch entry is a symlink");
+        else if (S_ISREG(dispatch_link.st_mode))
+            doctor_ok("workflow dispatch entry is a regular executable");
+        else
+            doctor_warn(&warnings, "workflow dispatch entry has unexpected type",
+                        "replace it with a symlink to the built dispatch binary");
+    } else {
+        doctor_warn(&warnings, "no dispatch executable in workflow directory",
+                    "ln -sf Dispatch/dispatch dispatch");
+    }
+
+    doctor_check_completion(&warnings, "fish");
+    doctor_check_completion(&warnings, "bash");
+    doctor_check_completion(&warnings, "zsh");
+
+    for (size_t i = 0; i < board.agents.count; i++) {
+        DispatchAgent *agent = &board.agents.items[i];
+        char message[512];
+        snprintf(message, sizeof(message), "agent %s prompt exists",
+                 agent->name);
+        if (path_exists(agent->prompt_path))
+            doctor_ok(message);
+        else
+            doctor_warn(&warnings, message, "run dispatch normalize");
+
+        if (agent->run_script_path) {
+            snprintf(message, sizeof(message),
+                     "agent %s run script is executable", agent->name);
+            if (path_is_executable(agent->run_script_path))
+                doctor_ok(message);
+            else
+                doctor_warn(&warnings, message, "run dispatch normalize");
+        }
+
+        if (agent->current_task &&
+            !dispatch_board_find_task(&board, agent->current_task)) {
+            snprintf(message, sizeof(message),
+                     "agent %s references missing current task %s",
+                     agent->name, agent->current_task);
+            doctor_warn(&warnings, message,
+                        "clear or update the agent session current task");
+        }
+    }
+
+    for (size_t i = 0; i < board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        char message[512];
+        snprintf(message, sizeof(message), "workspace %s path exists",
+                 workspace->id);
+        if (path_exists(workspace->path))
+            doctor_ok(message);
+        else
+            doctor_warn(&warnings, message,
+                        "run dispatch workspace show <id> and prune stale records if needed");
+    }
+
+    printf("Summary: %zu warning%s\n", warnings, warnings == 1 ? "" : "s");
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int file_contains_text(const char *path, const char *needle) {
     FILE *file = fopen(path, "r");
     if (!file)
@@ -4400,6 +4547,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_blocked(argc, argv);
     if (strcmp(command->name, "status") == 0)
         return cmd_status(argc, argv);
+    if (strcmp(command->name, "doctor") == 0)
+        return cmd_doctor(argc, argv);
     if (strcmp(command->name, "ready") == 0)
         return cmd_ready(argc, argv);
     if (strcmp(command->name, "reviews") == 0)
