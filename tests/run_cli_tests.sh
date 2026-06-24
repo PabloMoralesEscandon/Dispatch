@@ -834,6 +834,7 @@ expect_ok "$BIN" init repo
 expect_ok git -C repo init
 expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
 expect_ok "$BIN" agent create --name codex-a --runner codex
+expect_ok "$BIN" agent create --name dormant --runner codex --no-run-script
 expect_ok "$BIN" group add Development --prefix DE
 expect_ok "$BIN" group add QA --prefix QA
 expect_ok "$BIN" task add DE Root
@@ -846,7 +847,7 @@ expect_fail "$BIN" agent archive codex-a
 assert_contains "Agent codex-a has active task DE-01"
 
 expect_ok "$BIN" tui --agents-smoke
-assert_contains "Agents: 1"
+assert_contains "Agents: 2"
 assert_contains "codex-a codex enabled"
 assert_contains "session:yes"
 assert_contains "current:DE-01"
@@ -866,6 +867,13 @@ assert_contains "Session ID: tui-session-2"
 
 EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "'ed' '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+
+expect_ok "$BIN" tui --agent-archive-smoke dormant archive
+assert_contains "Archived agent dormant"
+expect_ok "$BIN" tui --agents-smoke
+assert_contains "dormant codex archived"
+expect_ok "$BIN" tui --agent-archive-smoke dormant restore
+assert_contains "Restored agent dormant"
 
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"

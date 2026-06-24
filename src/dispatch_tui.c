@@ -36,6 +36,7 @@ typedef struct {
     DispatchTuiFilter filter;
     int group_filter;
     int actor_filter;
+    int show_archived_agents;
     char actor[64];
     char status[256];
     char search[128];
@@ -251,6 +252,10 @@ static DispatchAgent *selected_agent(DispatchTui *tui) {
         (size_t)tui->selected_agent >= tui->board.agents.count)
         return NULL;
     return &tui->board.agents.items[tui->selected_agent];
+}
+
+static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent) {
+    return tui->show_archived_agents || !agent->archived;
 }
 
 static void set_filter(DispatchTui *tui, DispatchTuiFilter filter) {
@@ -637,6 +642,86 @@ static void clear_selected_agent_session(DispatchTui *tui) {
     tui_set_status(tui, message);
 }
 
+static int agent_has_live_workspace(DispatchBoard *board, const char *name) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace->state != DISPATCH_WORKSPACE_REMOVED &&
+            strcmp(workspace->actor, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int set_agent_archived_state(const char *name, int archived,
+                                    char *message, size_t message_size) {
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    if (!agent) {
+        snprintf(message, message_size, "No agent named %s", name);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    if (archived && ((agent->current_task && agent->current_task[0]) ||
+                     agent_has_live_workspace(&board, name))) {
+        snprintf(message, message_size, "Agent %s owns active work", name);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    agent->archived = archived;
+    agent->updated_at = time(NULL);
+    if (!dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not save board");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "%s agent %s",
+             archived ? "Archived" : "Restored", name);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
+static void toggle_selected_agent_archived(DispatchTui *tui) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        tui_set_status(tui, "No selected agent");
+        return;
+    }
+    char name[128];
+    int archived = !agent->archived;
+    snprintf(name, sizeof(name), "%s", agent->name);
+    char message[256] = {0};
+    set_agent_archived_state(name, archived, message, sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+    clamp_agent_selection(tui);
+}
+
 static void draw_truncated(int y, int x, int width, const char *text) {
     if (width <= 0)
         return;
@@ -703,6 +788,8 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                    "Name             Runner   Status    Session  Current task  Last workspace");
     for (size_t i = 0; i < tui->board.agents.count && y < rows - 1; i++) {
         DispatchAgent *agent = &tui->board.agents.items[i];
+        if (!agent_is_visible(tui, agent))
+            continue;
         char line[1024];
         snprintf(line, sizeof(line), "%-16s %-8s %-9s %-8s %-13s %s",
                  agent->name, agent->runner,
@@ -959,8 +1046,10 @@ static void tui_render(DispatchTui *tui) {
         draw_agent_inspector(tui, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENTS) {
         char line[512];
-        snprintf(line, sizeof(line), "Agents: %zu    Tab/b board    q quit",
-                 tui->board.agents.count);
+        snprintf(line, sizeof(line),
+                 "Agents: %zu    view:%s    A toggle all    z archive/restore",
+                 tui->board.agents.count,
+                 tui->show_archived_agents ? "all" : "enabled");
         draw_truncated(2, 0, cols, line);
         draw_agent_rows(tui, 4, rows, cols);
     } else {
@@ -1011,7 +1100,7 @@ static void tui_render(DispatchTui *tui) {
                      : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
                            ? " %s | q/Esc back | e edit prompt | x clear session"
                      : tui->screen == TUI_SCREEN_AGENTS
-                           ? " %s | Tab/b board | j/k move | q quit"
+                           ? " %s | A all/enabled | z archive/restore | Enter/i inspect"
                            : " %s | Tab/a agents | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
@@ -1122,11 +1211,23 @@ static int tui_run(void) {
             if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
                 edit_selected_agent_prompt(&tui);
             break;
+        case 'z':
+            if (tui.screen == TUI_SCREEN_AGENTS ||
+                tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                toggle_selected_agent_archived(&tui);
+            break;
         case 'G':
             cycle_group_filter(&tui);
             break;
         case 'A':
-            cycle_actor_filter(&tui);
+            if (tui.screen == TUI_SCREEN_AGENTS) {
+                tui.show_archived_agents = !tui.show_archived_agents;
+                tui_set_status(&tui, tui.show_archived_agents
+                                        ? "Showing all agents"
+                                        : "Showing enabled agents");
+            } else {
+                cycle_actor_filter(&tui);
+            }
             break;
         case 'c':
             clear_secondary_filters(&tui);
@@ -1484,6 +1585,26 @@ static int tui_prompt_edit_smoke(const char *name) {
     return 0;
 }
 
+static int tui_agent_archive_smoke(const char *name, const char *action) {
+    int archived;
+    if (strcmp(action, "archive") == 0) {
+        archived = 1;
+    } else if (strcmp(action, "restore") == 0) {
+        archived = 0;
+    } else {
+        fprintf(stderr, "Unknown archive action %s\n", action);
+        return 1;
+    }
+
+    char message[256] = {0};
+    if (!set_agent_archived_state(name, archived, message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -1497,6 +1618,7 @@ static void print_tui_help(void) {
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
+    puts("  --agent-archive-smoke <name> archive|restore");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1523,6 +1645,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_session_smoke(argv[3], argv[4], argv[5], argv[6]);
     if (argc == 4 && strcmp(argv[2], "--prompt-edit-smoke") == 0)
         return tui_prompt_edit_smoke(argv[3]);
+    if (argc == 5 && strcmp(argv[2], "--agent-archive-smoke") == 0)
+        return tui_agent_archive_smoke(argv[3], argv[4]);
     if (argc != 2) {
         print_tui_help();
         return 1;
