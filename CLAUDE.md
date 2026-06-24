@@ -62,6 +62,8 @@ dispatch workspace show <TASK-ID-or-workspace>
 dispatch workspace remove <TASK-ID-or-workspace> [--force]
 dispatch workspace prune [--done] [--stale] [--dry-run]
 dispatch ready
+dispatch reviews
+dispatch proposed
 dispatch blocked
 dispatch status
 dispatch list

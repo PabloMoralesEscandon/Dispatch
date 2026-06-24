@@ -42,6 +42,8 @@ static const DispatchCliCommand commands[] = {
     {"commit", "Manage task commit references"},
     {"completion", "Print shell completion candidates"},
     {"ready", "List ready work or mark a task ready"},
+    {"reviews", "List tasks waiting for review"},
+    {"proposed", "List tasks waiting for approval"},
     {"blocked", "List blocked work and blockers"},
     {"status", "Show board overview and health warnings"},
     {"show", "Show one task"},
@@ -75,7 +77,7 @@ void dispatch_cli_print_help(void) {
     puts("Implemented now:");
     puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
-    puts("  ready, start, finish, review, normalize, status, list, show, blocked");
+    puts("  ready, reviews, proposed, start, finish, review, normalize, status, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -3423,6 +3425,31 @@ static int ready_task_count(const DispatchBoard *board) {
     return count;
 }
 
+static int task_count_by_presentation_state(const DispatchBoard *board,
+                                            DispatchState state) {
+    int count = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (task_presentation_state(board, task) == state)
+            count++;
+    }
+    return count;
+}
+
+static int print_tasks_by_presentation_state(const DispatchBoard *board,
+                                             DispatchState state,
+                                             const char *indent) {
+    int count = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (task_presentation_state(board, task) != state)
+            continue;
+        print_task_line(board, task, indent);
+        count++;
+    }
+    return count;
+}
+
 static void print_list_for_group(const DispatchBoard *board,
                                  const DispatchGroup *group,
                                  int include_done) {
@@ -3742,7 +3769,45 @@ static int cmd_ready_list(void) {
     if (!load_board_or_error(&board))
         return 1;
 
-    print_ready_tasks_from_board(&board, "");
+    int count = print_ready_tasks_from_board(&board, "");
+    if (count == 0) {
+        int review_count =
+            task_count_by_presentation_state(&board, DISPATCH_STATE_REVIEW);
+        int proposed_count =
+            task_count_by_presentation_state(&board, DISPATCH_STATE_PROPOSED);
+        int blocked_count =
+            task_count_by_presentation_state(&board, DISPATCH_STATE_BLOCKED);
+        printf("No ready tasks.\n");
+        if (review_count > 0)
+            printf("Reviews waiting: %d (run: dispatch reviews)\n",
+                   review_count);
+        if (proposed_count > 0)
+            printf("Proposed tasks: %d (run: dispatch proposed)\n",
+                   proposed_count);
+        if (blocked_count > 0)
+            printf("Blocked tasks: %d (run: dispatch blocked)\n",
+                   blocked_count);
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_queue_list(int argc, char **argv, DispatchState state,
+                          const char *label) {
+    (void)argv;
+    if (argc != 2) {
+        fprintf(stderr, "Usage: dispatch %s\n", label);
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    int count = print_tasks_by_presentation_state(&board, state, "");
+    if (count == 0)
+        printf("(no %s tasks)\n", label);
 
     dispatch_board_free(&board);
     return 0;
@@ -4141,6 +4206,10 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_status(argc, argv);
     if (strcmp(command->name, "ready") == 0)
         return cmd_ready(argc, argv);
+    if (strcmp(command->name, "reviews") == 0)
+        return cmd_queue_list(argc, argv, DISPATCH_STATE_REVIEW, "reviews");
+    if (strcmp(command->name, "proposed") == 0)
+        return cmd_queue_list(argc, argv, DISPATCH_STATE_PROPOSED, "proposed");
     if (strcmp(command->name, "start") == 0)
         return cmd_start(argc, argv);
     if (strcmp(command->name, "finish") == 0)

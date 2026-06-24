@@ -388,6 +388,8 @@ task-to-diff link.
 
 ```bash
 dispatch ready [<id> [--actor <name>] [--no-review]]
+dispatch reviews
+dispatch proposed
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
 dispatch review <id> [--actor <name>]
@@ -405,12 +407,16 @@ Tasks without review gates go directly from `doing` to `done` when finished:
 proposed -> ready -> doing -> done
 ```
 
-Use `ready` with no ID to list work that can be started. Use `ready <id>` to
+Use `ready` with no ID to list work that can be started. If no task is ready,
+it summarizes waiting review, proposed, and blocked queues. Use `ready <id>` to
 approve a proposed task for work. Omitted actors on user-facing approval and
 review commands default to `user`; agents should still pass their explicit
 actor name when acting on the user's instruction. Add `--no-review` when
 approving a task that can safely move directly from `doing` to `done` after the
 agent finishes it.
+
+`reviews` lists tasks waiting for acceptance. `proposed` lists tasks waiting
+for approval.
 
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to

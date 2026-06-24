@@ -355,6 +355,14 @@ assert_contains "  DE-02    proposed   Second  depends_on:DE-01"
 expect_ok "$BIN" list
 assert_contains "  DE-02    proposed   Second  depends_on:DE-01"
 
+expect_ok "$BIN" proposed
+assert_contains "DE-01"
+assert_contains "DE-02"
+
+expect_ok "$BIN" ready
+assert_contains "No ready tasks."
+assert_contains "Proposed tasks: 2 (run: dispatch proposed)"
+
 expect_ok "$BIN" blocked
 assert_not_contains "DE-02"
 
@@ -422,6 +430,10 @@ assert_contains "Started DE-02"
 
 expect_ok "$BIN" finish DE-02 --actor codex
 assert_contains "Finished DE-02 (review)"
+
+expect_ok "$BIN" reviews
+assert_contains "DE-02"
+assert_contains "review"
 
 expect_ok "$BIN" status
 assert_contains "review:1"
