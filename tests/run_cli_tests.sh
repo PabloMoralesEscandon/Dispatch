@@ -849,7 +849,15 @@ assert_line "completion"
 assert_line "commit"
 assert_line "doctor"
 assert_line "status"
+assert_line "tui"
 assert_line "workspace"
+
+expect_ok "$BIN" tui --help
+assert_contains "Usage: dispatch tui [--smoke]"
+
+expect_ok "$BIN" tui --smoke
+assert_contains "dispatch tui smoke ok:"
+assert_contains "2 tasks"
 
 install_home="$case_dir/completion-home"
 mkdir -p "$install_home"

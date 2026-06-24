@@ -11,6 +11,7 @@
 
 #include "dispatch.h"
 #include "dispatch_store.h"
+#include "dispatch_tui.h"
 
 typedef struct {
     const char *name;
@@ -47,6 +48,7 @@ static const DispatchCliCommand commands[] = {
     {"blocked", "List blocked work and blockers"},
     {"status", "Show board overview and health warnings"},
     {"doctor", "Check Dispatch setup and diagnostics"},
+    {"tui", "Open terminal UI"},
     {"show", "Show one task"},
     {"list", "List tasks by group and workflow order"},
     {"start", "Start and assign a ready task"},
@@ -78,7 +80,7 @@ void dispatch_cli_print_help(void) {
     puts("Implemented now:");
     puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
-    puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, list, show, blocked");
+    puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, tui, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -4559,6 +4561,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_status(argc, argv);
     if (strcmp(command->name, "doctor") == 0)
         return cmd_doctor(argc, argv);
+    if (strcmp(command->name, "tui") == 0)
+        return dispatch_tui_main(argc, argv);
     if (strcmp(command->name, "ready") == 0)
         return cmd_ready(argc, argv);
     if (strcmp(command->name, "reviews") == 0)

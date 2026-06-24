@@ -9,6 +9,7 @@ const char *sources[] = {
     "src/dispatch.c",
     "src/dispatch_cli.c",
     "src/dispatch_store.c",
+    "src/dispatch_tui.c",
     NULL,
 };
 
@@ -65,7 +66,8 @@ int main(int argc, char **argv) {
         nob_cmd_append(&link_cmd, obj_path(sources[i]));
     }
 
-    nob_cmd_append(&link_cmd, "-ljansson", "-o", BUILD_FOLDER "dispatch");
+    nob_cmd_append(&link_cmd, "-ljansson", "-lncurses", "-o",
+                   BUILD_FOLDER "dispatch");
 
     if (!cmd_run(&link_cmd))
         return 1;
