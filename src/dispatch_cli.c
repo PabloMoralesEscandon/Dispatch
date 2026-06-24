@@ -135,16 +135,25 @@ static int cmd_init(int argc, char **argv) {
 
 static int load_board_or_error(DispatchBoard *board) {
     char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        fprintf(stderr, "%s\n", error);
+        return 0;
+    }
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
                                   sizeof(error))) {
         fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
                 error);
+        dispatch_store_lock_release(&lock);
         return 0;
     }
     if (!dispatch_store_load(board, DISPATCH_STORE_FILE, error, sizeof(error))) {
         fprintf(stderr, "Could not load %s: %s\n", DISPATCH_STORE_FILE, error);
+        dispatch_store_lock_release(&lock);
         return 0;
     }
+    dispatch_store_lock_release(&lock);
     return 1;
 }
 

@@ -55,6 +55,21 @@ static char *lock_path_for_store(const char *path) {
     return lock_path;
 }
 
+static char *temporary_path_for_store(const char *path) {
+    size_t path_len = strlen(path);
+    char suffix[64];
+    snprintf(suffix, sizeof(suffix), ".tmp.%ld", (long)getpid());
+    size_t suffix_len = strlen(suffix);
+    char *temporary_path = malloc(path_len + suffix_len + 1);
+    if (!temporary_path) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(temporary_path, path, path_len);
+    memcpy(temporary_path + path_len, suffix, suffix_len + 1);
+    return temporary_path;
+}
+
 int dispatch_store_lock_acquire(DispatchStoreLock *lock, const char *path,
                                 int timeout_ms, char *error,
                                 size_t error_size) {
@@ -478,13 +493,24 @@ int dispatch_store_save(const DispatchBoard *board, const char *path,
 
     json_object_set_new(root, "board", json_board);
 
-    if (json_dump_file(root, path, JSON_INDENT(2)) != 0) {
+    char *temporary_path = temporary_path_for_store(path);
+    if (json_dump_file(root, temporary_path, JSON_INDENT(2)) != 0) {
         json_decref(root);
+        unlink(temporary_path);
+        free(temporary_path);
         set_error(error, error_size, "could not write Dispatch storage");
+        return 0;
+    }
+    if (rename(temporary_path, path) != 0) {
+        json_decref(root);
+        unlink(temporary_path);
+        free(temporary_path);
+        set_error_errno(error, error_size, "could not replace Dispatch storage");
         return 0;
     }
 
     json_decref(root);
+    free(temporary_path);
     return 1;
 }
 
@@ -803,7 +829,8 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
     json_error_t json_error;
     json_t *root = json_load_file(path, 0, &json_error);
     if (!root) {
-        set_error(error, error_size, json_error.text);
+        set_error(error, error_size,
+                  "Dispatch board is being updated; retry shortly.");
         return 0;
     }
 

@@ -203,6 +203,11 @@ older agent prompt records by moving them to the canonical
 `.dispatch/agents/<name>/<name>-PROMPT.md` prompt path, refreshing outdated
 generated prompt content, and regenerating affected agent run scripts.
 
+Dispatch serializes board reads and writes through `dispatch.json.lock`. Saves
+are written to a temporary file and atomically moved into place, so concurrent
+commands either read a complete board or print a short retry message while
+another process updates it.
+
 ### Completion
 
 ```bash

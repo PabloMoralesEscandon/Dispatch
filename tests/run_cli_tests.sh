@@ -130,9 +130,20 @@ assert_contains "dispatch.json already exists"
 printf 'locked\n' > dispatch.json.lock
 expect_fail "$BIN" group add Locked --prefix LK
 assert_contains "Dispatch board is locked by another process; retry shortly."
+expect_fail "$BIN" list
+assert_contains "Dispatch board is locked by another process; retry shortly."
+expect_fail "$BIN" ready
+assert_contains "Dispatch board is locked by another process; retry shortly."
 expect_fail "$BIN" normalize
 assert_contains "Dispatch board is locked by another process; retry shortly."
 rm -f dispatch.json.lock
+
+printf '{"version": 1, "board": ' > dispatch.json
+expect_fail "$BIN" list
+assert_contains "Dispatch board is being updated; retry shortly."
+rm -f dispatch.json
+expect_ok "$BIN" init repo
+assert_contains "Created dispatch.json for repo repo"
 
 expect_ok "$BIN" agent list
 assert_contains "(no agents)"
