@@ -231,6 +231,22 @@ task the agent is actively handling, and `last_workspace` records the most
 recent workspace used by that agent. These fields are shown by `agent show` and
 are used by runner-specific resume commands.
 
+Codex session IDs are manual metadata. The Codex CLI creates its own session ID
+when an interactive session starts, so Dispatch cannot assign one ahead of time.
+After the user knows the Codex session ID, record it with:
+
+```bash
+dispatch agent session frontend --session-id <codex-session-id>
+dispatch agent show frontend
+dispatch agent session frontend --clear-session
+```
+
+The same command can record the active task and workspace:
+
+```bash
+dispatch agent session frontend --session-id <codex-session-id> --current-task FE-01 --last-workspace FE-01
+```
+
 `agent resume` prints a runner-specific shell command for continuing an agent.
 Codex agents use the stored session ID when present. Without one, Dispatch emits
 a `codex resume --last` command scoped to the agent's remembered workspace when
