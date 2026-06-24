@@ -852,6 +852,18 @@ assert_contains "session:yes"
 assert_contains "current:DE-01"
 assert_contains "workspace:DE-01"
 
+expect_ok "$BIN" tui --agent-inspect-smoke codex-a
+assert_contains "Agent: codex-a"
+assert_contains "Session ID: tui-session"
+assert_contains "Current task: DE-01"
+assert_contains "Last workspace: DE-01"
+assert_contains "Codex session: manual metadata"
+
+expect_ok "$BIN" tui --agent-session-smoke codex-a tui-session-2 DE-01 DE-01
+assert_contains "Updated agent session codex-a"
+expect_ok "$BIN" tui --agent-inspect-smoke codex-a
+assert_contains "Session ID: tui-session-2"
+
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"
 assert_line "commit"

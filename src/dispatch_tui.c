@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "dispatch.h"
 #include "dispatch_store.h"
@@ -12,7 +13,8 @@
 typedef enum {
     TUI_SCREEN_BOARD,
     TUI_SCREEN_TASK_INSPECTOR,
-    TUI_SCREEN_AGENTS
+    TUI_SCREEN_AGENTS,
+    TUI_SCREEN_AGENT_INSPECTOR
 } DispatchTuiScreen;
 
 typedef enum {
@@ -240,6 +242,14 @@ static void clamp_agent_selection(DispatchTui *tui) {
     } else if (tui->selected_agent < 0) {
         tui->selected_agent = 0;
     }
+}
+
+static DispatchAgent *selected_agent(DispatchTui *tui) {
+    if (!tui->board_loaded || tui->board.agents.count == 0 ||
+        tui->selected_agent < 0 ||
+        (size_t)tui->selected_agent >= tui->board.agents.count)
+        return NULL;
+    return &tui->board.agents.items[tui->selected_agent];
 }
 
 static void set_filter(DispatchTui *tui, DispatchTuiFilter filter) {
@@ -489,6 +499,100 @@ static void run_selected_task_action(DispatchTui *tui,
     clamp_selection(tui);
 }
 
+static int update_agent_session_metadata(const char *name,
+                                         const char *session_id,
+                                         const char *current_task,
+                                         const char *last_workspace,
+                                         int clear_session,
+                                         int clear_current_task,
+                                         int clear_last_workspace,
+                                         char *message,
+                                         size_t message_size) {
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    if (!agent) {
+        snprintf(message, message_size, "No agent named %s", name);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    if (current_task && !dispatch_board_find_task(&board, current_task)) {
+        snprintf(message, message_size, "No task with id %s", current_task);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    if (last_workspace && !dispatch_board_find_workspace(&board, last_workspace)) {
+        snprintf(message, message_size, "No workspace for %s", last_workspace);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    if (session_id || clear_session) {
+        free(agent->session_id);
+        agent->session_id = session_id && session_id[0] ? strdup(session_id) : NULL;
+    }
+    if (current_task || clear_current_task) {
+        free(agent->current_task);
+        agent->current_task =
+            current_task && current_task[0] ? strdup(current_task) : NULL;
+    }
+    if (last_workspace || clear_last_workspace) {
+        free(agent->last_workspace);
+        agent->last_workspace =
+            last_workspace && last_workspace[0] ? strdup(last_workspace) : NULL;
+    }
+    agent->updated_at = time(NULL);
+
+    if (!dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not save board");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "Updated agent session %s", name);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
+static void clear_selected_agent_session(DispatchTui *tui) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        tui_set_status(tui, "No selected agent");
+        return;
+    }
+    char name[128];
+    snprintf(name, sizeof(name), "%s", agent->name);
+    char message[256] = {0};
+    update_agent_session_metadata(name, NULL, NULL, NULL, 1, 0, 0, message,
+                                  sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+}
+
 static void draw_truncated(int y, int x, int width, const char *text) {
     if (width <= 0)
         return;
@@ -674,6 +778,53 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
     }
 }
 
+static void draw_agent_inspector(DispatchTui *tui, int rows, int cols) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        draw_truncated(2, 0, cols, "No selected agent.");
+        return;
+    }
+
+    char line[1024];
+    int y = 2;
+    snprintf(line, sizeof(line), "%s  %s", agent->name, agent->runner);
+    attron(A_BOLD);
+    y = draw_line(y, rows, cols, "", line);
+    attroff(A_BOLD);
+
+    y = draw_line(y + 1, rows, cols, "Status:",
+                  agent->archived ? "archived" : "enabled");
+    y = draw_line(y, rows, cols, "Model:", agent->model ? agent->model : "-");
+    y = draw_line(y, rows, cols, "Prompt:", agent->prompt_path);
+    y = draw_line(y, rows, cols, "Run script:",
+                  agent->run_script_path ? agent->run_script_path : "-");
+    y = draw_line(y, rows, cols, "Session ID:",
+                  agent->session_id ? agent->session_id : "-");
+    y = draw_line(y, rows, cols, "Current task:",
+                  agent->current_task ? agent->current_task : "-");
+    y = draw_line(y, rows, cols, "Last workspace:",
+                  agent->last_workspace ? agent->last_workspace : "-");
+    if (strcmp(agent->runner, "codex") == 0) {
+        y = draw_line(y, rows, cols, "Codex session:",
+                      "manual metadata; use dispatch agent session");
+    }
+
+    y = draw_line(y + 1, rows, cols, "Recent completed tasks:", "");
+    int shown = 0;
+    for (size_t i = tui->board.tasks.count; i > 0 && y < rows - 1; i--) {
+        DispatchTask *task = &tui->board.tasks.items[i - 1];
+        if (!task->completed_by || strcmp(task->completed_by, agent->name) != 0)
+            continue;
+        snprintf(line, sizeof(line), "  %s %s", task->id, task->title);
+        y = draw_line(y, rows, cols, "", line);
+        shown++;
+        if (shown == 5)
+            break;
+    }
+    if (shown == 0)
+        draw_line(y, rows, cols, "  -", "");
+}
+
 static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     int visible_index = 0;
@@ -748,6 +899,8 @@ static void tui_render(DispatchTui *tui) {
     draw_truncated(0, 0, cols,
                    tui->screen == TUI_SCREEN_TASK_INSPECTOR
                        ? "Dispatch TUI - Task"
+                       : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
+                             ? "Dispatch TUI - Agent"
                        : tui->screen == TUI_SCREEN_AGENTS
                              ? "Dispatch TUI - Agents"
                              : "Dispatch TUI - Board");
@@ -757,6 +910,8 @@ static void tui_render(DispatchTui *tui) {
         draw_truncated(2, 0, cols, "Board not loaded.");
     } else if (tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
         draw_task_inspector(tui, rows, cols);
+    } else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR) {
+        draw_agent_inspector(tui, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENTS) {
         char line[512];
         snprintf(line, sizeof(line), "Agents: %zu    Tab/b board    q quit",
@@ -808,6 +963,8 @@ static void tui_render(DispatchTui *tui) {
         snprintf(status, sizeof(status),
                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
                      ? " %s | q/Esc back | r/s/f/v actions | d diff | ? help"
+                     : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
+                           ? " %s | q/Esc back | x clear session | ? help"
                      : tui->screen == TUI_SCREEN_AGENTS
                            ? " %s | Tab/b board | j/k move | q quit"
                            : " %s | Tab/a agents | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
@@ -844,6 +1001,8 @@ static int tui_run(void) {
         case 'q':
             if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
                 tui.screen = TUI_SCREEN_BOARD;
+            else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                tui.screen = TUI_SCREEN_AGENTS;
             else
                 tui.running = 0;
             break;
@@ -863,6 +1022,9 @@ static int tui_run(void) {
             if (tui.screen == TUI_SCREEN_BOARD && selected_visible_task(&tui)) {
                 tui.screen = TUI_SCREEN_TASK_INSPECTOR;
                 tui_set_status(&tui, "Inspecting task");
+            } else if (tui.screen == TUI_SCREEN_AGENTS && selected_agent(&tui)) {
+                tui.screen = TUI_SCREEN_AGENT_INSPECTOR;
+                tui_set_status(&tui, "Inspecting agent");
             }
             break;
         case '?':
@@ -907,6 +1069,10 @@ static int tui_run(void) {
         case 'd':
             run_selected_task_diff(&tui);
             break;
+        case 'x':
+            if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                clear_selected_agent_session(&tui);
+            break;
         case 'G':
             cycle_group_filter(&tui);
             break;
@@ -924,6 +1090,9 @@ static int tui_run(void) {
             if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
                 tui.screen = TUI_SCREEN_BOARD;
                 tui_set_status(&tui, "Board");
+            } else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR) {
+                tui.screen = TUI_SCREEN_AGENTS;
+                tui_set_status(&tui, "Agents");
             } else {
                 tui.search_active = 0;
                 tui.search[0] = '\0';
@@ -1182,6 +1351,59 @@ static int tui_agents_smoke(void) {
     return 0;
 }
 
+static int tui_agent_inspect_smoke(const char *name) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui agent inspect smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    if (!agent) {
+        fprintf(stderr, "No agent named %s\n", name);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Agent: %s\n", agent->name);
+    printf("Runner: %s\n", agent->runner);
+    printf("Status: %s\n", agent->archived ? "archived" : "enabled");
+    printf("Prompt: %s\n", agent->prompt_path);
+    printf("Run script: %s\n", agent->run_script_path ? agent->run_script_path : "-");
+    printf("Session ID: %s\n", agent->session_id ? agent->session_id : "-");
+    printf("Current task: %s\n", agent->current_task ? agent->current_task : "-");
+    printf("Last workspace: %s\n",
+           agent->last_workspace ? agent->last_workspace : "-");
+    if (strcmp(agent->runner, "codex") == 0)
+        printf("Codex session: manual metadata\n");
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int tui_agent_session_smoke(const char *name, const char *session_id,
+                                   const char *current_task,
+                                   const char *last_workspace) {
+    char message[256] = {0};
+    int ok = update_agent_session_metadata(
+        name, strcmp(session_id, "-") == 0 ? NULL : session_id,
+        strcmp(current_task, "-") == 0 ? NULL : current_task,
+        strcmp(last_workspace, "-") == 0 ? NULL : last_workspace,
+        strcmp(session_id, "-") == 0, strcmp(current_task, "-") == 0,
+        strcmp(last_workspace, "-") == 0, message, sizeof(message));
+    if (!ok) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -1192,6 +1414,8 @@ static void print_tui_help(void) {
     puts("  --action-smoke <action> <task-id> [actor]  run lifecycle action and exit");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
     puts("  --agents-smoke             print agent dashboard data and exit");
+    puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
+    puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1212,6 +1436,10 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_diff_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)
         return tui_agents_smoke();
+    if (argc == 4 && strcmp(argv[2], "--agent-inspect-smoke") == 0)
+        return tui_agent_inspect_smoke(argv[3]);
+    if (argc == 7 && strcmp(argv[2], "--agent-session-smoke") == 0)
+        return tui_agent_session_smoke(argv[3], argv[4], argv[5], argv[6]);
     if (argc != 2) {
         print_tui_help();
         return 1;
