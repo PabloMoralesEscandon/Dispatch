@@ -866,6 +866,18 @@ assert_contains "Title: Root"
 assert_contains "Requires review: yes"
 assert_contains "Workspace: DE-01"
 
+expect_ok "$BIN" tui --filter-smoke not-done
+assert_contains "Filter: not-done"
+assert_contains "Visible: 2"
+
+expect_ok "$BIN" tui --filter-smoke all
+assert_contains "Filter: all"
+assert_contains "Visible: 2"
+
+expect_ok "$BIN" tui --filter-smoke ready
+assert_contains "Filter: ready"
+assert_contains "Visible: 1"
+
 install_home="$case_dir/completion-home"
 mkdir -p "$install_home"
 HOME="$install_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH=/no-such-dir expect_ok "$BIN" completion install fish

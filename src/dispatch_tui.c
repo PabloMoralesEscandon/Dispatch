@@ -13,10 +13,24 @@ typedef enum {
     TUI_SCREEN_TASK_INSPECTOR
 } DispatchTuiScreen;
 
+typedef enum {
+    TUI_FILTER_NOT_DONE,
+    TUI_FILTER_ALL,
+    TUI_FILTER_READY,
+    TUI_FILTER_BLOCKED,
+    TUI_FILTER_REVIEW,
+    TUI_FILTER_DOING,
+    TUI_FILTER_DONE,
+    TUI_FILTER_ATTENTION
+} DispatchTuiFilter;
+
 typedef struct {
     DispatchBoard board;
     int board_loaded;
     DispatchTuiScreen screen;
+    DispatchTuiFilter filter;
+    int group_filter;
+    int actor_filter;
     char status[256];
     char search[128];
     int search_active;
@@ -27,6 +41,14 @@ typedef struct {
 
 static void tui_set_status(DispatchTui *tui, const char *message) {
     snprintf(tui->status, sizeof(tui->status), "%s", message ? message : "");
+}
+
+static void tui_init(DispatchTui *tui) {
+    memset(tui, 0, sizeof(*tui));
+    tui->filter = TUI_FILTER_NOT_DONE;
+    tui->group_filter = -1;
+    tui->actor_filter = -1;
+    tui->running = 1;
 }
 
 static void tui_free_board(DispatchTui *tui) {
@@ -47,6 +69,12 @@ static int tui_load_board(DispatchTui *tui) {
         return 0;
     }
     tui->board_loaded = 1;
+    if (tui->group_filter >= 0 &&
+        (size_t)tui->group_filter >= tui->board.groups.count)
+        tui->group_filter = -1;
+    if (tui->actor_filter >= 0 &&
+        (size_t)tui->actor_filter >= tui->board.agents.count)
+        tui->actor_filter = -1;
     tui_set_status(tui, "Ready");
     return 1;
 }
@@ -63,8 +91,26 @@ static int task_count_for_state(const DispatchBoard *board,
     return count;
 }
 
-static int task_is_done(const DispatchBoard *board, const DispatchTask *task) {
-    return dispatch_task_effective_state(board, task) == DISPATCH_STATE_DONE;
+static const char *filter_name(DispatchTuiFilter filter) {
+    switch (filter) {
+    case TUI_FILTER_NOT_DONE:
+        return "not-done";
+    case TUI_FILTER_ALL:
+        return "all";
+    case TUI_FILTER_READY:
+        return "ready";
+    case TUI_FILTER_BLOCKED:
+        return "blocked";
+    case TUI_FILTER_REVIEW:
+        return "review";
+    case TUI_FILTER_DOING:
+        return "doing";
+    case TUI_FILTER_DONE:
+        return "done";
+    case TUI_FILTER_ATTENTION:
+        return "attention";
+    }
+    return "not-done";
 }
 
 static int text_contains_casefold(const char *haystack, const char *needle) {
@@ -95,25 +141,79 @@ static int task_matches_search(const DispatchTask *task, const char *search) {
            text_contains_casefold(task->completed_by, search);
 }
 
-static int task_is_visible(const DispatchBoard *board, const DispatchTask *task,
-                           const char *search) {
-    if (task_is_done(board, task))
-        return 0;
-    return task_matches_search(task, search);
+static int task_matches_filter(const DispatchBoard *board,
+                               const DispatchTask *task,
+                               DispatchTuiFilter filter) {
+    DispatchState state = dispatch_task_effective_state(board, task);
+    switch (filter) {
+    case TUI_FILTER_ALL:
+        return 1;
+    case TUI_FILTER_NOT_DONE:
+        return state != DISPATCH_STATE_DONE;
+    case TUI_FILTER_READY:
+        return state == DISPATCH_STATE_READY;
+    case TUI_FILTER_BLOCKED:
+        return state == DISPATCH_STATE_BLOCKED;
+    case TUI_FILTER_REVIEW:
+        return state == DISPATCH_STATE_REVIEW;
+    case TUI_FILTER_DOING:
+        return state == DISPATCH_STATE_DOING;
+    case TUI_FILTER_DONE:
+        return state == DISPATCH_STATE_DONE;
+    case TUI_FILTER_ATTENTION:
+        return state == DISPATCH_STATE_READY ||
+               state == DISPATCH_STATE_REVIEW ||
+               state == DISPATCH_STATE_PROPOSED;
+    }
+    return state != DISPATCH_STATE_DONE;
 }
 
-static int visible_task_count(const DispatchBoard *board, const char *search) {
+static const char *actor_filter_value(const DispatchBoard *board, int index) {
+    if (index < 0 || (size_t)index >= board->agents.count)
+        return NULL;
+    return board->agents.items[index].name;
+}
+
+static int task_matches_secondary_filters(const DispatchTui *tui,
+                                          const DispatchTask *task) {
+    if (tui->group_filter >= 0) {
+        if ((size_t)tui->group_filter >= tui->board.groups.count ||
+            strcmp(task->group, tui->board.groups.items[tui->group_filter].id) !=
+                0) {
+            return 0;
+        }
+    }
+
+    const char *actor = actor_filter_value(&tui->board, tui->actor_filter);
+    if (actor) {
+        int matches_actor =
+            (task->assigned_to && strcmp(task->assigned_to, actor) == 0) ||
+            (task->started_by && strcmp(task->started_by, actor) == 0) ||
+            (task->completed_by && strcmp(task->completed_by, actor) == 0);
+        if (!matches_actor)
+            return 0;
+    }
+    return 1;
+}
+
+static int tui_task_is_visible(const DispatchTui *tui,
+                               const DispatchTask *task) {
+    return task_matches_filter(&tui->board, task, tui->filter) &&
+           task_matches_secondary_filters(tui, task) &&
+           task_matches_search(task, tui->search);
+}
+
+static int visible_task_count_for_tui(const DispatchTui *tui) {
     int count = 0;
-    for (size_t i = 0; i < board->tasks.count; i++) {
-        if (task_is_visible(board, &board->tasks.items[i], search))
+    for (size_t i = 0; i < tui->board.tasks.count; i++) {
+        if (tui_task_is_visible(tui, &tui->board.tasks.items[i]))
             count++;
     }
     return count;
 }
 
 static void clamp_selection(DispatchTui *tui) {
-    int count = tui->board_loaded ? visible_task_count(&tui->board, tui->search)
-                                  : 0;
+    int count = tui->board_loaded ? visible_task_count_for_tui(tui) : 0;
     if (count <= 0) {
         tui->selected_task = 0;
     } else if (tui->selected_task >= count) {
@@ -123,6 +223,49 @@ static void clamp_selection(DispatchTui *tui) {
     }
 }
 
+static void set_filter(DispatchTui *tui, DispatchTuiFilter filter) {
+    tui->filter = filter;
+    tui->selected_task = 0;
+    char message[128];
+    snprintf(message, sizeof(message), "Filter: %s", filter_name(filter));
+    tui_set_status(tui, message);
+}
+
+static void cycle_group_filter(DispatchTui *tui) {
+    if (!tui->board_loaded || tui->board.groups.count == 0) {
+        tui->group_filter = -1;
+        tui_set_status(tui, "No groups");
+        return;
+    }
+    tui->group_filter++;
+    if ((size_t)tui->group_filter >= tui->board.groups.count)
+        tui->group_filter = -1;
+    tui->selected_task = 0;
+    tui_set_status(tui, tui->group_filter >= 0 ? "Group filter" : "All groups");
+}
+
+static void cycle_actor_filter(DispatchTui *tui) {
+    if (!tui->board_loaded || tui->board.agents.count == 0) {
+        tui->actor_filter = -1;
+        tui_set_status(tui, "No agents");
+        return;
+    }
+    tui->actor_filter++;
+    if ((size_t)tui->actor_filter >= tui->board.agents.count)
+        tui->actor_filter = -1;
+    tui->selected_task = 0;
+    tui_set_status(tui, tui->actor_filter >= 0 ? "Actor filter" : "All actors");
+}
+
+static void clear_secondary_filters(DispatchTui *tui) {
+    tui->search[0] = '\0';
+    tui->search_active = 0;
+    tui->group_filter = -1;
+    tui->actor_filter = -1;
+    tui->selected_task = 0;
+    tui_set_status(tui, "Filters cleared");
+}
+
 static DispatchTask *selected_visible_task(DispatchTui *tui) {
     if (!tui->board_loaded)
         return NULL;
@@ -130,7 +273,7 @@ static DispatchTask *selected_visible_task(DispatchTui *tui) {
     int visible_index = 0;
     for (size_t i = 0; i < tui->board.tasks.count; i++) {
         DispatchTask *task = &tui->board.tasks.items[i];
-        if (!task_is_visible(&tui->board, task, tui->search))
+        if (!tui_task_is_visible(tui, task))
             continue;
         if (visible_index == tui->selected_task)
             return task;
@@ -166,13 +309,16 @@ static void tui_render_help(void) {
         "",
         "q        quit",
         "?        toggle help",
-        "R        reload board",
+        "r        reload board",
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
         "j/k      move selection",
+        "1-7/R    filter presets",
+        "G/A      cycle group/actor filters",
+        "c        clear search/group/actor filters",
         "",
         "This foundation screen validates terminal setup, refresh, resize, and",
         "clean shutdown. Board and agent views are implemented in follow-up tasks.",
@@ -314,7 +460,7 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         for (size_t i = 0; i < tui->board.tasks.count; i++) {
             DispatchTask *task = &tui->board.tasks.items[i];
             if (strcmp(task->group, group->id) == 0 &&
-                task_is_visible(&tui->board, task, tui->search)) {
+                tui_task_is_visible(tui, task)) {
                 group_has_visible = 1;
                 break;
             }
@@ -332,7 +478,7 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         for (size_t i = 0; i < tui->board.tasks.count && y < rows - 1; i++) {
             DispatchTask *task = &tui->board.tasks.items[i];
             if (strcmp(task->group, group->id) != 0 ||
-                !task_is_visible(&tui->board, task, tui->search)) {
+                !tui_task_is_visible(tui, task)) {
                 continue;
             }
 
@@ -390,7 +536,7 @@ static void tui_render(DispatchTui *tui) {
                  tui->board.repo_path ? tui->board.repo_path : ".");
         draw_truncated(2, 0, cols, line);
 
-        int visible = visible_task_count(&tui->board, tui->search);
+        int visible = visible_task_count_for_tui(tui);
         snprintf(line, sizeof(line),
                  "Tasks: %zu total  visible:%d  ready:%d  doing:%d  review:%d  blocked:%d  done:%d",
                  tui->board.tasks.count,
@@ -403,7 +549,16 @@ static void tui_render(DispatchTui *tui) {
         draw_truncated(4, 0, cols, line);
 
         snprintf(line, sizeof(line),
-                 "Filter: not-done%s%s%s    Groups: %zu    Agents: %zu    Workspaces: %zu",
+                 "Filter: %s%s%s%s%s%s%s%s    Groups: %zu    Agents: %zu    Workspaces: %zu",
+                 filter_name(tui->filter),
+                 tui->group_filter >= 0 ? " group:" : "",
+                 tui->group_filter >= 0
+                     ? tui->board.groups.items[tui->group_filter].prefix
+                     : "",
+                 actor_filter_value(&tui->board, tui->actor_filter) ? " actor:" : "",
+                 actor_filter_value(&tui->board, tui->actor_filter)
+                     ? actor_filter_value(&tui->board, tui->actor_filter)
+                     : "",
                  tui->search[0] ? " search:" : "",
                  tui->search[0] ? tui->search : "",
                  tui->search_active ? "_" : "", tui->board.groups.count,
@@ -419,8 +574,8 @@ static void tui_render(DispatchTui *tui) {
         char status[512];
         snprintf(status, sizeof(status),
                  tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                     ? " %s | q/Esc back | ? help | R reload"
-                     : " %s | q quit | Enter/i inspect | ? help | R reload | / search | j/k move",
+                     ? " %s | q/Esc back | ? help | r reload"
+                     : " %s | q quit | Enter/i inspect | ? help | r reload | 1-7/R filters | / search",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -433,8 +588,8 @@ static void tui_render(DispatchTui *tui) {
 }
 
 static int tui_run(void) {
-    DispatchTui tui = {0};
-    tui.running = 1;
+    DispatchTui tui;
+    tui_init(&tui);
     tui_load_board(&tui);
 
     initscr();
@@ -468,6 +623,39 @@ static int tui_run(void) {
         case '?':
             tui.show_help = !tui.show_help;
             break;
+        case '1':
+            set_filter(&tui, TUI_FILTER_NOT_DONE);
+            break;
+        case '2':
+            set_filter(&tui, TUI_FILTER_ALL);
+            break;
+        case '3':
+            set_filter(&tui, TUI_FILTER_READY);
+            break;
+        case '4':
+            set_filter(&tui, TUI_FILTER_BLOCKED);
+            break;
+        case '5':
+            set_filter(&tui, TUI_FILTER_REVIEW);
+            break;
+        case '6':
+            set_filter(&tui, TUI_FILTER_DOING);
+            break;
+        case '7':
+            set_filter(&tui, TUI_FILTER_DONE);
+            break;
+        case 'R':
+            set_filter(&tui, TUI_FILTER_ATTENTION);
+            break;
+        case 'G':
+            cycle_group_filter(&tui);
+            break;
+        case 'A':
+            cycle_actor_filter(&tui);
+            break;
+        case 'c':
+            clear_secondary_filters(&tui);
+            break;
         case '/':
             tui.search_active = 1;
             tui_set_status(&tui, "Search");
@@ -493,7 +681,7 @@ static int tui_run(void) {
             tui.selected_task++;
             clamp_selection(&tui);
             break;
-        case 'R':
+        case 'r':
             tui_load_board(&tui);
             clamp_selection(&tui);
             break;
@@ -528,21 +716,24 @@ static int tui_run(void) {
 }
 
 static int tui_smoke(void) {
-    DispatchBoard board;
+    DispatchTui tui;
+    tui_init(&tui);
     char error[256] = {0};
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
                                   sizeof(error)) ||
-        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+        !dispatch_store_load(&tui.board, DISPATCH_STORE_FILE, error,
                              sizeof(error))) {
         fprintf(stderr, "dispatch tui smoke failed: %s\n",
                 error[0] ? error : "could not load board");
         return 1;
     }
+    tui.board_loaded = 1;
 
     printf("dispatch tui smoke ok: %zu tasks, %d visible, %zu groups, %zu agents, %zu workspaces\n",
-           board.tasks.count, visible_task_count(&board, ""), board.groups.count,
-           board.agents.count, board.workspaces.count);
-    dispatch_board_free(&board);
+           tui.board.tasks.count, visible_task_count_for_tui(&tui),
+           tui.board.groups.count, tui.board.agents.count,
+           tui.board.workspaces.count);
+    tui_free_board(&tui);
     return 0;
 }
 
@@ -580,11 +771,61 @@ static int tui_inspect_smoke(const char *task_id) {
     return 0;
 }
 
+static int parse_filter_name(const char *name, DispatchTuiFilter *filter) {
+    if (strcmp(name, "not-done") == 0) {
+        *filter = TUI_FILTER_NOT_DONE;
+    } else if (strcmp(name, "all") == 0) {
+        *filter = TUI_FILTER_ALL;
+    } else if (strcmp(name, "ready") == 0) {
+        *filter = TUI_FILTER_READY;
+    } else if (strcmp(name, "blocked") == 0) {
+        *filter = TUI_FILTER_BLOCKED;
+    } else if (strcmp(name, "review") == 0) {
+        *filter = TUI_FILTER_REVIEW;
+    } else if (strcmp(name, "doing") == 0) {
+        *filter = TUI_FILTER_DOING;
+    } else if (strcmp(name, "done") == 0) {
+        *filter = TUI_FILTER_DONE;
+    } else if (strcmp(name, "attention") == 0) {
+        *filter = TUI_FILTER_ATTENTION;
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+static int tui_filter_smoke(const char *filter_name_arg) {
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!parse_filter_name(filter_name_arg, &tui.filter)) {
+        fprintf(stderr, "Unknown TUI filter %s\n", filter_name_arg);
+        return 1;
+    }
+
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&tui.board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui filter smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+    tui.board_loaded = 1;
+
+    printf("Filter: %s\n", filter_name(tui.filter));
+    printf("Visible: %d\n", visible_task_count_for_tui(&tui));
+    tui_free_board(&tui);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
     puts("Open the ncurses Dispatch terminal UI.");
     puts("  --smoke   load the board and exit without initializing ncurses");
+    puts("  --inspect-smoke <task-id>  print task inspector data and exit");
+    puts("  --filter-smoke <filter>    print visible row count and exit");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -597,6 +838,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_smoke();
     if (argc == 4 && strcmp(argv[2], "--inspect-smoke") == 0)
         return tui_inspect_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--filter-smoke") == 0)
+        return tui_filter_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;
