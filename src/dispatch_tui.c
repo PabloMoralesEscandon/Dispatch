@@ -3,6 +3,7 @@
 #include <ncurses.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dispatch.h"
@@ -31,6 +32,7 @@ typedef struct {
     DispatchTuiFilter filter;
     int group_filter;
     int actor_filter;
+    char actor[64];
     char status[256];
     char search[128];
     int search_active;
@@ -48,6 +50,9 @@ static void tui_init(DispatchTui *tui) {
     tui->filter = TUI_FILTER_NOT_DONE;
     tui->group_filter = -1;
     tui->actor_filter = -1;
+    const char *actor = getenv("DISPATCH_ACTOR");
+    snprintf(tui->actor, sizeof(tui->actor), "%s",
+             actor && actor[0] ? actor : "user");
     tui->running = 1;
 }
 
@@ -293,6 +298,116 @@ static DispatchWorkspace *workspace_for_task(DispatchBoard *board,
     return NULL;
 }
 
+typedef enum {
+    TUI_ACTION_READY,
+    TUI_ACTION_START,
+    TUI_ACTION_FINISH,
+    TUI_ACTION_REVIEW
+} DispatchTuiAction;
+
+static int mutate_task(const char *task_id, const char *actor,
+                       DispatchTuiAction action, char *message,
+                       size_t message_size) {
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        snprintf(message, message_size, "No task with id %s", task_id);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    int ok = 0;
+    DispatchState finished_state = DISPATCH_STATE_PROPOSED;
+    switch (action) {
+    case TUI_ACTION_READY:
+        ok = dispatch_task_mark_ready(&board, task, actor);
+        break;
+    case TUI_ACTION_START:
+        ok = dispatch_task_start(&board, task, actor);
+        break;
+    case TUI_ACTION_FINISH:
+        ok = dispatch_task_finish(task, actor);
+        finished_state = task->state;
+        break;
+    case TUI_ACTION_REVIEW:
+        ok = dispatch_task_review(task, actor);
+        break;
+    }
+
+    if (!ok) {
+        snprintf(message, message_size, "Could not update %s", task_id);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    dispatch_board_normalize_states(&board);
+    if (!dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not save board");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    switch (action) {
+    case TUI_ACTION_READY:
+        snprintf(message, message_size, "Readied %s", task_id);
+        break;
+    case TUI_ACTION_START:
+        snprintf(message, message_size, "Started %s as %s", task_id, actor);
+        break;
+    case TUI_ACTION_FINISH:
+        snprintf(message, message_size, "Finished %s (%s)", task_id,
+                 dispatch_state_name(finished_state));
+        break;
+    case TUI_ACTION_REVIEW:
+        snprintf(message, message_size, "Reviewed %s", task_id);
+        break;
+    }
+
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
+static void run_selected_task_action(DispatchTui *tui,
+                                     DispatchTuiAction action) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+
+    char task_id[64];
+    snprintf(task_id, sizeof(task_id), "%s", task->id);
+    char message[256] = {0};
+    mutate_task(task_id, tui->actor, action, message, sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+    clamp_selection(tui);
+}
+
 static void draw_truncated(int y, int x, int width, const char *text) {
     if (width <= 0)
         return;
@@ -309,7 +424,8 @@ static void tui_render_help(void) {
         "",
         "q        quit",
         "?        toggle help",
-        "r        reload board",
+        "u        reload board",
+        "r/s/f/v  ready/start/finish/review selected task",
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
         "/        search tasks",
@@ -574,8 +690,8 @@ static void tui_render(DispatchTui *tui) {
         char status[512];
         snprintf(status, sizeof(status),
                  tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                     ? " %s | q/Esc back | ? help | r reload"
-                     : " %s | q quit | Enter/i inspect | ? help | r reload | 1-7/R filters | / search",
+                     ? " %s | q/Esc back | r/s/f/v actions | ? help | u reload"
+                     : " %s | q quit | Enter/i inspect | r/s/f/v actions | 1-7/R filters | / search",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -647,6 +763,18 @@ static int tui_run(void) {
         case 'R':
             set_filter(&tui, TUI_FILTER_ATTENTION);
             break;
+        case 'r':
+            run_selected_task_action(&tui, TUI_ACTION_READY);
+            break;
+        case 's':
+            run_selected_task_action(&tui, TUI_ACTION_START);
+            break;
+        case 'f':
+            run_selected_task_action(&tui, TUI_ACTION_FINISH);
+            break;
+        case 'v':
+            run_selected_task_action(&tui, TUI_ACTION_REVIEW);
+            break;
         case 'G':
             cycle_group_filter(&tui);
             break;
@@ -681,7 +809,7 @@ static int tui_run(void) {
             tui.selected_task++;
             clamp_selection(&tui);
             break;
-        case 'r':
+        case 'u':
             tui_load_board(&tui);
             clamp_selection(&tui);
             break;
@@ -819,6 +947,39 @@ static int tui_filter_smoke(const char *filter_name_arg) {
     return 0;
 }
 
+static int parse_action_name(const char *name, DispatchTuiAction *action) {
+    if (strcmp(name, "ready") == 0) {
+        *action = TUI_ACTION_READY;
+    } else if (strcmp(name, "start") == 0) {
+        *action = TUI_ACTION_START;
+    } else if (strcmp(name, "finish") == 0) {
+        *action = TUI_ACTION_FINISH;
+    } else if (strcmp(name, "review") == 0) {
+        *action = TUI_ACTION_REVIEW;
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+static int tui_action_smoke(const char *action_name, const char *task_id,
+                            const char *actor) {
+    DispatchTuiAction action;
+    if (!parse_action_name(action_name, &action)) {
+        fprintf(stderr, "Unknown TUI action %s\n", action_name);
+        return 1;
+    }
+
+    char message[256] = {0};
+    if (!mutate_task(task_id, actor && actor[0] ? actor : "user", action,
+                     message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -826,6 +987,7 @@ static void print_tui_help(void) {
     puts("  --smoke   load the board and exit without initializing ncurses");
     puts("  --inspect-smoke <task-id>  print task inspector data and exit");
     puts("  --filter-smoke <filter>    print visible row count and exit");
+    puts("  --action-smoke <action> <task-id> [actor]  run lifecycle action and exit");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -840,6 +1002,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_inspect_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--filter-smoke") == 0)
         return tui_filter_smoke(argv[3]);
+    if ((argc == 5 || argc == 6) && strcmp(argv[2], "--action-smoke") == 0)
+        return tui_action_smoke(argv[3], argv[4], argc == 6 ? argv[5] : "user");
     if (argc != 2) {
         print_tui_help();
         return 1;

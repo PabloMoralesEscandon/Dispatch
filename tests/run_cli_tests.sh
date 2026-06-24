@@ -1058,6 +1058,23 @@ assert_contains "Finished DE-01 (done)"
 assert_contains "Next ready tasks:"
 assert_contains "DE-02"
 
+case_dir="$(make_case_dir tui-actions)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root
+expect_ok "$BIN" tui --action-smoke ready DE-01 tester
+assert_contains "Readied DE-01"
+expect_ok "$BIN" tui --action-smoke start DE-01 tester
+assert_contains "Started DE-01 as tester"
+expect_ok "$BIN" tui --action-smoke finish DE-01 tester
+assert_contains "Finished DE-01 (review)"
+expect_ok "$BIN" tui --action-smoke review DE-01 reviewer
+assert_contains "Reviewed DE-01"
+expect_ok "$BIN" show DE-01
+assert_contains "State: done"
+
 case_dir="$(make_case_dir legacy)"
 cd "$case_dir"
 
