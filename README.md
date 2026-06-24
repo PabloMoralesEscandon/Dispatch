@@ -314,6 +314,74 @@ dirty worktrees, and non-worktree paths unless the operation is explicitly safe.
 `workspace prune --stale` clears stale creating records with no matching
 worktree. Use `--dry-run` to preview prune actions.
 
+### TUI
+
+```bash
+dispatch tui
+```
+
+`dispatch tui` opens the ncurses interface for the current workflow board. It
+is designed for a remote shell alongside tmux: Dispatch uses single-key
+application controls and does not reserve tmux prefix combinations.
+
+Main navigation:
+
+```text
+b          board
+a or Tab   agents
+w          workspaces
+l          logs
+Enter/i    inspect selected item
+q or Esc   leave inspector
+:          command palette
+?          help
+```
+
+The board view shows grouped task rows with state, review flag, commit
+presence, and actor metadata. Use arrows or `j`/`k` to move. Filters are
+single-key: `1` not-done, `2` all, `3` ready, `4` blocked, `5` review, `6`
+doing, `7` done, and `R` attention. `G` cycles groups, `A` cycles actors, `/`
+searches, and `c` clears secondary filters.
+
+Task actions are available from the board and task inspector: `r` ready, `s`
+start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` creates
+a task, `+` creates a group, `>` adds a dependency to the inspected task, `<`
+removes a dependency, and `d` opens the selected task commit with `git show`
+when commit metadata exists.
+
+The agents view lists enabled agents by default. `A` toggles enabled/all,
+`z` archives or restores the selected agent, `e` edits the agent prompt in
+`$EDITOR`, and `x` clears the stored session ID from the agent inspector.
+
+The workspaces view shows actor, path, branch, task state, workspace state, git
+worktree presence, and dirty status. `n` runs the existing workspace creation
+flow, `x` removes the selected workspace after typing its task ID, `X` force
+removes after the same confirmation, and `P` prunes done clean workspaces after
+typing `prune`.
+
+The logs view reads `dispatch.log` and filters records by actor, command,
+action, task, agent, or workspace. Press `F` to set a filter, `C` to clear it,
+or `L` from a task or agent inspector to jump to related log records.
+
+The command palette accepts compact commands:
+
+```text
+board | agents | workspaces | logs
+filter ready|blocked|review|doing|done|attention|all|not-done
+group <prefix>|all
+actor <agent>|all
+task <task-id>
+agent <name>
+workspace <task-id>
+log actor|command|action|task|agent|workspace <value>
+ready|start|finish|review <task-id>
+```
+
+Noninteractive acceptance hooks are available for tests and terminal smoke
+checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
+`--action-smoke`, `--diff-smoke`, `--agents-smoke`, `--workspaces-smoke`,
+`--logs-smoke`, `--palette-smoke`, and `--palette-complete-smoke`.
+
 ### Groups
 
 ```bash
