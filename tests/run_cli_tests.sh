@@ -1136,6 +1136,24 @@ assert_contains "Depends on: DE-01"
 expect_fail "$BIN" tui --create-task-smoke DE "DE-99 Bad title" - review -
 assert_contains "Task title should not include an ID"
 
+case_dir="$(make_case_dir tui-dependencies)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE Followup --no-review
+expect_ok "$BIN" tui --dependency-smoke add DE-01 DE-02
+assert_contains "Added dependency DE-01 -> DE-02"
+expect_ok "$BIN" show DE-02
+assert_contains "Depends on: DE-01"
+expect_fail "$BIN" tui --dependency-smoke add DE-02 DE-01
+assert_contains "Could not add dependency DE-02 -> DE-01"
+expect_ok "$BIN" tui --dependency-smoke remove DE-01 DE-02
+assert_contains "Removed dependency DE-01 -> DE-02"
+expect_ok "$BIN" show DE-02
+assert_contains "Depends on: -"
+
 case_dir="$(make_case_dir legacy)"
 cd "$case_dir"
 

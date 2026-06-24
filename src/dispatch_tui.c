@@ -696,6 +696,60 @@ static int create_task(const char *group, const char *title,
     return 1;
 }
 
+static int mutate_dependency(const char *dependency_id, const char *dependent_id,
+                             int add, char *message, size_t message_size) {
+    if (!dependency_id || !dependency_id[0] || !dependent_id || !dependent_id[0]) {
+        snprintf(message, message_size, "Dependency and dependent are required");
+        return 0;
+    }
+
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    int ok = add ? dispatch_task_add_dependency(&board, dependency_id, dependent_id)
+                 : dispatch_task_remove_dependency(&board, dependency_id,
+                                                   dependent_id);
+    if (!ok) {
+        snprintf(message, message_size, "Could not %s dependency %s -> %s",
+                 add ? "add" : "remove", dependency_id, dependent_id);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    dispatch_board_normalize_states(&board);
+
+    if (!dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not save board");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "%s dependency %s -> %s",
+             add ? "Added" : "Removed", dependency_id, dependent_id);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
 static void run_selected_task_action(DispatchTui *tui,
                                      DispatchTuiAction action) {
     DispatchTask *task = selected_visible_task(tui);
@@ -793,6 +847,26 @@ static void run_task_form(DispatchTui *tui) {
     tui_load_board(tui);
     tui_set_status(tui, message);
     clamp_selection(tui);
+}
+
+static void run_dependency_prompt(DispatchTui *tui, int add) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+
+    char task_id[64];
+    char dependency_id[64];
+    snprintf(task_id, sizeof(task_id), "%s", task->id);
+    if (!prompt_line(add ? "Add dependency ID: " : "Remove dependency ID: ",
+                     dependency_id, sizeof(dependency_id), ""))
+        return;
+
+    char message[256] = {0};
+    mutate_dependency(dependency_id, task_id, add, message, sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
 }
 
 static int update_agent_session_metadata(const char *name,
@@ -988,6 +1062,7 @@ static void tui_render_help(void) {
         "u        reload board",
         "r/s/f/v  ready/start/finish/review selected task",
         "n/+      create task/group",
+        ">/<      add/remove dependency in task inspector",
         "d        open selected task commit diff",
         "e        edit selected agent prompt",
         "Enter/i  inspect selected task",
@@ -1348,7 +1423,7 @@ static void tui_render(DispatchTui *tui) {
         char status[512];
         snprintf(status, sizeof(status),
                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                     ? " %s | q/Esc back | r/s/f/v actions | d diff | ? help"
+                     ? " %s | q/Esc back | > add dep | < remove dep | d diff"
                      : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
                            ? " %s | q/Esc back | e edit prompt | x clear session"
                      : tui->screen == TUI_SCREEN_AGENTS
@@ -1456,6 +1531,14 @@ static int tui_run(void) {
                 run_group_form(&tui);
                 tui.screen = TUI_SCREEN_BOARD;
             }
+            break;
+        case '>':
+            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
+                run_dependency_prompt(&tui, 1);
+            break;
+        case '<':
+            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
+                run_dependency_prompt(&tui, 0);
             break;
         case 's':
             run_selected_task_action(&tui, TUI_ACTION_START);
@@ -1906,6 +1989,28 @@ static int tui_create_task_smoke(const char *group, const char *title,
     return 0;
 }
 
+static int tui_dependency_smoke(const char *action, const char *dependency_id,
+                                const char *dependent_id) {
+    int add;
+    if (strcmp(action, "add") == 0) {
+        add = 1;
+    } else if (strcmp(action, "remove") == 0) {
+        add = 0;
+    } else {
+        fprintf(stderr, "Dependency action must be add or remove\n");
+        return 1;
+    }
+
+    char message[256] = {0};
+    if (!mutate_dependency(dependency_id, dependent_id, add, message,
+                           sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -1922,6 +2027,7 @@ static void print_tui_help(void) {
     puts("  --agent-archive-smoke <name> archive|restore");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
+    puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1955,6 +2061,8 @@ int dispatch_tui_main(int argc, char **argv) {
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)
         return tui_create_task_smoke(argv[3], argv[4], argv[5], argv[6],
                                     argv[7]);
+    if (argc == 6 && strcmp(argv[2], "--dependency-smoke") == 0)
+        return tui_dependency_smoke(argv[3], argv[4], argv[5]);
     if (argc != 2) {
         print_tui_help();
         return 1;
