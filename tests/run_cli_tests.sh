@@ -65,6 +65,14 @@ assert_file_contains() {
     fi
 }
 
+assert_file_not_contains() {
+    local file="$1"
+    local text="$2"
+    if grep -Fq -- "$text" "$file"; then
+        fail "expected $file not to contain: $text"
+    fi
+}
+
 line_count() {
     wc -l < "$1" | tr -d ' '
 }
@@ -184,11 +192,15 @@ assert_contains "Unknown agent resume option: --bad"
 if [ ! -f .dispatch/agents/codex-a/codex-a-PROMPT.md ]; then
     fail "agent prompt was not created"
 fi
-assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Prompt: codex-a"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent: codex-a"
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "- Agent name: \`codex-a\`"
-assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "## Workspace Rules"
-assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Instructions"
-assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "Never read dispatch.json directly."
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "## Agent ID"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "## Actor Usage"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch start <TASK-ID> --actor codex-a"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch workspace create <TASK-ID> --actor codex-a"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch agent session codex-a --session-id <SESSION-ID>"
+assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Instructions"
+assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "Never read dispatch.json directly."
 if [ ! -d .dispatch/agents/codex-a/scratch ]; then
     fail "agent scratch directory was not created"
 fi
@@ -202,7 +214,7 @@ mkdir -p fake-bin
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@"\n' > fake-bin/codex
 chmod +x fake-bin/codex
 PATH="$case_dir/fake-bin:$PATH" expect_ok .dispatch/agents/codex-a/run.sh
-assert_contains "# Dispatch Agent Prompt: codex-a"
+assert_contains "# Dispatch Agent: codex-a"
 
 expect_fail "$BIN" agent create --name codex-a --runner codex
 assert_contains "Agent codex-a already exists"

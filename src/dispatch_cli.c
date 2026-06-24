@@ -505,24 +505,6 @@ static char *claude_agent_resume_command_for(const DispatchAgent *agent,
     return command;
 }
 
-static int copy_file_contents(FILE *out, const char *path) {
-    FILE *in = fopen(path, "r");
-    if (!in)
-        return 0;
-
-    char buffer[4096];
-    size_t count;
-    while ((count = fread(buffer, 1, sizeof(buffer), in)) > 0) {
-        if (fwrite(buffer, 1, count, out) != count) {
-            fclose(in);
-            return 0;
-        }
-    }
-    int ok = ferror(in) == 0;
-    fclose(in);
-    return ok;
-}
-
 static int write_agent_prompt(const char *path, const char *name,
                               const char *runner, const char *model,
                               const char *agent_dir, const char *scratch_dir,
@@ -533,37 +515,37 @@ static int write_agent_prompt(const char *path, const char *name,
         return 0;
     }
 
-    fprintf(file, "# Dispatch Agent Prompt: %s\n\n", name);
-    fprintf(file, "## Agent Identity\n\n");
+    fprintf(file, "# Dispatch Agent: %s\n\n", name);
+    fprintf(file, "This file identifies the Dispatch agent instance. General repository and workflow instructions come from `AGENTS.md` in the workflow directory.\n\n");
+    fprintf(file, "## Agent ID\n\n");
     fprintf(file, "- Agent name: `%s`\n", name);
     fprintf(file, "- Runner: `%s`\n", runner);
     fprintf(file, "- Model: `%s`\n", model && model[0] ? model : "runner default");
-    fprintf(file, "- Workflow directory: the directory containing `dispatch.json`\n");
     fprintf(file, "- Agent directory: `%s`\n", agent_dir);
     fprintf(file, "- Prompt file: `%s`\n", path);
     fprintf(file, "- Scratch directory: `%s`\n", scratch_dir);
     fprintf(file, "- Decisions directory: `%s`\n\n", decisions_dir);
 
-    fprintf(file, "## Agent-Specific Operating Rules\n\n");
-    fprintf(file, "- Use the Dispatch CLI for all workflow state. Never read, parse, or edit `dispatch.json` directly.\n");
-    fprintf(file, "- Start only ready, unassigned tasks. Do not work on blocked, review, proposed, or already assigned tasks.\n");
-    fprintf(file, "- Use `%s` as the `--actor` value when starting, finishing, reviewing by explicit assignment, or recording workspace ownership.\n", name);
-    fprintf(file, "- Keep temporary notes in `%s` and durable agent-local decisions in `%s`.\n", scratch_dir, decisions_dir);
-    fprintf(file, "- Do not edit another agent's prompt, scratch directory, decisions directory, task worktree, or branch.\n");
-    fprintf(file, "- Commit each completed Dispatch task separately using the Dispatch task title as the commit message.\n\n");
-
-    fprintf(file, "## Workspace Rules\n\n");
-    fprintf(file, "- Use one Git worktree and branch per agent or task sequence when parallel agents are active.\n");
-    fprintf(file, "- Prefer `dispatch workspace create <task-id> --actor %s` for owned task workspaces.\n", name);
-    fprintf(file, "- Do not switch branches, stage files, amend commits, or merge branches in a shared worktree while another agent may be using it.\n");
-    fprintf(file, "- Do not remove or prune another agent's workspace unless the user explicitly asks.\n");
-    fprintf(file, "- Treat Dispatch workspace records as ownership metadata and Git worktrees as the file isolation boundary.\n\n");
-
-    fprintf(file, "## Repository Instructions From AGENTS.md\n\n");
-    if (!copy_file_contents(file, "AGENTS.md")) {
-        fprintf(file, "`AGENTS.md` was not found in the workflow directory when this prompt was generated. Follow the Dispatch rules above and inspect repository instructions through the normal runner context before changing files.\n");
-    }
-    fprintf(file, "\n");
+    fprintf(file, "## Actor Usage\n\n");
+    fprintf(file, "Always identify as `%s` when a Dispatch command needs the agent actor.\n\n", name);
+    fprintf(file, "Use this actor value for task lifecycle commands:\n\n");
+    fprintf(file, "```bash\n");
+    fprintf(file, "dispatch start <TASK-ID> --actor %s\n", name);
+    fprintf(file, "dispatch finish <TASK-ID> --actor %s\n", name);
+    fprintf(file, "dispatch review <TASK-ID> --actor %s\n", name);
+    fprintf(file, "```\n\n");
+    fprintf(file, "Use this actor value for owned workspaces:\n\n");
+    fprintf(file, "```bash\n");
+    fprintf(file, "dispatch workspace create <TASK-ID> --actor %s\n", name);
+    fprintf(file, "```\n\n");
+    fprintf(file, "Record this agent's current runner metadata with this agent name:\n\n");
+    fprintf(file, "```bash\n");
+    fprintf(file, "dispatch agent session %s --session-id <SESSION-ID>\n", name);
+    fprintf(file, "dispatch agent session %s --current-task <TASK-ID> --last-workspace <TASK-ID>\n", name);
+    fprintf(file, "dispatch agent show %s\n", name);
+    fprintf(file, "dispatch agent resume %s\n", name);
+    fprintf(file, "```\n\n");
+    fprintf(file, "Do not use `user` or another agent name as the actor for this agent's own work unless the user explicitly instructs you to do so.\n");
     fclose(file);
     return 1;
 }
@@ -3034,13 +3016,44 @@ static int cmd_completion(int argc, char **argv) {
     return 1;
 }
 
+static int file_contains_text(const char *path, const char *needle) {
+    FILE *file = fopen(path, "r");
+    if (!file)
+        return 0;
+
+    size_t needle_len = strlen(needle);
+    size_t matched = 0;
+    int found = 0;
+    int ch;
+    while ((ch = fgetc(file)) != EOF) {
+        if ((char)ch == needle[matched]) {
+            matched++;
+            if (matched == needle_len) {
+                found = 1;
+                break;
+            }
+        } else {
+            matched = (char)ch == needle[0] ? 1 : 0;
+        }
+    }
+    fclose(file);
+    return found;
+}
+
+static int agent_prompt_needs_refresh(const char *path) {
+    return !file_contains_text(path, "## Agent ID") ||
+           file_contains_text(path, "## Repository Instructions From AGENTS.md");
+}
+
 static int normalize_agent_prompts(DispatchBoard *board) {
     int changed = 0;
     for (size_t i = 0; i < board->agents.count; i++) {
         DispatchAgent *agent = &board->agents.items[i];
         char *prompt_path = agent_prompt_path_for(agent->agent_dir, agent->name);
         int needs_path_update = strcmp(agent->prompt_path, prompt_path) != 0;
-        if (!needs_path_update) {
+        int needs_prompt_refresh =
+            needs_path_update || agent_prompt_needs_refresh(agent->prompt_path);
+        if (!needs_prompt_refresh) {
             free(prompt_path);
             continue;
         }
@@ -3070,8 +3083,12 @@ static int normalize_agent_prompts(DispatchBoard *board) {
             }
         }
 
-        free(agent->prompt_path);
-        agent->prompt_path = prompt_path;
+        if (needs_path_update) {
+            free(agent->prompt_path);
+            agent->prompt_path = prompt_path;
+        } else {
+            free(prompt_path);
+        }
         agent->updated_at = time(NULL);
         changed++;
         free(scratch_dir);
