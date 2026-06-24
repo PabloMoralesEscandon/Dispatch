@@ -8,6 +8,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <jansson.h>
+
 #include "dispatch.h"
 #include "dispatch_store.h"
 
@@ -19,7 +21,8 @@ typedef enum {
     TUI_SCREEN_TASK_FORM,
     TUI_SCREEN_GROUP_FORM,
     TUI_SCREEN_WORKSPACES,
-    TUI_SCREEN_WORKSPACE_INSPECTOR
+    TUI_SCREEN_WORKSPACE_INSPECTOR,
+    TUI_SCREEN_LOGS
 } DispatchTuiScreen;
 
 typedef enum {
@@ -48,6 +51,9 @@ typedef struct {
     int selected_task;
     int selected_agent;
     int selected_workspace;
+    int selected_log;
+    char log_filter_field[32];
+    char log_filter_value[128];
     int show_help;
     int running;
 } DispatchTui;
@@ -165,6 +171,45 @@ static int text_contains_casefold(const char *haystack, const char *needle) {
             return 1;
     }
     return 0;
+}
+
+static const char *json_string_field(json_t *object, const char *name) {
+    json_t *value = json_object_get(object, name);
+    return json_is_string(value) ? json_string_value(value) : "";
+}
+
+static const char *json_nested_string_field(json_t *object, const char *parent,
+                                            const char *name) {
+    json_t *nested = json_object_get(object, parent);
+    if (!json_is_object(nested))
+        return "";
+    return json_string_field(nested, name);
+}
+
+static int log_record_matches_filter(json_t *record, const char *field,
+                                     const char *value) {
+    if (!field || !field[0] || !value || !value[0])
+        return 1;
+    if (strcmp(field, "actor") == 0)
+        return text_contains_casefold(json_string_field(record, "actor"), value);
+    if (strcmp(field, "command") == 0)
+        return text_contains_casefold(json_string_field(record, "command"), value);
+    if (strcmp(field, "action") == 0)
+        return text_contains_casefold(json_string_field(record, "action"), value);
+    if (strcmp(field, "task") == 0)
+        return text_contains_casefold(json_nested_string_field(record, "targets",
+                                                              "task"),
+                                      value);
+    if (strcmp(field, "agent") == 0)
+        return text_contains_casefold(json_nested_string_field(record, "targets",
+                                                              "agent"),
+                                      value) ||
+               text_contains_casefold(json_string_field(record, "actor"), value);
+    if (strcmp(field, "workspace") == 0)
+        return text_contains_casefold(json_nested_string_field(record, "targets",
+                                                              "workspace"),
+                                      value);
+    return 1;
 }
 
 static int task_matches_search(const DispatchTask *task, const char *search) {
@@ -286,6 +331,38 @@ static void clamp_workspace_selection(DispatchTui *tui) {
         tui->selected_workspace = count - 1;
     } else if (tui->selected_workspace < 0) {
         tui->selected_workspace = 0;
+    }
+}
+
+static int visible_log_count(const DispatchTui *tui) {
+    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
+    if (!file)
+        return 0;
+
+    int count = 0;
+    char line[8192];
+    while (fgets(line, sizeof(line), file)) {
+        json_error_t error;
+        json_t *record = json_loads(line, 0, &error);
+        if (record) {
+            if (log_record_matches_filter(record, tui->log_filter_field,
+                                          tui->log_filter_value))
+                count++;
+            json_decref(record);
+        }
+    }
+    fclose(file);
+    return count;
+}
+
+static void clamp_log_selection(DispatchTui *tui) {
+    int count = visible_log_count(tui);
+    if (count <= 0) {
+        tui->selected_log = 0;
+    } else if (tui->selected_log >= count) {
+        tui->selected_log = count - 1;
+    } else if (tui->selected_log < 0) {
+        tui->selected_log = 0;
     }
 }
 
@@ -1042,6 +1119,55 @@ static void run_workspace_prune_form(DispatchTui *tui) {
     clamp_workspace_selection(tui);
 }
 
+static void set_log_filter(DispatchTui *tui, const char *field,
+                           const char *value) {
+    snprintf(tui->log_filter_field, sizeof(tui->log_filter_field), "%s",
+             field ? field : "");
+    snprintf(tui->log_filter_value, sizeof(tui->log_filter_value), "%s",
+             value ? value : "");
+    tui->selected_log = 0;
+    char message[256];
+    if (tui->log_filter_field[0]) {
+        snprintf(message, sizeof(message), "Log filter %s=%s",
+                 tui->log_filter_field, tui->log_filter_value);
+    } else {
+        snprintf(message, sizeof(message), "Log filters cleared");
+    }
+    tui_set_status(tui, message);
+}
+
+static void run_log_filter_form(DispatchTui *tui) {
+    char field[32];
+    char value[128];
+    if (!prompt_line("Filter field (actor/command/action/task/agent/workspace): ",
+                     field, sizeof(field), tui->log_filter_field))
+        return;
+    if (!prompt_line("Filter value: ", value, sizeof(value),
+                     tui->log_filter_value))
+        return;
+    set_log_filter(tui, field, value);
+}
+
+static void show_selected_task_logs(DispatchTui *tui) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+    set_log_filter(tui, "task", task->id);
+    tui->screen = TUI_SCREEN_LOGS;
+}
+
+static void show_selected_agent_logs(DispatchTui *tui) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        tui_set_status(tui, "No selected agent");
+        return;
+    }
+    set_log_filter(tui, "agent", agent->name);
+    tui->screen = TUI_SCREEN_LOGS;
+}
+
 static int update_agent_session_metadata(const char *name,
                                          const char *session_id,
                                          const char *current_task,
@@ -1242,6 +1368,7 @@ static void tui_render_help(void) {
         "Esc/q    close inspector",
         "Tab/a    switch to agents",
         "w        switch to workspaces",
+        "l/L      logs / selected task or agent logs",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
@@ -1339,6 +1466,62 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
             attroff(A_REVERSE);
         visible_index++;
     }
+}
+
+static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
+    int y = start_y;
+    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
+    if (!file) {
+        draw_truncated(y, 0, cols, "(no dispatch.log)");
+        return;
+    }
+
+    int visible_index = 0;
+    int any_visible = 0;
+    char line[8192];
+    while (fgets(line, sizeof(line), file) && y < rows - 1) {
+        json_error_t error;
+        json_t *record = json_loads(line, 0, &error);
+        if (!record)
+            continue;
+        if (!log_record_matches_filter(record, tui->log_filter_field,
+                                       tui->log_filter_value)) {
+            json_decref(record);
+            continue;
+        }
+
+        const char *time = json_string_field(record, "timestamp");
+        const char *actor = json_string_field(record, "actor");
+        const char *command = json_string_field(record, "command");
+        const char *action = json_string_field(record, "action");
+        const char *message = json_string_field(record, "message");
+        const char *task = json_nested_string_field(record, "targets", "task");
+        const char *agent = json_nested_string_field(record, "targets", "agent");
+        const char *workspace =
+            json_nested_string_field(record, "targets", "workspace");
+        char target[256] = "";
+        if (task[0])
+            snprintf(target, sizeof(target), " task:%s", task);
+        else if (agent[0])
+            snprintf(target, sizeof(target), " agent:%s", agent);
+        else if (workspace[0])
+            snprintf(target, sizeof(target), " workspace:%s", workspace);
+
+        char row[1400];
+        snprintf(row, sizeof(row), "%s %-12s %-10s %-18s%s  %s", time,
+                 actor, command, action, target, message);
+        if (visible_index == tui->selected_log)
+            attron(A_REVERSE);
+        draw_truncated(y++, 0, cols, row);
+        if (visible_index == tui->selected_log)
+            attroff(A_REVERSE);
+        visible_index++;
+        any_visible = 1;
+        json_decref(record);
+    }
+    fclose(file);
+    if (!any_visible)
+        draw_truncated(y, 0, cols, "(no matching log records)");
 }
 
 static int draw_line(int y, int rows, int cols, const char *label,
@@ -1615,6 +1798,8 @@ static void tui_render(DispatchTui *tui) {
                              ? "Dispatch TUI - Workspace"
                        : tui->screen == TUI_SCREEN_WORKSPACES
                              ? "Dispatch TUI - Workspaces"
+                       : tui->screen == TUI_SCREEN_LOGS
+                             ? "Dispatch TUI - Logs"
                        : tui->screen == TUI_SCREEN_AGENTS
                              ? "Dispatch TUI - Agents"
                              : "Dispatch TUI - Board");
@@ -1635,6 +1820,19 @@ static void tui_render(DispatchTui *tui) {
                  visible_workspace_count(tui));
         draw_truncated(2, 0, cols, line);
         draw_workspace_rows(tui, 4, rows, cols);
+    } else if (tui->screen == TUI_SCREEN_LOGS) {
+        char line[512];
+        snprintf(line, sizeof(line), "Logs: %d visible%s%s%s    F filter    C clear",
+                 visible_log_count(tui),
+                 tui->log_filter_field[0] ? "  " : "",
+                 tui->log_filter_field[0] ? tui->log_filter_field : "",
+                 tui->log_filter_field[0] ? "=" : "");
+        size_t used = strlen(line);
+        if (tui->log_filter_field[0])
+            snprintf(line + used, sizeof(line) - used, "%s",
+                     tui->log_filter_value);
+        draw_truncated(2, 0, cols, line);
+        draw_log_rows(tui, 4, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENTS) {
         char line[512];
         snprintf(line, sizeof(line),
@@ -1694,6 +1892,8 @@ static void tui_render(DispatchTui *tui) {
                            ? " %s | q/Esc back | x remove | X force remove"
                      : tui->screen == TUI_SCREEN_WORKSPACES
                            ? " %s | b board | a agents | n create | x/X remove | P prune"
+                     : tui->screen == TUI_SCREEN_LOGS
+                           ? " %s | b board | F filter | C clear | j/k move"
                      : tui->screen == TUI_SCREEN_AGENTS
                            ? " %s | A all/enabled | z archive/restore | Enter/i inspect"
                            : " %s | Tab/a agents | w workspaces | n task | + group | d diff",
@@ -1749,6 +1949,17 @@ static int tui_run(void) {
             break;
         case 'w':
             tui.screen = TUI_SCREEN_WORKSPACES;
+            break;
+        case 'l':
+            tui.screen = TUI_SCREEN_LOGS;
+            break;
+        case 'L':
+            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
+                show_selected_task_logs(&tui);
+            else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                show_selected_agent_logs(&tui);
+            else
+                tui.screen = TUI_SCREEN_LOGS;
             break;
         case '\n':
         case KEY_ENTER:
@@ -1859,6 +2070,10 @@ static int tui_run(void) {
         case 'G':
             cycle_group_filter(&tui);
             break;
+        case 'F':
+            if (tui.screen == TUI_SCREEN_LOGS)
+                run_log_filter_form(&tui);
+            break;
         case 'A':
             if (tui.screen == TUI_SCREEN_AGENTS) {
                 tui.show_archived_agents = !tui.show_archived_agents;
@@ -1871,6 +2086,10 @@ static int tui_run(void) {
             break;
         case 'c':
             clear_secondary_filters(&tui);
+            break;
+        case 'C':
+            if (tui.screen == TUI_SCREEN_LOGS)
+                set_log_filter(&tui, "", "");
             break;
         case '/':
             tui.search_active = 1;
@@ -1901,6 +2120,9 @@ static int tui_run(void) {
             } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
                 tui.selected_workspace--;
                 clamp_workspace_selection(&tui);
+            } else if (tui.screen == TUI_SCREEN_LOGS) {
+                tui.selected_log--;
+                clamp_log_selection(&tui);
             } else {
                 tui.selected_task--;
                 clamp_selection(&tui);
@@ -1914,6 +2136,9 @@ static int tui_run(void) {
             } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
                 tui.selected_workspace++;
                 clamp_workspace_selection(&tui);
+            } else if (tui.screen == TUI_SCREEN_LOGS) {
+                tui.selected_log++;
+                clamp_log_selection(&tui);
             } else {
                 tui.selected_task++;
                 clamp_selection(&tui);
@@ -1924,6 +2149,7 @@ static int tui_run(void) {
             clamp_selection(&tui);
             clamp_agent_selection(&tui);
             clamp_workspace_selection(&tui);
+            clamp_log_selection(&tui);
             break;
         case KEY_RESIZE:
             tui_set_status(&tui, "Resized");
@@ -2393,6 +2619,42 @@ static int tui_workspace_inspect_smoke(const char *target) {
     return 0;
 }
 
+static int tui_logs_smoke(const char *field, const char *value) {
+    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
+    if (!file) {
+        fprintf(stderr, "No %s\n", DISPATCH_LOG_FILE);
+        return 1;
+    }
+
+    int count = 0;
+    char line[8192];
+    while (fgets(line, sizeof(line), file)) {
+        json_error_t error;
+        json_t *record = json_loads(line, 0, &error);
+        if (!record)
+            continue;
+        if (!log_record_matches_filter(record, field, value)) {
+            json_decref(record);
+            continue;
+        }
+        const char *actor = json_string_field(record, "actor");
+        const char *command = json_string_field(record, "command");
+        const char *action = json_string_field(record, "action");
+        const char *task = json_nested_string_field(record, "targets", "task");
+        const char *agent = json_nested_string_field(record, "targets", "agent");
+        const char *workspace =
+            json_nested_string_field(record, "targets", "workspace");
+        printf("%s %s %s task:%s agent:%s workspace:%s\n", actor, command,
+               action, task[0] ? task : "-", agent[0] ? agent : "-",
+               workspace[0] ? workspace : "-");
+        count++;
+        json_decref(record);
+    }
+    fclose(file);
+    printf("Logs: %d\n", count);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -2412,6 +2674,7 @@ static void print_tui_help(void) {
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
     puts("  --workspaces-smoke          print workspace dashboard data and exit");
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
+    puts("  --logs-smoke [actor|command|action|task|agent|workspace <value>]");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -2451,6 +2714,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_workspaces_smoke();
     if (argc == 4 && strcmp(argv[2], "--workspace-inspect-smoke") == 0)
         return tui_workspace_inspect_smoke(argv[3]);
+    if ((argc == 3 || argc == 5) && strcmp(argv[2], "--logs-smoke") == 0)
+        return tui_logs_smoke(argc == 5 ? argv[3] : "", argc == 5 ? argv[4] : "");
     if (argc != 2) {
         print_tui_help();
         return 1;

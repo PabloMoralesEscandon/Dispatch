@@ -502,6 +502,20 @@ expect_ok "$BIN" finish DE-01 --actor codex
 assert_file_contains dispatch.log '"actor":"codex"'
 assert_file_contains dispatch.log '"command":"finish"'
 assert_file_contains dispatch.log '"new_state":"done"'
+expect_ok "$BIN" tui --logs-smoke
+assert_contains "Logs:"
+assert_contains "user group add"
+assert_contains "codex finish finish task:DE-01"
+expect_ok "$BIN" tui --logs-smoke actor codex
+assert_contains "codex start start task:DE-01"
+assert_contains "codex finish finish task:DE-01"
+expect_ok "$BIN" tui --logs-smoke command ready
+assert_contains "alice ready ready task:DE-01"
+expect_ok "$BIN" tui --logs-smoke action add
+assert_contains "user group add"
+expect_ok "$BIN" tui --logs-smoke task DE-01
+assert_contains "alice ready ready task:DE-01"
+assert_contains "codex finish finish task:DE-01"
 
 case_dir="$(make_case_dir id-prefix-display)"
 cd "$case_dir"
@@ -659,6 +673,11 @@ assert_contains "Workspace state: active"
 assert_contains "Actor: Codex_A"
 assert_contains "Git worktree: present"
 assert_contains "Dirty: no"
+expect_ok "$BIN" tui --logs-smoke agent Codex_A
+assert_contains "user agent create task:- agent:Codex_A"
+assert_contains "Codex_A workspace workspace_create task:DE-01"
+expect_ok "$BIN" tui --logs-smoke workspace DE-01
+assert_contains "Codex_A workspace workspace_create task:DE-01"
 
 expect_ok "$BIN" show DE-01
 assert_contains "Workspace actor: Codex_A"
