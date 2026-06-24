@@ -678,6 +678,11 @@ assert_contains "user agent create task:- agent:Codex_A"
 assert_contains "Codex_A workspace workspace_create task:DE-01"
 expect_ok "$BIN" tui --logs-smoke workspace DE-01
 assert_contains "Codex_A workspace workspace_create task:DE-01"
+expect_ok "$BIN" tui --palette-complete-smoke "workspace DE"
+assert_contains "DE-01"
+expect_ok "$BIN" tui --palette-smoke "workspace DE-01"
+assert_contains "Screen: workspace"
+assert_contains "Selected workspace: DE-01"
 
 expect_ok "$BIN" show DE-01
 assert_contains "Workspace actor: Codex_A"
@@ -1185,6 +1190,36 @@ expect_ok "$BIN" tui --dependency-smoke remove DE-01 DE-02
 assert_contains "Removed dependency DE-01 -> DE-02"
 expect_ok "$BIN" show DE-02
 assert_contains "Depends on: -"
+
+case_dir="$(make_case_dir tui-palette)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" agent create --name codex-a --runner codex --no-run-script
+expect_ok "$BIN" tui --palette-smoke "filter ready"
+assert_contains "Screen: board"
+assert_contains "Filter: ready"
+expect_ok "$BIN" tui --palette-smoke "task DE-01"
+assert_contains "Screen: task"
+assert_contains "Selected task: DE-01"
+expect_ok "$BIN" tui --palette-smoke "agent codex-a"
+assert_contains "Screen: agent"
+assert_contains "Selected agent: codex-a"
+expect_ok "$BIN" tui --palette-smoke "ready DE-01"
+assert_contains "Status: Readied DE-01"
+expect_ok "$BIN" tui --palette-smoke "log task DE-01"
+assert_contains "Screen: logs"
+assert_contains "Log filter: task=DE-01"
+expect_ok "$BIN" tui --palette-complete-smoke ta
+assert_contains "task"
+expect_ok "$BIN" tui --palette-complete-smoke "task DE"
+assert_contains "DE-01"
+expect_ok "$BIN" tui --palette-complete-smoke "group D"
+assert_contains "DE"
+expect_ok "$BIN" tui --palette-complete-smoke "agent co"
+assert_contains "codex-a"
 
 case_dir="$(make_case_dir legacy)"
 cd "$case_dir"

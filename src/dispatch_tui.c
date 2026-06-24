@@ -60,6 +60,7 @@ typedef struct {
 
 static DispatchTask *selected_visible_task(DispatchTui *tui);
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
+static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
 
 static int title_starts_with_dispatch_id_like(const char *title) {
     if (!title)
@@ -390,6 +391,52 @@ static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui) {
     return NULL;
 }
 
+static int select_task_by_id(DispatchTui *tui, const char *task_id) {
+    tui->filter = TUI_FILTER_ALL;
+    tui->group_filter = -1;
+    tui->actor_filter = -1;
+    tui->search[0] = '\0';
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.tasks.count; i++) {
+        DispatchTask *task = &tui->board.tasks.items[i];
+        if (!tui_task_is_visible(tui, task))
+            continue;
+        if (strcmp(task->id, task_id) == 0) {
+            tui->selected_task = visible_index;
+            return 1;
+        }
+        visible_index++;
+    }
+    return 0;
+}
+
+static int select_agent_by_name(DispatchTui *tui, const char *name) {
+    for (size_t i = 0; i < tui->board.agents.count; i++) {
+        if (strcmp(tui->board.agents.items[i].name, name) == 0) {
+            tui->selected_agent = (int)i;
+            tui->show_archived_agents = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int select_workspace_by_id(DispatchTui *tui, const char *target) {
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        if (strcmp(workspace->id, target) == 0 ||
+            strcmp(workspace->task_id, target) == 0) {
+            tui->selected_workspace = visible_index;
+            return 1;
+        }
+        visible_index++;
+    }
+    return 0;
+}
+
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent) {
     return tui->show_archived_agents || !agent->archived;
 }
@@ -619,6 +666,8 @@ typedef enum {
     TUI_ACTION_FINISH,
     TUI_ACTION_REVIEW
 } DispatchTuiAction;
+
+static int parse_action_name(const char *name, DispatchTuiAction *action);
 
 static int mutate_task(const char *task_id, const char *actor,
                        DispatchTuiAction action, char *message,
@@ -1168,6 +1217,221 @@ static void show_selected_agent_logs(DispatchTui *tui) {
     tui->screen = TUI_SCREEN_LOGS;
 }
 
+static int string_starts_with(const char *value, const char *prefix) {
+    return !prefix || !prefix[0] ||
+           strncmp(value, prefix, strlen(prefix)) == 0;
+}
+
+static void execute_palette_command(DispatchTui *tui, const char *command) {
+    char copy[512];
+    snprintf(copy, sizeof(copy), "%s", command ? command : "");
+    char *verb = strtok(copy, " \t");
+    if (!verb) {
+        tui_set_status(tui, "No command");
+        return;
+    }
+
+    if (strcmp(verb, "board") == 0 || strcmp(verb, "b") == 0) {
+        tui->screen = TUI_SCREEN_BOARD;
+        tui_set_status(tui, "Board");
+        return;
+    }
+    if (strcmp(verb, "agents") == 0 || strcmp(verb, "a") == 0) {
+        tui->screen = TUI_SCREEN_AGENTS;
+        tui_set_status(tui, "Agents");
+        return;
+    }
+    if (strcmp(verb, "workspaces") == 0 || strcmp(verb, "w") == 0) {
+        tui->screen = TUI_SCREEN_WORKSPACES;
+        tui_set_status(tui, "Workspaces");
+        return;
+    }
+    if (strcmp(verb, "logs") == 0 || strcmp(verb, "l") == 0) {
+        tui->screen = TUI_SCREEN_LOGS;
+        tui_set_status(tui, "Logs");
+        return;
+    }
+    if (strcmp(verb, "filter") == 0) {
+        char *name = strtok(NULL, " \t");
+        DispatchTuiFilter filter;
+        if (name && parse_filter_name(name, &filter)) {
+            set_filter(tui, filter);
+            tui->screen = TUI_SCREEN_BOARD;
+        } else {
+            tui_set_status(tui, "Unknown filter");
+        }
+        return;
+    }
+    if (strcmp(verb, "group") == 0) {
+        char *group = strtok(NULL, " \t");
+        tui->group_filter = -1;
+        if (group && strcmp(group, "all") != 0) {
+            for (size_t i = 0; i < tui->board.groups.count; i++) {
+                DispatchGroup *candidate = &tui->board.groups.items[i];
+                if (strcmp(candidate->id, group) == 0 ||
+                    strcmp(candidate->prefix, group) == 0 ||
+                    strcmp(candidate->name, group) == 0) {
+                    tui->group_filter = (int)i;
+                    break;
+                }
+            }
+            if (tui->group_filter < 0) {
+                tui_set_status(tui, "No matching group");
+                return;
+            }
+        }
+        tui->screen = TUI_SCREEN_BOARD;
+        tui->selected_task = 0;
+        tui_set_status(tui, "Group filter updated");
+        return;
+    }
+    if (strcmp(verb, "actor") == 0) {
+        char *actor = strtok(NULL, " \t");
+        tui->actor_filter = -1;
+        if (actor && strcmp(actor, "all") != 0) {
+            for (size_t i = 0; i < tui->board.agents.count; i++) {
+                if (strcmp(tui->board.agents.items[i].name, actor) == 0) {
+                    tui->actor_filter = (int)i;
+                    break;
+                }
+            }
+            if (tui->actor_filter < 0) {
+                tui_set_status(tui, "No matching actor");
+                return;
+            }
+        }
+        tui->screen = TUI_SCREEN_BOARD;
+        tui->selected_task = 0;
+        tui_set_status(tui, "Actor filter updated");
+        return;
+    }
+    if (strcmp(verb, "log") == 0) {
+        char *field = strtok(NULL, " \t");
+        char *value = strtok(NULL, "");
+        set_log_filter(tui, field ? field : "", value ? value : "");
+        tui->screen = TUI_SCREEN_LOGS;
+        return;
+    }
+    if (strcmp(verb, "task") == 0) {
+        char *task_id = strtok(NULL, " \t");
+        if (task_id && select_task_by_id(tui, task_id)) {
+            tui->screen = TUI_SCREEN_TASK_INSPECTOR;
+            tui_set_status(tui, "Inspecting task");
+        } else {
+            tui_set_status(tui, "No matching task");
+        }
+        return;
+    }
+    if (strcmp(verb, "agent") == 0) {
+        char *name = strtok(NULL, " \t");
+        if (name && select_agent_by_name(tui, name)) {
+            tui->screen = TUI_SCREEN_AGENT_INSPECTOR;
+            tui_set_status(tui, "Inspecting agent");
+        } else {
+            tui_set_status(tui, "No matching agent");
+        }
+        return;
+    }
+    if (strcmp(verb, "workspace") == 0) {
+        char *target = strtok(NULL, " \t");
+        if (target && select_workspace_by_id(tui, target)) {
+            tui->screen = TUI_SCREEN_WORKSPACE_INSPECTOR;
+            tui_set_status(tui, "Inspecting workspace");
+        } else {
+            tui_set_status(tui, "No matching workspace");
+        }
+        return;
+    }
+
+    DispatchTuiAction action;
+    if (parse_action_name(verb, &action)) {
+        char *task_id = strtok(NULL, " \t");
+        if (!task_id) {
+            tui_set_status(tui, "Task ID required");
+            return;
+        }
+        char message[256] = {0};
+        mutate_task(task_id, tui->actor, action, message, sizeof(message));
+        tui_load_board(tui);
+        tui_set_status(tui, message);
+        return;
+    }
+
+    tui_set_status(tui, "Unknown palette command");
+}
+
+static void run_command_palette(DispatchTui *tui) {
+    char command[512];
+    if (!prompt_line(": ", command, sizeof(command), ""))
+        return;
+    execute_palette_command(tui, command);
+}
+
+static void print_palette_completion(const DispatchBoard *board,
+                                     const char *input) {
+    const char *commands[] = {"board",     "agents", "workspaces", "logs",
+                              "filter",    "group",  "actor",      "log",
+                              "task",      "agent",  "workspace",  "ready",
+                              "start",     "finish", "review",     NULL};
+    char copy[256];
+    snprintf(copy, sizeof(copy), "%s", input ? input : "");
+    char *space = strchr(copy, ' ');
+    if (!space) {
+        for (int i = 0; commands[i]; i++) {
+            if (string_starts_with(commands[i], copy))
+                puts(commands[i]);
+        }
+        return;
+    }
+
+    *space = '\0';
+    char *verb = copy;
+    char *prefix = space + 1;
+    while (*prefix == ' ')
+        prefix++;
+    if (strcmp(verb, "filter") == 0) {
+        const char *filters[] = {"not-done", "all",   "ready", "blocked",
+                                 "review",   "doing", "done",  "attention",
+                                 NULL};
+        for (int i = 0; filters[i]; i++) {
+            if (string_starts_with(filters[i], prefix))
+                puts(filters[i]);
+        }
+    } else if (strcmp(verb, "group") == 0) {
+        puts("all");
+        for (size_t i = 0; i < board->groups.count; i++) {
+            if (string_starts_with(board->groups.items[i].prefix, prefix))
+                puts(board->groups.items[i].prefix);
+        }
+    } else if (strcmp(verb, "actor") == 0 || strcmp(verb, "agent") == 0) {
+        if (strcmp(verb, "actor") == 0)
+            puts("all");
+        for (size_t i = 0; i < board->agents.count; i++) {
+            if (string_starts_with(board->agents.items[i].name, prefix))
+                puts(board->agents.items[i].name);
+        }
+    } else if (strcmp(verb, "workspace") == 0) {
+        for (size_t i = 0; i < board->workspaces.count; i++) {
+            DispatchWorkspace *workspace = &board->workspaces.items[i];
+            if (workspace->state != DISPATCH_WORKSPACE_REMOVED &&
+                string_starts_with(workspace->task_id, prefix))
+                puts(workspace->task_id);
+        }
+    } else if (strcmp(verb, "log") == 0) {
+        const char *fields[] = {"actor", "command", "action", "task",
+                                "agent", "workspace", NULL};
+        for (int i = 0; fields[i]; i++) {
+            if (string_starts_with(fields[i], prefix))
+                puts(fields[i]);
+        }
+    } else {
+        for (size_t i = 0; i < board->tasks.count; i++) {
+            if (string_starts_with(board->tasks.items[i].id, prefix))
+                puts(board->tasks.items[i].id);
+        }
+    }
+}
+
 static int update_agent_session_metadata(const char *name,
                                          const char *session_id,
                                          const char *current_task,
@@ -1369,6 +1633,7 @@ static void tui_render_help(void) {
         "Tab/a    switch to agents",
         "w        switch to workspaces",
         "l/L      logs / selected task or agent logs",
+        ":        command palette",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
@@ -1896,7 +2161,7 @@ static void tui_render(DispatchTui *tui) {
                            ? " %s | b board | F filter | C clear | j/k move"
                      : tui->screen == TUI_SCREEN_AGENTS
                            ? " %s | A all/enabled | z archive/restore | Enter/i inspect"
-                           : " %s | Tab/a agents | w workspaces | n task | + group | d diff",
+                           : " %s | : palette | Tab/a agents | w workspaces | n task | + group",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -1978,6 +2243,9 @@ static int tui_run(void) {
             break;
         case '?':
             tui.show_help = !tui.show_help;
+            break;
+        case ':':
+            run_command_palette(&tui);
             break;
         case '1':
             set_filter(&tui, TUI_FILTER_NOT_DONE);
@@ -2655,6 +2923,73 @@ static int tui_logs_smoke(const char *field, const char *value) {
     return 0;
 }
 
+static const char *screen_name(DispatchTuiScreen screen) {
+    switch (screen) {
+    case TUI_SCREEN_BOARD:
+        return "board";
+    case TUI_SCREEN_TASK_INSPECTOR:
+        return "task";
+    case TUI_SCREEN_AGENTS:
+        return "agents";
+    case TUI_SCREEN_AGENT_INSPECTOR:
+        return "agent";
+    case TUI_SCREEN_TASK_FORM:
+        return "task-form";
+    case TUI_SCREEN_GROUP_FORM:
+        return "group-form";
+    case TUI_SCREEN_WORKSPACES:
+        return "workspaces";
+    case TUI_SCREEN_WORKSPACE_INSPECTOR:
+        return "workspace";
+    case TUI_SCREEN_LOGS:
+        return "logs";
+    }
+    return "board";
+}
+
+static int tui_palette_smoke(const char *command) {
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+    execute_palette_command(&tui, command);
+    printf("Screen: %s\n", screen_name(tui.screen));
+    printf("Status: %s\n", tui.status);
+    printf("Filter: %s\n", filter_name(tui.filter));
+    if (tui.log_filter_field[0])
+        printf("Log filter: %s=%s\n", tui.log_filter_field,
+               tui.log_filter_value);
+    DispatchTask *task = selected_visible_task(&tui);
+    if (task)
+        printf("Selected task: %s\n", task->id);
+    DispatchAgent *agent = selected_agent(&tui);
+    if (agent)
+        printf("Selected agent: %s\n", agent->name);
+    DispatchWorkspace *workspace = selected_visible_workspace(&tui);
+    if (workspace)
+        printf("Selected workspace: %s\n", workspace->task_id);
+    tui_free_board(&tui);
+    return 0;
+}
+
+static int tui_palette_complete_smoke(const char *input) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui palette complete failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+    print_palette_completion(&board, input);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -2675,6 +3010,8 @@ static void print_tui_help(void) {
     puts("  --workspaces-smoke          print workspace dashboard data and exit");
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
     puts("  --logs-smoke [actor|command|action|task|agent|workspace <value>]");
+    puts("  --palette-smoke <command>");
+    puts("  --palette-complete-smoke <prefix>");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -2716,6 +3053,10 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_workspace_inspect_smoke(argv[3]);
     if ((argc == 3 || argc == 5) && strcmp(argv[2], "--logs-smoke") == 0)
         return tui_logs_smoke(argc == 5 ? argv[3] : "", argc == 5 ? argv[4] : "");
+    if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
+        return tui_palette_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)
+        return tui_palette_complete_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;
