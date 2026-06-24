@@ -1118,6 +1118,24 @@ assert_contains "Reviewed DE-01"
 expect_ok "$BIN" show DE-01
 assert_contains "State: done"
 
+case_dir="$(make_case_dir tui-create)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" tui --create-group-smoke Development DE
+assert_contains "Added group Development (DE)"
+expect_ok "$BIN" tui --create-task-smoke DE Root "Root task" no-review -
+assert_contains "Added task DE-01"
+expect_ok "$BIN" tui --create-task-smoke DE Followup "Follow-up task" review DE-01
+assert_contains "Added task DE-02"
+expect_ok "$BIN" show DE-01
+assert_contains "Requires review: no"
+expect_ok "$BIN" show DE-02
+assert_contains "Requires review: yes"
+assert_contains "Depends on: DE-01"
+expect_fail "$BIN" tui --create-task-smoke DE "DE-99 Bad title" - review -
+assert_contains "Task title should not include an ID"
+
 case_dir="$(make_case_dir legacy)"
 cd "$case_dir"
 

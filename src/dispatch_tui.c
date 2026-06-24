@@ -15,7 +15,9 @@ typedef enum {
     TUI_SCREEN_BOARD,
     TUI_SCREEN_TASK_INSPECTOR,
     TUI_SCREEN_AGENTS,
-    TUI_SCREEN_AGENT_INSPECTOR
+    TUI_SCREEN_AGENT_INSPECTOR,
+    TUI_SCREEN_TASK_FORM,
+    TUI_SCREEN_GROUP_FORM
 } DispatchTuiScreen;
 
 typedef enum {
@@ -48,6 +50,21 @@ typedef struct {
 } DispatchTui;
 
 static DispatchTask *selected_visible_task(DispatchTui *tui);
+
+static int title_starts_with_dispatch_id_like(const char *title) {
+    if (!title)
+        return 0;
+    size_t i = 0;
+    while (isalpha((unsigned char)title[i]) && i < 6)
+        i++;
+    if (i == 0 || title[i] != '-')
+        return 0;
+    i++;
+    size_t digit_start = i;
+    while (isdigit((unsigned char)title[i]))
+        i++;
+    return i > digit_start && isspace((unsigned char)title[i]);
+}
 
 static void tui_set_status(DispatchTui *tui, const char *message) {
     snprintf(tui->status, sizeof(tui->status), "%s", message ? message : "");
@@ -531,6 +548,154 @@ static int mutate_task(const char *task_id, const char *actor,
     return 1;
 }
 
+static int create_group(const char *name, const char *prefix, char *message,
+                        size_t message_size) {
+    if (!name || !name[0]) {
+        snprintf(message, message_size, "Group name is required");
+        return 0;
+    }
+
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    if (!dispatch_board_add_group(&board, name, prefix && prefix[0] ? prefix : NULL)) {
+        snprintf(message, message_size, "Could not add group %s", name);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchGroup *group = dispatch_board_find_group(&board, name);
+    char prefix_copy[16];
+    snprintf(prefix_copy, sizeof(prefix_copy), "%s", group ? group->prefix : "");
+    if (!dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not save board");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "Added group %s (%s)", name, prefix_copy);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
+static int add_dependencies_from_text(DispatchBoard *board, const char *task_id,
+                                      const char *depends_text,
+                                      char *message, size_t message_size) {
+    if (!depends_text || !depends_text[0] || strcmp(depends_text, "-") == 0)
+        return 1;
+
+    char *copy = strdup(depends_text);
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    for (char *token = strtok(copy, ", \t"); token;
+         token = strtok(NULL, ", \t")) {
+        if (!dispatch_task_add_dependency(board, token, task_id)) {
+            snprintf(message, message_size, "Could not add dependency %s -> %s",
+                     token, task_id);
+            free(copy);
+            return 0;
+        }
+    }
+
+    free(copy);
+    return 1;
+}
+
+static int create_task(const char *group, const char *title,
+                       const char *description, int requires_review,
+                       const char *depends_text, char *message,
+                       size_t message_size) {
+    if (!group || !group[0]) {
+        snprintf(message, message_size, "Group is required");
+        return 0;
+    }
+    if (!title || !title[0]) {
+        snprintf(message, message_size, "Task title is required");
+        return 0;
+    }
+    if (title_starts_with_dispatch_id_like(title)) {
+        snprintf(message, message_size, "Task title should not include an ID");
+        return 0;
+    }
+
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchTask *task =
+        dispatch_board_add_task(&board, group, title, description ? description : "");
+    if (!task) {
+        snprintf(message, message_size, "Could not add task %s", title);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    task->requires_review = requires_review;
+
+    char task_id[64];
+    snprintf(task_id, sizeof(task_id), "%s", task->id);
+    if (!add_dependencies_from_text(&board, task_id, depends_text, message,
+                                    message_size)) {
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    dispatch_board_normalize_states(&board);
+
+    if (!dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not save board");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "Added task %s", task_id);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
 static void run_selected_task_action(DispatchTui *tui,
                                      DispatchTuiAction action) {
     DispatchTask *task = selected_visible_task(tui);
@@ -543,6 +708,88 @@ static void run_selected_task_action(DispatchTui *tui,
     snprintf(task_id, sizeof(task_id), "%s", task->id);
     char message[256] = {0};
     mutate_task(task_id, tui->actor, action, message, sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+    clamp_selection(tui);
+}
+
+static int prompt_line(const char *label, char *buffer, size_t buffer_size,
+                       const char *initial) {
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    if (initial)
+        snprintf(buffer, buffer_size, "%s", initial);
+    else
+        buffer[0] = '\0';
+
+    echo();
+    curs_set(1);
+    attron(A_REVERSE);
+    mvhline(rows - 1, 0, ' ', cols);
+    mvprintw(rows - 1, 0, "%s", label);
+    attroff(A_REVERSE);
+    move(rows - 1, (int)strlen(label));
+    int result = getnstr(buffer, (int)buffer_size - 1);
+    noecho();
+    curs_set(0);
+    return result == OK;
+}
+
+static int prompt_yes_no(const char *label, int default_yes) {
+    char value[16];
+    if (!prompt_line(label, value, sizeof(value), default_yes ? "y" : "n"))
+        return default_yes;
+    return value[0] == '\0' || value[0] == 'y' || value[0] == 'Y';
+}
+
+static const char *selected_task_group(DispatchTui *tui) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (task)
+        return task->group;
+    if (tui->group_filter >= 0 &&
+        (size_t)tui->group_filter < tui->board.groups.count)
+        return tui->board.groups.items[tui->group_filter].id;
+    if (tui->board.groups.count > 0)
+        return tui->board.groups.items[0].id;
+    return "";
+}
+
+static void run_group_form(DispatchTui *tui) {
+    char name[128];
+    char prefix[16];
+    if (!prompt_line("New group name: ", name, sizeof(name), ""))
+        return;
+    if (!prompt_line("Prefix (blank auto): ", prefix, sizeof(prefix), ""))
+        return;
+
+    char message[256] = {0};
+    create_group(name, prefix, message, sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+}
+
+static void run_task_form(DispatchTui *tui) {
+    char group[32];
+    char title[256];
+    char description[512];
+    char deps[256];
+
+    if (!prompt_line("Task group: ", group, sizeof(group),
+                     selected_task_group(tui)))
+        return;
+    if (!prompt_line("Task title: ", title, sizeof(title), ""))
+        return;
+    if (!prompt_line("Description: ", description, sizeof(description), ""))
+        return;
+    int requires_review = prompt_yes_no("Requires review? [Y/n]: ", 1);
+    if (!prompt_line("Depends on (comma/space IDs, blank none): ", deps,
+                     sizeof(deps), ""))
+        return;
+
+    char message[256] = {0};
+    create_task(group, title, description, requires_review, deps, message,
+                sizeof(message));
     tui_load_board(tui);
     tui_set_status(tui, message);
     clamp_selection(tui);
@@ -740,6 +987,7 @@ static void tui_render_help(void) {
         "?        toggle help",
         "u        reload board",
         "r/s/f/v  ready/start/finish/review selected task",
+        "n/+      create task/group",
         "d        open selected task commit diff",
         "e        edit selected agent prompt",
         "Enter/i  inspect selected task",
@@ -1033,6 +1281,10 @@ static void tui_render(DispatchTui *tui) {
                        ? "Dispatch TUI - Task"
                        : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
                              ? "Dispatch TUI - Agent"
+                       : tui->screen == TUI_SCREEN_TASK_FORM
+                             ? "Dispatch TUI - New Task"
+                       : tui->screen == TUI_SCREEN_GROUP_FORM
+                             ? "Dispatch TUI - New Group"
                        : tui->screen == TUI_SCREEN_AGENTS
                              ? "Dispatch TUI - Agents"
                              : "Dispatch TUI - Board");
@@ -1101,7 +1353,7 @@ static void tui_render(DispatchTui *tui) {
                            ? " %s | q/Esc back | e edit prompt | x clear session"
                      : tui->screen == TUI_SCREEN_AGENTS
                            ? " %s | A all/enabled | z archive/restore | Enter/i inspect"
-                           : " %s | Tab/a agents | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
+                           : " %s | Tab/a agents | n task | + group | r/s/f/v actions | d diff",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -1190,6 +1442,20 @@ static int tui_run(void) {
             break;
         case 'r':
             run_selected_task_action(&tui, TUI_ACTION_READY);
+            break;
+        case 'n':
+            if (tui.screen == TUI_SCREEN_BOARD) {
+                tui.screen = TUI_SCREEN_TASK_FORM;
+                run_task_form(&tui);
+                tui.screen = TUI_SCREEN_BOARD;
+            }
+            break;
+        case '+':
+            if (tui.screen == TUI_SCREEN_BOARD) {
+                tui.screen = TUI_SCREEN_GROUP_FORM;
+                run_group_form(&tui);
+                tui.screen = TUI_SCREEN_BOARD;
+            }
             break;
         case 's':
             run_selected_task_action(&tui, TUI_ACTION_START);
@@ -1605,6 +1871,41 @@ static int tui_agent_archive_smoke(const char *name, const char *action) {
     return 0;
 }
 
+static int tui_create_group_smoke(const char *name, const char *prefix) {
+    char message[256] = {0};
+    if (!create_group(name, strcmp(prefix, "-") == 0 ? "" : prefix, message,
+                      sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
+static int tui_create_task_smoke(const char *group, const char *title,
+                                 const char *description,
+                                 const char *review_mode,
+                                 const char *depends_text) {
+    int requires_review;
+    if (strcmp(review_mode, "review") == 0) {
+        requires_review = 1;
+    } else if (strcmp(review_mode, "no-review") == 0) {
+        requires_review = 0;
+    } else {
+        fprintf(stderr, "Review mode must be review or no-review\n");
+        return 1;
+    }
+
+    char message[256] = {0};
+    if (!create_task(group, title, strcmp(description, "-") == 0 ? "" : description,
+                     requires_review, depends_text, message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -1619,6 +1920,8 @@ static void print_tui_help(void) {
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
     puts("  --agent-archive-smoke <name> archive|restore");
+    puts("  --create-group-smoke <name> <prefix|->");
+    puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1647,6 +1950,11 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_prompt_edit_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--agent-archive-smoke") == 0)
         return tui_agent_archive_smoke(argv[3], argv[4]);
+    if (argc == 5 && strcmp(argv[2], "--create-group-smoke") == 0)
+        return tui_create_group_smoke(argv[3], argv[4]);
+    if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)
+        return tui_create_task_smoke(argv[3], argv[4], argv[5], argv[6],
+                                    argv[7]);
     if (argc != 2) {
         print_tui_help();
         return 1;
