@@ -282,13 +282,36 @@ assert_contains "Title: First"
 assert_contains "Description: First task"
 assert_contains "State: proposed"
 assert_contains "Blocks: -"
+assert_contains "Commits: -"
+
+expect_ok "$BIN" commit list DE-01
+assert_contains "(no commits)"
+
+expect_fail "$BIN" commit add DE-01 not-a-sha
+assert_contains "Commit reference must be a 4-64 character hex SHA"
+
+expect_ok "$BIN" commit add DE-01 abc1234 --actor codex
+assert_contains "Added commit abc1234 to DE-01"
+
+expect_ok "$BIN" commit add DE-01 abc1234 --actor codex
+assert_contains "Commit abc1234 already recorded for DE-01"
+
+expect_ok "$BIN" commit list DE-01
+assert_line "abc1234"
+
+expect_ok "$BIN" commit show DE-01
+assert_contains "Task: DE-01 First"
+assert_contains "  abc1234"
+
+expect_ok "$BIN" show DE-01
+assert_contains "Commits: abc1234"
 
 expect_ok "$BIN" dep add DE-01 DE-02
 assert_contains "Added dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
 
 expect_ok "$BIN" list
 assert_contains "[DE] Development"
-assert_contains "  DE-01    proposed   First"
+assert_contains "  DE-01    proposed   First  commits:1"
 assert_contains "  DE-02    proposed   Second  depends_on:DE-01"
 
 expect_ok "$BIN" list
@@ -744,6 +767,7 @@ expect_ok "$BIN" workspace create DE-01 --actor codex-a
 
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"
+assert_line "commit"
 assert_line "workspace"
 
 expect_ok "$BIN" completion candidates candidate-kinds

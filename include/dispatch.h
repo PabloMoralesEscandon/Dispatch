@@ -52,6 +52,7 @@ typedef struct {
     char *group;
     DispatchState state;
     DispatchStringList depends_on;
+    DispatchStringList commits;
     int requires_review;
     char *assigned_to;
     char *started_by;

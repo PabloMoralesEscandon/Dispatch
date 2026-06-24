@@ -90,6 +90,7 @@ static void task_free_fields(DispatchTask *task) {
     free(task->description);
     free(task->group);
     string_list_free(&task->depends_on);
+    string_list_free(&task->commits);
     free(task->assigned_to);
     free(task->started_by);
     free(task->completed_by);

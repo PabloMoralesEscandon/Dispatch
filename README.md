@@ -335,6 +335,7 @@ the group prints a single `(done)` marker instead of every completed task row.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name. Use `list all` to include
 completed tasks, optionally scoped to a group with `list all <group>`.
+Tasks with recorded commits show a `commits:N` summary on their task line.
 
 When stdout is a terminal, `list` uses ANSI color to distinguish group headings,
 task IDs, states, and metadata. Set `FORCE_COLOR=1` to force color in captured
@@ -353,6 +354,18 @@ the prerequisite, and the second argument is the task that waits for it. A task
 that has been approved for work is blocked when any dependency is not done.
 Tasks that have not been readied yet still display as proposed, even when they
 have unmet dependencies. Dependency cycles are rejected.
+
+### Commit References
+
+```bash
+dispatch commit add <task-id> <sha> [--actor <name>]
+dispatch commit list <task-id>
+dispatch commit show <task-id>
+```
+
+Commit references attach one or more Git SHAs to a Dispatch task. `show` also
+prints recorded commits, which gives review tooling and the TUI a reliable
+task-to-diff link.
 
 ### Lifecycle
 

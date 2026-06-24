@@ -39,6 +39,7 @@ static const DispatchCliCommand commands[] = {
     {"group", "Manage groups"},
     {"task", "Manage tasks"},
     {"dep", "Manage dependencies"},
+    {"commit", "Manage task commit references"},
     {"completion", "Print shell completion candidates"},
     {"ready", "List ready work or mark a task ready"},
     {"blocked", "List blocked work and blockers"},
@@ -72,7 +73,7 @@ void dispatch_cli_print_help(void) {
     puts("");
     puts("Implemented now:");
     puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
-    puts("  group add/ready, task add, dep add/remove, completion candidates,");
+    puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
     puts("  ready, start, finish, review, normalize, list, show, blocked");
 }
 
@@ -2686,6 +2687,15 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "  fi\n"
         "}\n"
         "\n"
+        "_dispatch_commit_command() {\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- add list show\n"
+        "  elif [[ ${words[3]} == add || ${words[3]} == list || ${words[3]} == show ]] && "
+        "(( CURRENT == 4 )); then\n"
+        "    _dispatch_compadd_candidates tasks\n"
+        "  fi\n"
+        "}\n"
+        "\n"
         "_dispatch_agent_command() {\n"
         "  if (( CURRENT == 3 )); then\n"
         "    compadd -- create list show command session resume\n"
@@ -2739,6 +2749,9 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "      ;;\n"
         "    dep)\n"
         "      _dispatch_dep_command\n"
+        "      ;;\n"
+        "    commit)\n"
+        "      _dispatch_commit_command\n"
         "      ;;\n"
         "    agent)\n"
         "      _dispatch_agent_command\n"
@@ -2811,6 +2824,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "\"--actor --no-review\" ;;\n"
         "      task) [[ $sub == delete ]] && _dispatch_complete_words "
         "\"--force\" || _dispatch_complete_words \"--description --no-review\" ;;\n"
+        "      commit) [[ $sub == add ]] && _dispatch_complete_words \"--actor\" ;;\n"
         "      ready) _dispatch_complete_words \"--actor --no-review\" ;;\n"
         "      start|finish|review) _dispatch_complete_words \"--actor\" ;;\n"
         "    esac\n"
@@ -2853,6 +2867,13 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      if (( COMP_CWORD == 2 )); then\n"
         "        _dispatch_complete_words \"add remove\"\n"
         "      elif (( COMP_CWORD == 3 || COMP_CWORD == 4 )); then\n"
+        "        _dispatch_complete_candidates tasks\n"
+        "      fi\n"
+        "      ;;\n"
+        "    commit)\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"add list show\"\n"
+        "      elif [[ ( $sub == add || $sub == list || $sub == show ) && $COMP_CWORD -eq 3 ]]; then\n"
         "        _dispatch_complete_candidates tasks\n"
         "      fi\n"
         "      ;;\n"
@@ -2937,6 +2958,11 @@ static int cmd_completion_fish(int argc, char **argv) {
         "complete -c dispatch -f -n '__fish_seen_subcommand_from dep; and "
         "__fish_seen_subcommand_from add remove' -a '(__dispatch_candidates tasks)'\n"
         "\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from commit; and not "
+        "__fish_seen_subcommand_from add list show' -a 'add list show'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from commit; and "
+        "__fish_seen_subcommand_from add list show' -a '(__dispatch_candidates tasks)'\n"
+        "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and not "
         "__fish_seen_subcommand_from create list show command session resume' -a "
         "'create list show command session resume'\n"
@@ -2968,6 +2994,8 @@ static int cmd_completion_fish(int argc, char **argv) {
         "__fish_seen_subcommand_from add' -l no-review\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
         "__fish_seen_subcommand_from delete' -l force\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from commit; and "
+        "__fish_seen_subcommand_from add' -l actor\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
         "__fish_seen_subcommand_from create' -l actor\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
@@ -3212,6 +3240,8 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
             printf("%s%s", i == 0 ? "" : ",", task->depends_on.items[i]);
         printf("%s", reset);
     }
+    if (task->commits.count > 0)
+        printf("  %scommits:%zu%s", meta_color, task->commits.count, reset);
     printf("\n");
 
     DispatchWorkspace *workspace = task_workspace(board, task->id, 1);
@@ -3382,6 +3412,15 @@ static int cmd_show(int argc, char **argv) {
         printf(" -");
     printf("\n");
 
+    printf("Commits:");
+    if (task->commits.count == 0) {
+        printf(" -");
+    } else {
+        for (size_t i = 0; i < task->commits.count; i++)
+            printf(" %s", task->commits.items[i]);
+    }
+    printf("\n");
+
     printf("History:\n");
     if (task->history.count == 0) {
         printf("  -\n");
@@ -3396,6 +3435,156 @@ static int cmd_show(int argc, char **argv) {
     }
 
     dispatch_board_free(&board);
+    return 0;
+}
+
+static int commit_ref_is_valid(const char *ref) {
+    size_t len = ref ? strlen(ref) : 0;
+    if (len < 4 || len > 64)
+        return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!isxdigit((unsigned char)ref[i]))
+            return 0;
+    }
+    return 1;
+}
+
+static int task_commit_contains(const DispatchTask *task, const char *ref) {
+    for (size_t i = 0; i < task->commits.count; i++) {
+        if (strcmp(task->commits.items[i], ref) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void task_commit_append(DispatchTask *task, const char *ref) {
+    if (task->commits.count >= task->commits.capacity) {
+        task->commits.capacity =
+            task->commits.capacity == 0 ? 4 : task->commits.capacity * 2;
+        task->commits.items = cli_realloc_array(
+            task->commits.items, task->commits.capacity,
+            sizeof(*task->commits.items));
+    }
+    task->commits.items[task->commits.count++] = cli_strdup(ref);
+    task->updated_at = time(NULL);
+}
+
+static void print_task_commits(const DispatchTask *task, int include_header) {
+    if (include_header) {
+        printf("Task: %s %s\n", task->id, task_display_title(task));
+        printf("Commits:\n");
+    }
+
+    if (task->commits.count == 0) {
+        printf("%s(no commits)\n", include_header ? "  " : "");
+        return;
+    }
+
+    for (size_t i = 0; i < task->commits.count; i++)
+        printf("%s%s\n", include_header ? "  " : "", task->commits.items[i]);
+}
+
+static int cmd_commit(int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr,
+                "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+        fprintf(stderr, "       dispatch commit list <task-id>\n");
+        fprintf(stderr, "       dispatch commit show <task-id>\n");
+        return 1;
+    }
+
+    const char *subcommand = argv[2];
+    const char *task_id = argv[3];
+
+    if (strcmp(subcommand, "list") == 0 || strcmp(subcommand, "show") == 0) {
+        if (argc != 4) {
+            fprintf(stderr, "Usage: dispatch commit %s <task-id>\n",
+                    subcommand);
+            return 1;
+        }
+
+        DispatchBoard board;
+        if (!load_board_or_error(&board))
+            return 1;
+
+        DispatchTask *task = dispatch_board_find_task(&board, task_id);
+        if (!task) {
+            dispatch_board_free(&board);
+            fprintf(stderr, "No task with id %s\n", task_id);
+            return 1;
+        }
+
+        print_task_commits(task, strcmp(subcommand, "show") == 0);
+        dispatch_board_free(&board);
+        return 0;
+    }
+
+    if (strcmp(subcommand, "add") != 0) {
+        fprintf(stderr,
+                "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+        fprintf(stderr, "       dispatch commit list <task-id>\n");
+        fprintf(stderr, "       dispatch commit show <task-id>\n");
+        return 1;
+    }
+
+    if (argc != 5 && argc != 7) {
+        fprintf(stderr,
+                "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+        return 1;
+    }
+
+    const char *sha = argv[4];
+    const char *actor = "user";
+    if (argc == 7) {
+        if (strcmp(argv[5], "--actor") != 0 || argv[6][0] == '\0') {
+            fprintf(stderr,
+                    "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+            return 1;
+        }
+        actor = argv[6];
+    }
+
+    if (!commit_ref_is_valid(sha)) {
+        fprintf(stderr, "Commit reference must be a 4-64 character hex SHA\n");
+        return 1;
+    }
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+
+    DispatchTask *task = dispatch_board_find_task(&locked.board, task_id);
+    if (!task) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No task with id %s\n", task_id);
+        return 1;
+    }
+
+    if (task_commit_contains(task, sha)) {
+        locked_board_close(&locked);
+        printf("Commit %s already recorded for %s\n", sha, task_id);
+        return 0;
+    }
+
+    task_commit_append(task, sha);
+    dispatch_task_append_history(task, actor, "commit", sha);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        return 1;
+    }
+
+    printf("Added commit %s to %s\n", sha, task_id);
+    DispatchLogField targets[] = {
+        {"task", task_id},
+    };
+    DispatchLogField context[] = {
+        {"commit", sha},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Added commit %s to %s", sha, task_id);
+    append_dispatch_log(actor, "commit", "commit_add", targets, 1, context, 1,
+                        message);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -3672,6 +3861,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_task(argc, argv);
     if (strcmp(command->name, "dep") == 0)
         return cmd_dep(argc, argv);
+    if (strcmp(command->name, "commit") == 0)
+        return cmd_commit(argc, argv);
     if (strcmp(command->name, "completion") == 0)
         return cmd_completion(argc, argv);
     if (strcmp(command->name, "normalize") == 0)

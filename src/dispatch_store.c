@@ -265,6 +265,9 @@ static void task_free_fields(DispatchTask *task) {
     for (size_t i = 0; i < task->depends_on.count; i++)
         free(task->depends_on.items[i]);
     free(task->depends_on.items);
+    for (size_t i = 0; i < task->commits.count; i++)
+        free(task->commits.items[i]);
+    free(task->commits.items);
     free(task->assigned_to);
     free(task->started_by);
     free(task->completed_by);
@@ -369,11 +372,9 @@ static json_t *task_to_json(const DispatchTask *task) {
     json_object_set_new(object, "state",
                         json_string(dispatch_state_name(task->state)));
 
-    json_t *depends_on = json_array();
-    for (size_t i = 0; i < task->depends_on.count; i++)
-        json_array_append_new(depends_on,
-                              json_string(task->depends_on.items[i]));
-    json_object_set_new(object, "depends_on", depends_on);
+    json_object_set_new(object, "depends_on",
+                        string_list_to_json(&task->depends_on));
+    json_object_set_new(object, "commits", string_list_to_json(&task->commits));
 
     json_object_set_new(object, "requires_review",
                         json_boolean(task->requires_review));
@@ -582,6 +583,21 @@ static int load_tasks(DispatchBoard *board, json_t *tasks, char *error,
                     return 0;
                 }
                 string_list_append(&task.depends_on, json_string_value(dep));
+            }
+        }
+
+        json_t *commits = json_object_get(value, "commits");
+        if (json_is_array(commits)) {
+            size_t commit_index;
+            json_t *commit;
+            json_array_foreach(commits, commit_index, commit) {
+                if (!json_is_string(commit)) {
+                    set_error(error, error_size,
+                              "commit entries must be strings");
+                    task_free_fields(&task);
+                    return 0;
+                }
+                string_list_append(&task.commits, json_string_value(commit));
             }
         }
 

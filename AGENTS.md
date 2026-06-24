@@ -71,6 +71,9 @@ dispatch group ready <group> --actor <name> [--no-review]
 dispatch task add <group> <title> [--description <text>] [--no-review]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
+dispatch commit add <TASK-ID> <sha> [--actor <agent-id>]
+dispatch commit list <TASK-ID>
+dispatch commit show <TASK-ID>
 dispatch normalize
 ```
 
@@ -87,6 +90,10 @@ agents use in commands.
 Dependencies are stored as "this task depends on those task IDs". A task is
 blocked when any dependency is not done. Agents must treat blocked tasks as not
 available.
+
+Commit references are stored through the CLI with `dispatch commit add`. Use
+them to associate a completed or review-pending task with the Git SHA created
+for that task.
 
 The normal lifecycle is:
 
