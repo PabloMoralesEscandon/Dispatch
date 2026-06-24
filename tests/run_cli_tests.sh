@@ -233,11 +233,23 @@ assert_contains "Agent codex-a already exists"
 
 expect_ok "$BIN" agent create --name claude-a --runner claude --no-run-script --print-command
 assert_contains "Created agent claude-a (claude)"
-assert_contains "command: claude --prompt-file \".dispatch/agents/claude-a/claude-a-PROMPT.md\""
+assert_contains "command: claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 expect_ok "$BIN" agent command claude-a --print-command
-assert_contains "claude --prompt-file \".dispatch/agents/claude-a/claude-a-PROMPT.md\""
+assert_contains "claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 expect_ok "$BIN" agent show claude-a
 assert_contains "Run script: -"
+
+expect_ok "$BIN" agent create --name claude-run --runner claude
+assert_contains "Created agent claude-run (claude)"
+assert_file_contains .dispatch/agents/claude-run/run.sh "exec claude \"\$(cat '.dispatch/agents/claude-run/claude-run-PROMPT.md')\""
+assert_file_not_contains .dispatch/agents/claude-run/run.sh "--prompt-file"
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'cd "$(dirname "$0")/../../.."' 'exec claude --prompt-file ".dispatch/agents/claude-run/claude-run-PROMPT.md"' > .dispatch/agents/claude-run/run.sh
+chmod +x .dispatch/agents/claude-run/run.sh
+expect_ok "$BIN" normalize
+assert_contains "Updated 1 agent prompt"
+assert_file_contains .dispatch/agents/claude-run/run.sh "exec claude \"\$(cat '.dispatch/agents/claude-run/claude-run-PROMPT.md')\""
+assert_file_not_contains .dispatch/agents/claude-run/run.sh "--prompt-file"
+
 expect_ok "$BIN" agent resume claude-a
 assert_contains "claude --session-id '"
 assert_contains "\"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""

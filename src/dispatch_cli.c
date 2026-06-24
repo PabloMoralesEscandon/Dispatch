@@ -387,7 +387,7 @@ static char *agent_command_for(const char *runner, const char *model,
     if (strcmp(runner, "codex") == 0) {
         format = "codex%s%s \"$(cat '%s')\"";
     } else {
-        format = "claude%s%s --prompt-file \"%s\"";
+        format = "claude%s%s \"$(cat '%s')\"";
     }
 
     size_t size = strlen(format) + strlen(model_flag) + strlen(model_value) +
@@ -3568,29 +3568,38 @@ static int normalize_agent_prompts(DispatchBoard *board) {
         int needs_path_update = strcmp(agent->prompt_path, prompt_path) != 0;
         int needs_prompt_refresh =
             needs_path_update || agent_prompt_needs_refresh(agent->prompt_path);
-        if (!needs_prompt_refresh) {
+        char *command = agent->run_script_path
+                            ? agent_command_for(agent->runner, agent->model,
+                                                prompt_path)
+                            : NULL;
+        int needs_script_refresh =
+            command && !file_contains_text(agent->run_script_path, command);
+        if (!needs_prompt_refresh && !needs_script_refresh) {
+            free(command);
             free(prompt_path);
             continue;
         }
 
         char *scratch_dir = NULL;
         char *decisions_dir = NULL;
-        if (!create_agent_dirs(agent->agent_dir, &scratch_dir, &decisions_dir) ||
-            !write_agent_prompt(prompt_path, agent->name, agent->runner,
-                                agent->model, agent->agent_dir, scratch_dir,
-                                decisions_dir)) {
-            free(prompt_path);
-            free(scratch_dir);
-            free(decisions_dir);
-            return -1;
+        if (needs_prompt_refresh) {
+            if (!create_agent_dirs(agent->agent_dir, &scratch_dir,
+                                   &decisions_dir) ||
+                !write_agent_prompt(prompt_path, agent->name, agent->runner,
+                                    agent->model, agent->agent_dir, scratch_dir,
+                                    decisions_dir)) {
+                free(command);
+                free(prompt_path);
+                free(scratch_dir);
+                free(decisions_dir);
+                return -1;
+            }
         }
 
-        if (agent->run_script_path) {
-            char *command =
-                agent_command_for(agent->runner, agent->model, prompt_path);
+        if (needs_script_refresh) {
             int ok = write_agent_run_script(agent->run_script_path, command);
-            free(command);
             if (!ok) {
+                free(command);
                 free(prompt_path);
                 free(scratch_dir);
                 free(decisions_dir);
@@ -3606,6 +3615,7 @@ static int normalize_agent_prompts(DispatchBoard *board) {
         }
         agent->updated_at = time(NULL);
         changed++;
+        free(command);
         free(scratch_dir);
         free(decisions_dir);
     }
