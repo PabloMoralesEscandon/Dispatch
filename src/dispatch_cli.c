@@ -2730,6 +2730,7 @@ static void print_completion_usage(void) {
     fprintf(stderr, "       dispatch completion bash\n");
     fprintf(stderr, "       dispatch completion fish\n");
     fprintf(stderr, "       dispatch completion zsh\n");
+    fprintf(stderr, "       dispatch completion install fish|bash|zsh\n");
 }
 
 static int cmd_completion_candidates(int argc, char **argv) {
@@ -2801,7 +2802,7 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "\n"
         "_dispatch_completion_command() {\n"
         "  local -a subcommands kinds\n"
-        "  subcommands=(candidates bash fish zsh)\n"
+        "  subcommands=(candidates bash fish zsh install)\n"
         "  kinds=(\"${(@f)$(_dispatch_candidate_values candidate-kinds)}\")\n"
         "\n"
         "  if (( CURRENT == 3 )); then\n"
@@ -2983,9 +2984,11 @@ static int cmd_completion_bash(int argc, char **argv) {
         "  case \"$cmd\" in\n"
         "    completion)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
-        "        _dispatch_complete_words \"candidates bash fish zsh\"\n"
+        "        _dispatch_complete_words \"candidates bash fish zsh install\"\n"
         "      elif [[ $sub == candidates && $COMP_CWORD -eq 3 ]]; then\n"
         "        _dispatch_complete_candidates candidate-kinds\n"
+        "      elif [[ $sub == install && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_words \"fish bash zsh\"\n"
         "      fi\n"
         "      ;;\n"
         "    show|start|finish|review|ready)\n"
@@ -3079,11 +3082,13 @@ static int cmd_completion_fish(int argc, char **argv) {
         "(__dispatch_candidates commands)' -a '(__dispatch_candidates commands)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from completion; "
-        "and not __fish_seen_subcommand_from candidates bash fish zsh' -a "
-        "'candidates bash fish zsh'\n"
+        "and not __fish_seen_subcommand_from candidates bash fish zsh install' -a "
+        "'candidates bash fish zsh install'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from completion; "
         "and __fish_seen_subcommand_from candidates' -a '(__dispatch_candidates "
         "candidate-kinds)'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from completion; "
+        "and __fish_seen_subcommand_from install' -a 'fish bash zsh'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from show start "
         "finish review ready' -a '(__dispatch_candidates tasks)'\n"
@@ -3181,6 +3186,188 @@ static int cmd_completion_fish(int argc, char **argv) {
     return 0;
 }
 
+static int make_dir_recursive(const char *path) {
+    if (!path || path[0] == '\0')
+        return 0;
+
+    char *copy = cli_strdup(path);
+    for (char *cursor = copy + 1; *cursor; cursor++) {
+        if (*cursor != '/')
+            continue;
+        *cursor = '\0';
+        if (!make_dir_if_needed(copy)) {
+            free(copy);
+            return 0;
+        }
+        *cursor = '/';
+    }
+
+    int ok = make_dir_if_needed(copy);
+    free(copy);
+    return ok;
+}
+
+static char *path_parent_dir(const char *path) {
+    const char *slash = strrchr(path, '/');
+    if (!slash)
+        return cli_strdup(".");
+    size_t len = (size_t)(slash - path);
+    if (len == 0)
+        len = 1;
+    char *dir = malloc(len + 1);
+    if (!dir) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(dir, path, len);
+    dir[len] = '\0';
+    return dir;
+}
+
+static int command_exists_on_path(const char *command) {
+    const char *path_env = getenv("PATH");
+    if (!path_env || !path_env[0])
+        return 0;
+
+    char *paths = cli_strdup(path_env);
+    char *saveptr = NULL;
+    for (char *dir = strtok_r(paths, ":", &saveptr); dir;
+         dir = strtok_r(NULL, ":", &saveptr)) {
+        char *candidate = join_path2(dir[0] ? dir : ".", command);
+        int found = access(candidate, X_OK) == 0;
+        free(candidate);
+        if (found) {
+            free(paths);
+            return 1;
+        }
+    }
+
+    free(paths);
+    return 0;
+}
+
+static char *completion_install_path(const char *shell_name) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return NULL;
+
+    if (strcmp(shell_name, "fish") == 0) {
+        const char *xdg_config = getenv("XDG_CONFIG_HOME");
+        char *base = xdg_config && xdg_config[0]
+                         ? cli_strdup(xdg_config)
+                         : join_path2(home, ".config");
+        char *dir = join_path2(base, "fish/completions");
+        char *path = join_path2(dir, "dispatch.fish");
+        free(base);
+        free(dir);
+        return path;
+    }
+
+    const char *xdg_data = getenv("XDG_DATA_HOME");
+    char *data_base = xdg_data && xdg_data[0]
+                          ? cli_strdup(xdg_data)
+                          : join_path2(home, ".local/share");
+    char *path = NULL;
+    if (strcmp(shell_name, "bash") == 0) {
+        char *dir = join_path2(data_base, "bash-completion/completions");
+        path = join_path2(dir, "dispatch");
+        free(dir);
+    } else if (strcmp(shell_name, "zsh") == 0) {
+        char *dir = join_path2(data_base, "zsh/site-functions");
+        path = join_path2(dir, "_dispatch");
+        free(dir);
+    }
+    free(data_base);
+    return path;
+}
+
+static const char *completion_reload_hint(const char *shell_name,
+                                          const char *path) {
+    (void)path;
+    if (strcmp(shell_name, "fish") == 0)
+        return "Run: exec fish";
+    if (strcmp(shell_name, "bash") == 0)
+        return "Run: source ~/.bashrc, or start a new bash shell";
+    return "Ensure ~/.local/share/zsh/site-functions is in fpath, then run: autoload -Uz compinit; compinit";
+}
+
+static int write_completion_script_file(const char *shell_name,
+                                        const char *path) {
+    char *dir = path_parent_dir(path);
+    if (!make_dir_recursive(dir)) {
+        fprintf(stderr, "Could not create completion directory %s: %s\n", dir,
+                strerror(errno));
+        free(dir);
+        return 0;
+    }
+    free(dir);
+
+    FILE *file = fopen(path, "w");
+    if (!file) {
+        fprintf(stderr, "Could not write %s: %s\n", path, strerror(errno));
+        return 0;
+    }
+
+    fflush(stdout);
+    int saved_stdout = dup(STDOUT_FILENO);
+    if (saved_stdout < 0 || dup2(fileno(file), STDOUT_FILENO) < 0) {
+        if (saved_stdout >= 0)
+            close(saved_stdout);
+        fclose(file);
+        fprintf(stderr, "Could not redirect completion output: %s\n",
+                strerror(errno));
+        return 0;
+    }
+
+    char *argv[] = {"dispatch", "completion", (char *)shell_name, NULL};
+    int result = 1;
+    if (strcmp(shell_name, "fish") == 0)
+        result = cmd_completion_fish(3, argv);
+    else if (strcmp(shell_name, "bash") == 0)
+        result = cmd_completion_bash(3, argv);
+    else if (strcmp(shell_name, "zsh") == 0)
+        result = cmd_completion_zsh(3, argv);
+
+    fflush(stdout);
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
+    fclose(file);
+    return result == 0;
+}
+
+static int cmd_completion_install(int argc, char **argv) {
+    if (argc != 4) {
+        print_completion_usage();
+        return 1;
+    }
+
+    const char *shell_name = argv[3];
+    if (strcmp(shell_name, "fish") != 0 && strcmp(shell_name, "bash") != 0 &&
+        strcmp(shell_name, "zsh") != 0) {
+        print_completion_usage();
+        return 1;
+    }
+
+    char *path = completion_install_path(shell_name);
+    if (!path) {
+        fprintf(stderr, "HOME must be set to install completions\n");
+        return 1;
+    }
+
+    if (!write_completion_script_file(shell_name, path)) {
+        free(path);
+        return 1;
+    }
+
+    printf("Installed %s completion: %s\n", shell_name, path);
+    if (!command_exists_on_path("dispatch")) {
+        printf("Warning: dispatch was not found on PATH; completions may not load dynamic candidates.\n");
+    }
+    printf("%s\n", completion_reload_hint(shell_name, path));
+    free(path);
+    return 0;
+}
+
 static int cmd_completion(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "candidates") == 0)
         return cmd_completion_candidates(argc, argv);
@@ -3190,6 +3377,8 @@ static int cmd_completion(int argc, char **argv) {
         return cmd_completion_fish(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "zsh") == 0)
         return cmd_completion_zsh(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "install") == 0)
+        return cmd_completion_install(argc, argv);
 
     print_completion_usage();
     return 1;
@@ -4032,6 +4221,13 @@ static int cmd_start(int argc, char **argv) {
         return 1;
     DispatchBoard *board = &locked.board;
 
+    DispatchAgent *actor_agent = dispatch_board_find_agent(board, actor);
+    if (actor_agent && actor_agent->archived) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent %s is archived; restore it first\n", actor);
+        return 1;
+    }
+
     DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task) {
         locked_board_close(&locked);
@@ -4040,9 +4236,9 @@ static int cmd_start(int argc, char **argv) {
     }
     DispatchWorkspace *workspace = task_workspace(board, task_id, 0);
     if (workspace && strcmp(workspace->actor, actor) != 0) {
-        locked_board_close(&locked);
         fprintf(stderr, "Workspace for %s belongs to %s\n", task_id,
                 workspace->actor);
+        locked_board_close(&locked);
         return 1;
     }
     if (!dispatch_task_start(board, task, actor)) {

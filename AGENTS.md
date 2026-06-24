@@ -79,6 +79,7 @@ dispatch dep remove <dependency-id> <dependent-id>
 dispatch commit add <TASK-ID> <sha> [--actor <agent-id>]
 dispatch commit list <TASK-ID>
 dispatch commit show <TASK-ID>
+dispatch completion install fish|bash|zsh
 dispatch normalize
 ```
 

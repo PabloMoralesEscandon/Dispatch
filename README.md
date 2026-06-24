@@ -220,11 +220,15 @@ dispatch completion candidates commands|candidate-kinds|tasks|groups|agents|work
 dispatch completion bash
 dispatch completion zsh
 dispatch completion fish
+dispatch completion install fish|bash|zsh
 ```
 
 `completion candidates` prints line-separated values for shell completion.
 Generated shell scripts use those candidate commands for board-specific task,
 group, agent, and workspace values.
+`completion install <shell>` writes the generated completion script to the
+shell-specific user directory, checks whether `dispatch` is on `PATH`, and
+prints the reload command.
 
 ### Agents
 

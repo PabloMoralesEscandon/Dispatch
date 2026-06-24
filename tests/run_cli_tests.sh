@@ -838,6 +838,14 @@ assert_line "commit"
 assert_line "status"
 assert_line "workspace"
 
+install_home="$case_dir/completion-home"
+mkdir -p "$install_home"
+HOME="$install_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH=/no-such-dir expect_ok "$BIN" completion install fish
+assert_contains "Installed fish completion: $install_home/.config/fish/completions/dispatch.fish"
+assert_contains "Warning: dispatch was not found on PATH"
+assert_contains "Run: exec fish"
+assert_file_contains "$install_home/.config/fish/completions/dispatch.fish" "function __dispatch_command"
+
 expect_ok "$BIN" completion candidates candidate-kinds
 assert_line "tasks"
 assert_line "groups"
@@ -863,7 +871,7 @@ assert_contains "Usage: dispatch completion candidates"
 
 expect_ok "$BIN" completion zsh
 assert_contains "#compdef dispatch"
-assert_contains "subcommands=(candidates bash fish zsh)"
+assert_contains "subcommands=(candidates bash fish zsh install)"
 assert_contains 'dispatch completion candidates "$1"'
 assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
@@ -874,7 +882,7 @@ assert_contains "Usage: dispatch completion candidates"
 expect_ok "$BIN" completion bash
 assert_contains "complete -F _dispatch_complete dispatch"
 assert_contains 'dispatch completion candidates "$1"'
-assert_contains "candidates bash fish zsh"
+assert_contains "candidates bash fish zsh install"
 assert_contains "all \$(_dispatch_candidate_values groups)"
 assert_contains "_dispatch_complete_candidates tasks"
 assert_contains "--actor --no-review"
@@ -886,7 +894,7 @@ expect_ok "$BIN" completion fish
 assert_contains "function __dispatch_command"
 assert_contains "function __dispatch_candidates"
 assert_contains "command \$cmd completion candidates \$argv[1]"
-assert_contains "candidates bash fish zsh"
+assert_contains "candidates bash fish zsh install"
 assert_contains "all (__dispatch_candidates groups)"
 assert_contains "(__dispatch_candidates tasks)"
 assert_contains "(__dispatch_candidates workspaces)"
