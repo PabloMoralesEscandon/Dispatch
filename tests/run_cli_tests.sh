@@ -840,9 +840,17 @@ expect_ok "$BIN" task add DE Root
 expect_ok "$BIN" task add QA Check
 expect_ok "$BIN" ready DE-01 --actor user
 expect_ok "$BIN" workspace create DE-01 --actor codex-a
+expect_ok "$BIN" agent session codex-a --session-id tui-session --current-task DE-01 --last-workspace DE-01
 
 expect_fail "$BIN" agent archive codex-a
-assert_contains "Agent codex-a has active workspace"
+assert_contains "Agent codex-a has active task DE-01"
+
+expect_ok "$BIN" tui --agents-smoke
+assert_contains "Agents: 1"
+assert_contains "codex-a codex enabled"
+assert_contains "session:yes"
+assert_contains "current:DE-01"
+assert_contains "workspace:DE-01"
 
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"

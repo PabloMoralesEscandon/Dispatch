@@ -11,7 +11,8 @@
 
 typedef enum {
     TUI_SCREEN_BOARD,
-    TUI_SCREEN_TASK_INSPECTOR
+    TUI_SCREEN_TASK_INSPECTOR,
+    TUI_SCREEN_AGENTS
 } DispatchTuiScreen;
 
 typedef enum {
@@ -37,6 +38,7 @@ typedef struct {
     char search[128];
     int search_active;
     int selected_task;
+    int selected_agent;
     int show_help;
     int running;
 } DispatchTui;
@@ -227,6 +229,16 @@ static void clamp_selection(DispatchTui *tui) {
         tui->selected_task = count - 1;
     } else if (tui->selected_task < 0) {
         tui->selected_task = 0;
+    }
+}
+
+static void clamp_agent_selection(DispatchTui *tui) {
+    if (!tui->board_loaded || tui->board.agents.count == 0) {
+        tui->selected_agent = 0;
+    } else if ((size_t)tui->selected_agent >= tui->board.agents.count) {
+        tui->selected_agent = (int)tui->board.agents.count - 1;
+    } else if (tui->selected_agent < 0) {
+        tui->selected_agent = 0;
     }
 }
 
@@ -498,6 +510,7 @@ static void tui_render_help(void) {
         "d        open selected task commit diff",
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
+        "Tab/a    switch to agents",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
@@ -527,6 +540,32 @@ static void tui_render_help(void) {
         attron(A_REVERSE);
         draw_truncated(top + i + 1, left + 2, width - 4, lines[i]);
         attroff(A_REVERSE);
+    }
+}
+
+static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
+    int y = start_y;
+    if (tui->board.agents.count == 0) {
+        draw_truncated(y, 0, cols, "(no agents)");
+        return;
+    }
+
+    draw_truncated(y++, 0, cols,
+                   "Name             Runner   Status    Session  Current task  Last workspace");
+    for (size_t i = 0; i < tui->board.agents.count && y < rows - 1; i++) {
+        DispatchAgent *agent = &tui->board.agents.items[i];
+        char line[1024];
+        snprintf(line, sizeof(line), "%-16s %-8s %-9s %-8s %-13s %s",
+                 agent->name, agent->runner,
+                 agent->archived ? "archived" : "enabled",
+                 agent->session_id ? "yes" : "no",
+                 agent->current_task ? agent->current_task : "-",
+                 agent->last_workspace ? agent->last_workspace : "-");
+        if ((int)i == tui->selected_agent)
+            attron(A_REVERSE);
+        draw_truncated(y++, 0, cols, line);
+        if ((int)i == tui->selected_agent)
+            attroff(A_REVERSE);
     }
 }
 
@@ -709,13 +748,21 @@ static void tui_render(DispatchTui *tui) {
     draw_truncated(0, 0, cols,
                    tui->screen == TUI_SCREEN_TASK_INSPECTOR
                        ? "Dispatch TUI - Task"
-                       : "Dispatch TUI - Board");
+                       : tui->screen == TUI_SCREEN_AGENTS
+                             ? "Dispatch TUI - Agents"
+                             : "Dispatch TUI - Board");
     attroff(A_BOLD);
 
     if (!tui->board_loaded) {
         draw_truncated(2, 0, cols, "Board not loaded.");
     } else if (tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
         draw_task_inspector(tui, rows, cols);
+    } else if (tui->screen == TUI_SCREEN_AGENTS) {
+        char line[512];
+        snprintf(line, sizeof(line), "Agents: %zu    Tab/b board    q quit",
+                 tui->board.agents.count);
+        draw_truncated(2, 0, cols, line);
+        draw_agent_rows(tui, 4, rows, cols);
     } else {
         char line[512];
         snprintf(line, sizeof(line), "Board: %s    Repo: %s", tui->board.name,
@@ -759,9 +806,11 @@ static void tui_render(DispatchTui *tui) {
         mvhline(rows - 1, 0, ' ', cols);
         char status[512];
         snprintf(status, sizeof(status),
-                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
+                tui->screen == TUI_SCREEN_TASK_INSPECTOR
                      ? " %s | q/Esc back | r/s/f/v actions | d diff | ? help"
-                     : " %s | q quit | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
+                     : tui->screen == TUI_SCREEN_AGENTS
+                           ? " %s | Tab/b board | j/k move | q quit"
+                           : " %s | Tab/a agents | Enter/i inspect | r/s/f/v actions | d diff | 1-7/R filters",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -797,6 +846,16 @@ static int tui_run(void) {
                 tui.screen = TUI_SCREEN_BOARD;
             else
                 tui.running = 0;
+            break;
+        case '\t':
+            tui.screen = tui.screen == TUI_SCREEN_AGENTS ? TUI_SCREEN_BOARD
+                                                         : TUI_SCREEN_AGENTS;
+            break;
+        case 'a':
+            tui.screen = TUI_SCREEN_AGENTS;
+            break;
+        case 'b':
+            tui.screen = TUI_SCREEN_BOARD;
             break;
         case '\n':
         case KEY_ENTER:
@@ -874,17 +933,28 @@ static int tui_run(void) {
             break;
         case KEY_UP:
         case 'k':
-            tui.selected_task--;
-            clamp_selection(&tui);
+            if (tui.screen == TUI_SCREEN_AGENTS) {
+                tui.selected_agent--;
+                clamp_agent_selection(&tui);
+            } else {
+                tui.selected_task--;
+                clamp_selection(&tui);
+            }
             break;
         case KEY_DOWN:
         case 'j':
-            tui.selected_task++;
-            clamp_selection(&tui);
+            if (tui.screen == TUI_SCREEN_AGENTS) {
+                tui.selected_agent++;
+                clamp_agent_selection(&tui);
+            } else {
+                tui.selected_task++;
+                clamp_selection(&tui);
+            }
             break;
         case 'u':
             tui_load_board(&tui);
             clamp_selection(&tui);
+            clamp_agent_selection(&tui);
             break;
         case KEY_RESIZE:
             tui_set_status(&tui, "Resized");
@@ -1087,6 +1157,31 @@ static int tui_diff_smoke(const char *task_id) {
     return 0;
 }
 
+static int tui_agents_smoke(void) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui agents smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    printf("Agents: %zu\n", board.agents.count);
+    for (size_t i = 0; i < board.agents.count; i++) {
+        DispatchAgent *agent = &board.agents.items[i];
+        printf("%s %s %s session:%s current:%s workspace:%s\n", agent->name,
+               agent->runner, agent->archived ? "archived" : "enabled",
+               agent->session_id ? "yes" : "no",
+               agent->current_task ? agent->current_task : "-",
+               agent->last_workspace ? agent->last_workspace : "-");
+    }
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -1096,6 +1191,7 @@ static void print_tui_help(void) {
     puts("  --filter-smoke <filter>    print visible row count and exit");
     puts("  --action-smoke <action> <task-id> [actor]  run lifecycle action and exit");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
+    puts("  --agents-smoke             print agent dashboard data and exit");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -1114,6 +1210,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_action_smoke(argv[3], argv[4], argc == 6 ? argv[5] : "user");
     if (argc == 4 && strcmp(argv[2], "--diff-smoke") == 0)
         return tui_diff_smoke(argv[3]);
+    if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)
+        return tui_agents_smoke();
     if (argc != 2) {
         print_tui_help();
         return 1;

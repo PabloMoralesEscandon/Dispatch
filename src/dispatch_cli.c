@@ -862,14 +862,14 @@ static int cmd_agent_archive_restore(int argc, char **argv) {
         const char *task_id = NULL;
         const char *workspace_id = NULL;
         if (agent_has_active_task(&locked.board, agent, &task_id)) {
-            locked_board_close(&locked);
             fprintf(stderr, "Agent %s has active task %s\n", name, task_id);
+            locked_board_close(&locked);
             return 1;
         }
         if (agent_has_active_workspace(&locked.board, agent, &workspace_id)) {
-            locked_board_close(&locked);
             fprintf(stderr, "Agent %s has active workspace %s\n", name,
                     workspace_id);
+            locked_board_close(&locked);
             return 1;
         }
     }
