@@ -858,6 +858,7 @@ assert_contains "Usage: dispatch tui [--smoke]"
 expect_ok "$BIN" tui --smoke
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
+assert_contains "2 visible"
 
 install_home="$case_dir/completion-home"
 mkdir -p "$install_home"
