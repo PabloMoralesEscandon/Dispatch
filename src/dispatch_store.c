@@ -411,6 +411,7 @@ static json_t *agent_to_json(const DispatchAgent *agent) {
                         json_optional_string(agent->current_task));
     json_object_set_new(object, "last_workspace",
                         json_optional_string(agent->last_workspace));
+    json_object_set_new(object, "archived", json_boolean(agent->archived));
     json_object_set_new(object, "created_at",
                         json_time_or_null(agent->created_at));
     json_object_set_new(object, "updated_at",
@@ -663,6 +664,7 @@ static int load_agents(DispatchBoard *board, json_t *agents, char *error,
         const char *current_task = json_string_or(value, "current_task", NULL);
         const char *last_workspace =
             json_string_or(value, "last_workspace", NULL);
+        json_t *archived = json_object_get(value, "archived");
 
         DispatchAgent agent = {0};
         agent.name = store_strdup(name);
@@ -676,6 +678,8 @@ static int load_agents(DispatchBoard *board, json_t *agents, char *error,
         agent.current_task = current_task ? store_strdup(current_task) : NULL;
         agent.last_workspace =
             last_workspace ? store_strdup(last_workspace) : NULL;
+        agent.archived =
+            json_is_boolean(archived) ? json_boolean_value(archived) : 0;
         agent.created_at = json_time_or_zero(value, "created_at");
         agent.updated_at = json_time_or_zero(value, "updated_at");
 

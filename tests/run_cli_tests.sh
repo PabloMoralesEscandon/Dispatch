@@ -160,6 +160,7 @@ assert_contains ".dispatch/agents/codex-a"
 expect_ok "$BIN" agent show codex-a
 assert_contains "Name: codex-a"
 assert_contains "Runner: codex"
+assert_contains "Status: enabled"
 assert_contains "Model: gpt-test"
 assert_contains "Agent dir: .dispatch/agents/codex-a"
 assert_contains "Prompt: .dispatch/agents/codex-a/codex-a-PROMPT.md"
@@ -242,6 +243,29 @@ if [ -e .dispatch/agents/claude-a/run.sh ]; then
     fail "agent run script was created despite --no-run-script"
 fi
 
+expect_ok "$BIN" agent create --name archive-me --runner codex --no-run-script
+expect_ok "$BIN" agent archive archive-me
+assert_contains "Archived agent archive-me"
+
+expect_ok "$BIN" agent list
+assert_not_contains "archive-me"
+
+expect_ok "$BIN" agent list --all
+assert_contains "archive-me"
+assert_contains "archived"
+
+expect_ok "$BIN" agent show archive-me
+assert_contains "Status: archived"
+
+expect_fail "$BIN" agent command archive-me
+assert_contains "Agent archive-me is archived; restore it first"
+
+expect_ok "$BIN" agent restore archive-me
+assert_contains "Restored agent archive-me"
+
+expect_ok "$BIN" agent list
+assert_contains "archive-me"
+
 expect_ok "$BIN" group add Development --prefix DE
 assert_contains "Added group Development (DE)"
 
@@ -256,6 +280,9 @@ assert_contains "Added task DE-01"
 
 expect_ok "$BIN" agent session codex-a --session-id session-1 --current-task DE-01
 assert_contains "Updated agent session codex-a"
+
+expect_fail "$BIN" agent archive codex-a
+assert_contains "Agent codex-a has active task DE-01"
 
 expect_ok "$BIN" agent show codex-a
 assert_contains "Session ID: session-1"
@@ -764,6 +791,9 @@ expect_ok "$BIN" task add DE Root
 expect_ok "$BIN" task add QA Check
 expect_ok "$BIN" ready DE-01 --actor user
 expect_ok "$BIN" workspace create DE-01 --actor codex-a
+
+expect_fail "$BIN" agent archive codex-a
+assert_contains "Agent codex-a has active workspace"
 
 expect_ok "$BIN" completion candidates commands
 assert_line "completion"

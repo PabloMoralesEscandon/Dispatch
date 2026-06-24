@@ -220,8 +220,10 @@ group, agent, and workspace values.
 
 ```bash
 dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]
-dispatch agent list
+dispatch agent list [--all]
 dispatch agent show <name>
+dispatch agent archive <name>
+dispatch agent restore <name>
 dispatch agent command <name> [--print-command]
 dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]
 dispatch agent resume <name> [--print-command]
@@ -236,6 +238,11 @@ directory and receive those repository instructions normally. The optional
 `run.sh` starts the selected runner from the workflow directory. Agent
 directories are for prompt material, scratch notes, and local decisions; task
 state remains in Dispatch and product changes belong in task worktrees.
+
+`agent archive <name>` hides an inactive agent from the default `agent list`
+without deleting its record or history. Use `agent list --all` to include
+archived agents and `agent restore <name>` to enable one again. Dispatch refuses
+to archive agents that still have an active task or active workspace.
 
 `agent session` records runner session metadata on the agent record. The
 session ID identifies the runner session to resume, `current_task` records the

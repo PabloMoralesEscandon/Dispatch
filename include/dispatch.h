@@ -86,6 +86,7 @@ typedef struct {
     char *session_id;
     char *current_task;
     char *last_workspace;
+    int archived;
     time_t created_at;
     time_t updated_at;
 } DispatchAgent;

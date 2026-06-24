@@ -51,8 +51,10 @@ if working from another directory.
 ```bash
 dispatch init repo
 dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]
-dispatch agent list
+dispatch agent list [--all]
 dispatch agent show <name>
+dispatch agent archive <name>
+dispatch agent restore <name>
 dispatch agent command <name> [--print-command]
 dispatch workspace create <TASK-ID> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
 dispatch workspace list

@@ -715,8 +715,11 @@ static int cmd_agent_create(int argc, char **argv) {
 
 static int cmd_agent_list(int argc, char **argv) {
     (void)argv;
-    if (argc != 3) {
-        fprintf(stderr, "Usage: dispatch agent list\n");
+    int include_archived = 0;
+    if (argc == 4 && strcmp(argv[3], "--all") == 0)
+        include_archived = 1;
+    else if (argc != 3) {
+        fprintf(stderr, "Usage: dispatch agent list [--all]\n");
         return 1;
     }
 
@@ -730,11 +733,17 @@ static int cmd_agent_list(int argc, char **argv) {
         return 0;
     }
 
+    int printed = 0;
     for (size_t i = 0; i < board.agents.count; i++) {
         DispatchAgent *agent = &board.agents.items[i];
-        printf("%-16s %-8s %s\n", agent->name, agent->runner,
-               agent->agent_dir);
+        if (agent->archived && !include_archived)
+            continue;
+        printf("%-16s %-8s %-8s %s\n", agent->name, agent->runner,
+               agent->archived ? "archived" : "enabled", agent->agent_dir);
+        printed = 1;
     }
+    if (!printed)
+        printf("(no enabled agents)\n");
 
     dispatch_board_free(&board);
     return 0;
@@ -759,6 +768,7 @@ static int cmd_agent_show(int argc, char **argv) {
 
     printf("Name: %s\n", agent->name);
     printf("Runner: %s\n", agent->runner);
+    printf("Status: %s\n", agent->archived ? "archived" : "enabled");
     printf("Model: %s\n", agent->model ? agent->model : "-");
     printf("Agent dir: %s\n", agent->agent_dir);
     printf("Prompt: %s\n", agent->prompt_path);
@@ -772,6 +782,103 @@ static int cmd_agent_show(int argc, char **argv) {
     printf("Updated at: %ld\n", (long)agent->updated_at);
 
     dispatch_board_free(&board);
+    return 0;
+}
+
+static int agent_has_active_task(const DispatchBoard *board,
+                                 const DispatchAgent *agent,
+                                 const char **task_id) {
+    if (agent->current_task && agent->current_task[0]) {
+        if (task_id)
+            *task_id = agent->current_task;
+        return 1;
+    }
+
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        if (!task->assigned_to || strcmp(task->assigned_to, agent->name) != 0)
+            continue;
+        DispatchState state = dispatch_task_effective_state(board, task);
+        if (state == DISPATCH_STATE_DOING || state == DISPATCH_STATE_REVIEW) {
+            if (task_id)
+                *task_id = task->id;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int agent_has_active_workspace(const DispatchBoard *board,
+                                      const DispatchAgent *agent,
+                                      const char **workspace_id) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        const DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED ||
+            strcmp(workspace->actor, agent->name) != 0)
+            continue;
+        if (workspace_id)
+            *workspace_id = workspace->id;
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_agent_archive_restore(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: dispatch agent %s <name>\n", argv[2]);
+        return 1;
+    }
+
+    int archive = strcmp(argv[2], "archive") == 0;
+    const char *name = argv[3];
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+
+    DispatchAgent *agent = dispatch_board_find_agent(&locked.board, name);
+    if (!agent) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No agent named %s\n", name);
+        return 1;
+    }
+
+    if (archive) {
+        const char *task_id = NULL;
+        const char *workspace_id = NULL;
+        if (agent_has_active_task(&locked.board, agent, &task_id)) {
+            locked_board_close(&locked);
+            fprintf(stderr, "Agent %s has active task %s\n", name, task_id);
+            return 1;
+        }
+        if (agent_has_active_workspace(&locked.board, agent, &workspace_id)) {
+            locked_board_close(&locked);
+            fprintf(stderr, "Agent %s has active workspace %s\n", name,
+                    workspace_id);
+            return 1;
+        }
+    }
+
+    agent->archived = archive;
+    agent->updated_at = time(NULL);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        return 1;
+    }
+
+    printf("%s agent %s\n", archive ? "Archived" : "Restored", name);
+    DispatchLogField targets[] = {
+        {"agent", name},
+    };
+    DispatchLogField context[] = {
+        {"archived", bool_string(agent->archived)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "%s agent %s",
+             archive ? "Archived" : "Restored", name);
+    append_dispatch_log("user", "agent", archive ? "archive" : "restore",
+                        targets, 1, context, 1, message);
+    locked_board_close(&locked);
     return 0;
 }
 
@@ -842,6 +949,11 @@ static int cmd_agent_session(int argc, char **argv) {
         fprintf(stderr, "No agent named %s\n", name);
         return 1;
     }
+    if (agent->archived) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent %s is archived; restore it first\n", name);
+        return 1;
+    }
     if (current_task && !dispatch_board_find_task(&locked.board, current_task)) {
         locked_board_close(&locked);
         fprintf(stderr, "No task with id %s\n", current_task);
@@ -904,6 +1016,11 @@ static int cmd_agent_command(int argc, char **argv) {
         fprintf(stderr, "No agent named %s\n", argv[3]);
         return 1;
     }
+    if (agent->archived) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "Agent %s is archived; restore it first\n", argv[3]);
+        return 1;
+    }
 
     char *command =
         agent_command_for(agent->runner, agent->model, agent->prompt_path);
@@ -932,6 +1049,11 @@ static int cmd_agent_resume(int argc, char **argv) {
     if (!agent) {
         locked_board_close(&locked);
         fprintf(stderr, "No agent named %s\n", argv[3]);
+        return 1;
+    }
+    if (agent->archived) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent %s is archived; restore it first\n", argv[3]);
         return 1;
     }
 
@@ -1025,11 +1147,17 @@ static int cmd_agent(int argc, char **argv) {
         return cmd_agent_session(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "resume") == 0)
         return cmd_agent_resume(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "archive") == 0)
+        return cmd_agent_archive_restore(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "restore") == 0)
+        return cmd_agent_archive_restore(argc, argv);
 
     fprintf(stderr,
             "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
-    fprintf(stderr, "       dispatch agent list\n");
+    fprintf(stderr, "       dispatch agent list [--all]\n");
     fprintf(stderr, "       dispatch agent show <name>\n");
+    fprintf(stderr, "       dispatch agent archive <name>\n");
+    fprintf(stderr, "       dispatch agent restore <name>\n");
     fprintf(stderr, "       dispatch agent command <name> [--print-command]\n");
     fprintf(stderr,
             "       dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]\n");
@@ -1588,6 +1716,14 @@ static int cmd_workspace_create(int argc, char **argv) {
         return 1;
     }
     DispatchBoard *board = &locked.board;
+
+    DispatchAgent *actor_agent = dispatch_board_find_agent(board, actor);
+    if (actor_agent && actor_agent->archived) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent %s is archived; restore it first\n", actor);
+        free(workflow_dir);
+        return 1;
+    }
 
     DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task) {
@@ -2698,8 +2834,8 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "\n"
         "_dispatch_agent_command() {\n"
         "  if (( CURRENT == 3 )); then\n"
-        "    compadd -- create list show command session resume\n"
-        "  elif [[ ${words[3]} == show || ${words[3]} == command || ${words[3]} == session || ${words[3]} == resume ]] && "
+        "    compadd -- create list show command session resume archive restore\n"
+        "  elif [[ ${words[3]} == show || ${words[3]} == command || ${words[3]} == session || ${words[3]} == resume || ${words[3]} == archive || ${words[3]} == restore ]] && "
         "(( CURRENT == 4 )); then\n"
         "    _dispatch_compadd_candidates agents\n"
         "  fi\n"
@@ -2809,6 +2945,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "        case \"$sub\" in\n"
         "          create) _dispatch_complete_words \"--name --runner --model "
         "--no-run-script --print-command\" ;;\n"
+        "          list) _dispatch_complete_words \"--all\" ;;\n"
         "          command|resume) _dispatch_complete_words \"--print-command\" ;;\n"
         "        esac\n"
         "        ;;\n"
@@ -2879,8 +3016,8 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      ;;\n"
         "    agent)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
-        "        _dispatch_complete_words \"create list show command session resume\"\n"
-        "      elif [[ ( $sub == show || $sub == command || $sub == session || $sub == resume ) && "
+        "        _dispatch_complete_words \"create list show command session resume archive restore\"\n"
+        "      elif [[ ( $sub == show || $sub == command || $sub == session || $sub == resume || $sub == archive || $sub == restore ) && "
         "$COMP_CWORD -eq 3 ]]; then\n"
         "        _dispatch_complete_candidates agents\n"
         "      fi\n"
@@ -2964,10 +3101,10 @@ static int cmd_completion_fish(int argc, char **argv) {
         "__fish_seen_subcommand_from add list show' -a '(__dispatch_candidates tasks)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and not "
-        "__fish_seen_subcommand_from create list show command session resume' -a "
-        "'create list show command session resume'\n"
+        "__fish_seen_subcommand_from create list show command session resume archive restore' -a "
+        "'create list show command session resume archive restore'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
-        "__fish_seen_subcommand_from show command session resume' -a "
+        "__fish_seen_subcommand_from show command session resume archive restore' -a "
         "'(__dispatch_candidates agents)'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from workspace; and "
@@ -3024,6 +3161,8 @@ static int cmd_completion_fish(int argc, char **argv) {
         "__fish_seen_subcommand_from create' -l no-run-script\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
         "__fish_seen_subcommand_from create' -l print-command\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
+        "__fish_seen_subcommand_from list' -l all\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
         "__fish_seen_subcommand_from command resume' -l print-command\n",
         stdout);
@@ -3660,6 +3799,13 @@ static int cmd_ready(int argc, char **argv) {
     if (!locked_board_load_or_error(&locked))
         return 1;
     DispatchBoard *board = &locked.board;
+
+    DispatchAgent *actor_agent = dispatch_board_find_agent(board, actor);
+    if (actor_agent && actor_agent->archived) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Agent %s is archived; restore it first\n", actor);
+        return 1;
+    }
 
     DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task || !dispatch_task_mark_ready(board, task, actor)) {
