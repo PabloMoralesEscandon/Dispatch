@@ -17,7 +17,9 @@ typedef enum {
     TUI_SCREEN_AGENTS,
     TUI_SCREEN_AGENT_INSPECTOR,
     TUI_SCREEN_TASK_FORM,
-    TUI_SCREEN_GROUP_FORM
+    TUI_SCREEN_GROUP_FORM,
+    TUI_SCREEN_WORKSPACES,
+    TUI_SCREEN_WORKSPACE_INSPECTOR
 } DispatchTuiScreen;
 
 typedef enum {
@@ -45,11 +47,13 @@ typedef struct {
     int search_active;
     int selected_task;
     int selected_agent;
+    int selected_workspace;
     int show_help;
     int running;
 } DispatchTui;
 
 static DispatchTask *selected_visible_task(DispatchTui *tui);
+static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
 
 static int title_starts_with_dispatch_id_like(const char *title) {
     if (!title)
@@ -263,12 +267,50 @@ static void clamp_agent_selection(DispatchTui *tui) {
     }
 }
 
+static int visible_workspace_count(const DispatchTui *tui) {
+    if (!tui->board_loaded)
+        return 0;
+    int count = 0;
+    for (size_t i = 0; i < tui->board.workspaces.count; i++) {
+        if (tui->board.workspaces.items[i].state != DISPATCH_WORKSPACE_REMOVED)
+            count++;
+    }
+    return count;
+}
+
+static void clamp_workspace_selection(DispatchTui *tui) {
+    int count = visible_workspace_count(tui);
+    if (count <= 0) {
+        tui->selected_workspace = 0;
+    } else if (tui->selected_workspace >= count) {
+        tui->selected_workspace = count - 1;
+    } else if (tui->selected_workspace < 0) {
+        tui->selected_workspace = 0;
+    }
+}
+
 static DispatchAgent *selected_agent(DispatchTui *tui) {
     if (!tui->board_loaded || tui->board.agents.count == 0 ||
         tui->selected_agent < 0 ||
         (size_t)tui->selected_agent >= tui->board.agents.count)
         return NULL;
     return &tui->board.agents.items[tui->selected_agent];
+}
+
+static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui) {
+    if (!tui->board_loaded)
+        return NULL;
+
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        if (visible_index == tui->selected_workspace)
+            return workspace;
+        visible_index++;
+    }
+    return NULL;
 }
 
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent) {
@@ -359,6 +401,45 @@ static char *diff_command_for_task(const DispatchBoard *board,
     free(repo_q);
     free(commit_q);
     return command;
+}
+
+static int path_has_git_metadata(const char *path) {
+    if (!path || !path[0])
+        return 0;
+    char *git_path = malloc(strlen(path) + strlen("/.git") + 1);
+    if (!git_path) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    sprintf(git_path, "%s/.git", path);
+    int present = access(git_path, F_OK) == 0;
+    free(git_path);
+    return present;
+}
+
+static int workspace_is_dirty(const DispatchWorkspace *workspace) {
+    if (!workspace || !workspace->path || !path_has_git_metadata(workspace->path))
+        return 0;
+
+    char *path_q = tui_shell_quote(workspace->path);
+    size_t size = strlen("git -C  status --porcelain 2>/dev/null") +
+                  strlen(path_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "git -C %s status --porcelain 2>/dev/null",
+             path_q);
+    free(path_q);
+
+    FILE *pipe = popen(command, "r");
+    free(command);
+    if (!pipe)
+        return 1;
+    int ch = fgetc(pipe);
+    int status = pclose(pipe);
+    return ch != EOF || status != 0;
 }
 
 static void run_selected_task_diff(DispatchTui *tui) {
@@ -869,6 +950,98 @@ static void run_dependency_prompt(DispatchTui *tui, int add) {
     tui_set_status(tui, message);
 }
 
+static void run_external_command_in_terminal(DispatchTui *tui,
+                                             const char *command,
+                                             const char *label) {
+    def_prog_mode();
+    endwin();
+    int result = system(command);
+    reset_prog_mode();
+    refresh();
+
+    char message[256];
+    snprintf(message, sizeof(message), "%s exited with status %d", label,
+             result);
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+}
+
+static void run_workspace_create_form(DispatchTui *tui) {
+    char task_id[64];
+    char actor[64];
+    if (!prompt_line("Workspace task ID: ", task_id, sizeof(task_id), ""))
+        return;
+    if (!prompt_line("Actor: ", actor, sizeof(actor), tui->actor))
+        return;
+    int sequence = prompt_yes_no("Create sequence workspace? [y/N]: ", 0);
+
+    char *task_q = tui_shell_quote(task_id);
+    char *actor_q = tui_shell_quote(actor);
+    size_t size = strlen("./dispatch workspace create  --actor  --sequence") +
+                  strlen(task_q) + strlen(actor_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "./dispatch workspace create %s --actor %s%s",
+             task_q, actor_q, sequence ? " --sequence" : "");
+    free(task_q);
+    free(actor_q);
+
+    run_external_command_in_terminal(tui, command, "Workspace create");
+    free(command);
+    clamp_workspace_selection(tui);
+}
+
+static void run_workspace_remove_form(DispatchTui *tui, int force) {
+    DispatchWorkspace *workspace = selected_visible_workspace(tui);
+    if (!workspace) {
+        tui_set_status(tui, "No selected workspace");
+        return;
+    }
+
+    char confirm[64];
+    char label[128];
+    snprintf(label, sizeof(label), "Type %s to remove: ", workspace->task_id);
+    if (!prompt_line(label, confirm, sizeof(confirm), ""))
+        return;
+    if (strcmp(confirm, workspace->task_id) != 0) {
+        tui_set_status(tui, "Workspace removal cancelled");
+        return;
+    }
+
+    char *target_q = tui_shell_quote(workspace->task_id);
+    size_t size = strlen("./dispatch workspace remove  --force") +
+                  strlen(target_q) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(command, size, "./dispatch workspace remove %s%s", target_q,
+             force ? " --force" : "");
+    free(target_q);
+
+    run_external_command_in_terminal(tui, command, "Workspace remove");
+    free(command);
+    clamp_workspace_selection(tui);
+}
+
+static void run_workspace_prune_form(DispatchTui *tui) {
+    char confirm[32];
+    if (!prompt_line("Type prune to remove done clean workspaces: ", confirm,
+                     sizeof(confirm), ""))
+        return;
+    if (strcmp(confirm, "prune") != 0) {
+        tui_set_status(tui, "Workspace prune cancelled");
+        return;
+    }
+    run_external_command_in_terminal(
+        tui, "./dispatch workspace prune --done", "Workspace prune");
+    clamp_workspace_selection(tui);
+}
+
 static int update_agent_session_metadata(const char *name,
                                          const char *session_id,
                                          const char *current_task,
@@ -1068,6 +1241,7 @@ static void tui_render_help(void) {
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
         "Tab/a    switch to agents",
+        "w        switch to workspaces",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
@@ -1125,6 +1299,45 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         draw_truncated(y++, 0, cols, line);
         if ((int)i == tui->selected_agent)
             attroff(A_REVERSE);
+    }
+}
+
+static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
+                                int cols) {
+    int y = start_y;
+    int visible_index = 0;
+    if (visible_workspace_count(tui) == 0) {
+        draw_truncated(y, 0, cols, "(no active workspaces)");
+        return;
+    }
+
+    draw_truncated(y++, 0, cols,
+                   "Task     Task state  Workspace  Actor       Dirty  Git      Branch / Path");
+    for (size_t i = 0; i < tui->board.workspaces.count && y < rows - 1; i++) {
+        DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        DispatchTask *task =
+            dispatch_board_find_task(&tui->board, workspace->task_id);
+        const char *task_state =
+            task ? dispatch_state_name(dispatch_task_effective_state(&tui->board,
+                                                                     task))
+                 : "missing";
+        int git_present = path_has_git_metadata(workspace->path);
+        int dirty = workspace_is_dirty(workspace);
+        char line[1200];
+        snprintf(line, sizeof(line), "%-8s %-11s %-10s %-11s %-6s %-8s %s  %s",
+                 workspace->task_id, task_state,
+                 dispatch_workspace_state_name(workspace->state),
+                 workspace->actor, dirty ? "yes" : "no",
+                 git_present ? "present" : "missing", workspace->branch,
+                 workspace->path);
+        if (visible_index == tui->selected_workspace)
+            attron(A_REVERSE);
+        draw_truncated(y++, 0, cols, line);
+        if (visible_index == tui->selected_workspace)
+            attroff(A_REVERSE);
+        visible_index++;
     }
 }
 
@@ -1280,6 +1493,44 @@ static void draw_agent_inspector(DispatchTui *tui, int rows, int cols) {
         draw_line(y, rows, cols, "  -", "");
 }
 
+static void draw_workspace_inspector(DispatchTui *tui, int rows, int cols) {
+    DispatchWorkspace *workspace = selected_visible_workspace(tui);
+    if (!workspace) {
+        draw_truncated(2, 0, cols, "No selected workspace.");
+        return;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&tui->board,
+                                                  workspace->task_id);
+    const char *task_state =
+        task ? dispatch_state_name(dispatch_task_effective_state(&tui->board,
+                                                                 task))
+             : "missing";
+    int y = 2;
+    char line[1024];
+    snprintf(line, sizeof(line), "%s  %s", workspace->task_id,
+             workspace->branch);
+    attron(A_BOLD);
+    y = draw_line(y, rows, cols, "", line);
+    attroff(A_BOLD);
+
+    y = draw_line(y + 1, rows, cols, "Task state:", task_state);
+    y = draw_line(y, rows, cols, "Workspace state:",
+                  dispatch_workspace_state_name(workspace->state));
+    y = draw_line(y, rows, cols, "Actor:", workspace->actor);
+    y = draw_line(y, rows, cols, "Path:", workspace->path);
+    y = draw_line(y, rows, cols, "Repo:", workspace->repo_path);
+    y = draw_line(y, rows, cols, "Branch:", workspace->branch);
+    y = draw_line(y, rows, cols, "Git worktree:",
+                  path_has_git_metadata(workspace->path) ? "present" : "missing");
+    y = draw_line(y, rows, cols, "Dirty:",
+                  workspace_is_dirty(workspace) ? "yes" : "no");
+    y = draw_string_list(y + 1, rows, cols, "Sequence tasks:",
+                         &workspace->sequence_tasks);
+    y = draw_line(y, rows, cols, "Review gate:",
+                  workspace->review_gate ? workspace->review_gate : "-");
+}
+
 static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     int visible_index = 0;
@@ -1360,6 +1611,10 @@ static void tui_render(DispatchTui *tui) {
                              ? "Dispatch TUI - New Task"
                        : tui->screen == TUI_SCREEN_GROUP_FORM
                              ? "Dispatch TUI - New Group"
+                       : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
+                             ? "Dispatch TUI - Workspace"
+                       : tui->screen == TUI_SCREEN_WORKSPACES
+                             ? "Dispatch TUI - Workspaces"
                        : tui->screen == TUI_SCREEN_AGENTS
                              ? "Dispatch TUI - Agents"
                              : "Dispatch TUI - Board");
@@ -1371,6 +1626,15 @@ static void tui_render(DispatchTui *tui) {
         draw_task_inspector(tui, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR) {
         draw_agent_inspector(tui, rows, cols);
+    } else if (tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR) {
+        draw_workspace_inspector(tui, rows, cols);
+    } else if (tui->screen == TUI_SCREEN_WORKSPACES) {
+        char line[512];
+        snprintf(line, sizeof(line),
+                 "Workspaces: %d active    n create    x remove    X force remove    P prune done",
+                 visible_workspace_count(tui));
+        draw_truncated(2, 0, cols, line);
+        draw_workspace_rows(tui, 4, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENTS) {
         char line[512];
         snprintf(line, sizeof(line),
@@ -1426,9 +1690,13 @@ static void tui_render(DispatchTui *tui) {
                      ? " %s | q/Esc back | > add dep | < remove dep | d diff"
                      : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
                            ? " %s | q/Esc back | e edit prompt | x clear session"
+                     : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
+                           ? " %s | q/Esc back | x remove | X force remove"
+                     : tui->screen == TUI_SCREEN_WORKSPACES
+                           ? " %s | b board | a agents | n create | x/X remove | P prune"
                      : tui->screen == TUI_SCREEN_AGENTS
                            ? " %s | A all/enabled | z archive/restore | Enter/i inspect"
-                           : " %s | Tab/a agents | n task | + group | r/s/f/v actions | d diff",
+                           : " %s | Tab/a agents | w workspaces | n task | + group | d diff",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -1464,6 +1732,8 @@ static int tui_run(void) {
                 tui.screen = TUI_SCREEN_BOARD;
             else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
                 tui.screen = TUI_SCREEN_AGENTS;
+            else if (tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
+                tui.screen = TUI_SCREEN_WORKSPACES;
             else
                 tui.running = 0;
             break;
@@ -1477,6 +1747,9 @@ static int tui_run(void) {
         case 'b':
             tui.screen = TUI_SCREEN_BOARD;
             break;
+        case 'w':
+            tui.screen = TUI_SCREEN_WORKSPACES;
+            break;
         case '\n':
         case KEY_ENTER:
         case 'i':
@@ -1486,6 +1759,10 @@ static int tui_run(void) {
             } else if (tui.screen == TUI_SCREEN_AGENTS && selected_agent(&tui)) {
                 tui.screen = TUI_SCREEN_AGENT_INSPECTOR;
                 tui_set_status(&tui, "Inspecting agent");
+            } else if (tui.screen == TUI_SCREEN_WORKSPACES &&
+                       selected_visible_workspace(&tui)) {
+                tui.screen = TUI_SCREEN_WORKSPACE_INSPECTOR;
+                tui_set_status(&tui, "Inspecting workspace");
             }
             break;
         case '?':
@@ -1523,6 +1800,8 @@ static int tui_run(void) {
                 tui.screen = TUI_SCREEN_TASK_FORM;
                 run_task_form(&tui);
                 tui.screen = TUI_SCREEN_BOARD;
+            } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
+                run_workspace_create_form(&tui);
             }
             break;
         case '+':
@@ -1555,6 +1834,18 @@ static int tui_run(void) {
         case 'x':
             if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
                 clear_selected_agent_session(&tui);
+            else if (tui.screen == TUI_SCREEN_WORKSPACES ||
+                     tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
+                run_workspace_remove_form(&tui, 0);
+            break;
+        case 'X':
+            if (tui.screen == TUI_SCREEN_WORKSPACES ||
+                tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
+                run_workspace_remove_form(&tui, 1);
+            break;
+        case 'P':
+            if (tui.screen == TUI_SCREEN_WORKSPACES)
+                run_workspace_prune_form(&tui);
             break;
         case 'e':
             if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
@@ -1592,6 +1883,9 @@ static int tui_run(void) {
             } else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR) {
                 tui.screen = TUI_SCREEN_AGENTS;
                 tui_set_status(&tui, "Agents");
+            } else if (tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR) {
+                tui.screen = TUI_SCREEN_WORKSPACES;
+                tui_set_status(&tui, "Workspaces");
             } else {
                 tui.search_active = 0;
                 tui.search[0] = '\0';
@@ -1604,6 +1898,9 @@ static int tui_run(void) {
             if (tui.screen == TUI_SCREEN_AGENTS) {
                 tui.selected_agent--;
                 clamp_agent_selection(&tui);
+            } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
+                tui.selected_workspace--;
+                clamp_workspace_selection(&tui);
             } else {
                 tui.selected_task--;
                 clamp_selection(&tui);
@@ -1614,6 +1911,9 @@ static int tui_run(void) {
             if (tui.screen == TUI_SCREEN_AGENTS) {
                 tui.selected_agent++;
                 clamp_agent_selection(&tui);
+            } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
+                tui.selected_workspace++;
+                clamp_workspace_selection(&tui);
             } else {
                 tui.selected_task++;
                 clamp_selection(&tui);
@@ -1623,6 +1923,7 @@ static int tui_run(void) {
             tui_load_board(&tui);
             clamp_selection(&tui);
             clamp_agent_selection(&tui);
+            clamp_workspace_selection(&tui);
             break;
         case KEY_RESIZE:
             tui_set_status(&tui, "Resized");
@@ -2011,6 +2312,87 @@ static int tui_dependency_smoke(const char *action, const char *dependency_id,
     return 0;
 }
 
+static int tui_workspaces_smoke(void) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui workspaces smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    int live = 0;
+    for (size_t i = 0; i < board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        live++;
+    }
+    printf("Workspaces: %d\n", live);
+    for (size_t i = 0; i < board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        DispatchTask *task = dispatch_board_find_task(&board,
+                                                      workspace->task_id);
+        const char *task_state =
+            task ? dispatch_state_name(dispatch_task_effective_state(&board,
+                                                                     task))
+                 : "missing";
+        printf("%s %s %s actor:%s branch:%s git:%s dirty:%s path:%s\n",
+               workspace->task_id, task_state,
+               dispatch_workspace_state_name(workspace->state),
+               workspace->actor, workspace->branch,
+               path_has_git_metadata(workspace->path) ? "present" : "missing",
+               workspace_is_dirty(workspace) ? "yes" : "no",
+               workspace->path);
+    }
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int tui_workspace_inspect_smoke(const char *target) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui workspace inspect smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchWorkspace *workspace = dispatch_board_find_workspace(&board, target);
+    if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
+        fprintf(stderr, "No workspace for %s\n", target);
+        dispatch_board_free(&board);
+        return 1;
+    }
+    DispatchTask *task = dispatch_board_find_task(&board, workspace->task_id);
+    printf("Task: %s\n", workspace->task_id);
+    printf("Task state: %s\n",
+           task ? dispatch_state_name(dispatch_task_effective_state(&board,
+                                                                    task))
+                : "missing");
+    printf("Workspace state: %s\n",
+           dispatch_workspace_state_name(workspace->state));
+    printf("Actor: %s\n", workspace->actor);
+    printf("Branch: %s\n", workspace->branch);
+    printf("Path: %s\n", workspace->path);
+    printf("Git worktree: %s\n",
+           path_has_git_metadata(workspace->path) ? "present" : "missing");
+    printf("Dirty: %s\n", workspace_is_dirty(workspace) ? "yes" : "no");
+    printf("Sequence tasks: %zu\n", workspace->sequence_tasks.count);
+    printf("Review gate: %s\n",
+           workspace->review_gate ? workspace->review_gate : "-");
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -2028,6 +2410,8 @@ static void print_tui_help(void) {
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
+    puts("  --workspaces-smoke          print workspace dashboard data and exit");
+    puts("  --workspace-inspect-smoke <task-id-or-workspace>");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -2063,6 +2447,10 @@ int dispatch_tui_main(int argc, char **argv) {
                                     argv[7]);
     if (argc == 6 && strcmp(argv[2], "--dependency-smoke") == 0)
         return tui_dependency_smoke(argv[3], argv[4], argv[5]);
+    if (argc == 3 && strcmp(argv[2], "--workspaces-smoke") == 0)
+        return tui_workspaces_smoke();
+    if (argc == 4 && strcmp(argv[2], "--workspace-inspect-smoke") == 0)
+        return tui_workspace_inspect_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;

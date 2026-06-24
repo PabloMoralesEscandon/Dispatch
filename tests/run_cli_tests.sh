@@ -639,6 +639,12 @@ assert_contains "active"
 assert_contains "Codex_A"
 assert_contains "agent/codex_a/DE-01"
 
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "Workspaces: 1"
+assert_contains "DE-01 ready active actor:Codex_A"
+assert_contains "git:present"
+assert_contains "dirty:no"
+
 expect_ok "$BIN" workspace show DE-01
 assert_contains "Task: DE-01"
 assert_contains "Task state: ready"
@@ -646,6 +652,13 @@ assert_contains "Workspace state: active"
 assert_contains "Actor: Codex_A"
 assert_contains "Branch: agent/codex_a/DE-01"
 assert_contains "Git worktree: present"
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-01
+assert_contains "Task: DE-01"
+assert_contains "Workspace state: active"
+assert_contains "Actor: Codex_A"
+assert_contains "Git worktree: present"
+assert_contains "Dirty: no"
 
 expect_ok "$BIN" show DE-01
 assert_contains "Workspace actor: Codex_A"
