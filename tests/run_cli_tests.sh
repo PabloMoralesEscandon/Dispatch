@@ -860,6 +860,12 @@ assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
 assert_contains "2 visible"
 
+expect_ok "$BIN" tui --inspect-smoke DE-01
+assert_contains "Task: DE-01"
+assert_contains "Title: Root"
+assert_contains "Requires review: yes"
+assert_contains "Workspace: DE-01"
+
 install_home="$case_dir/completion-home"
 mkdir -p "$install_home"
 HOME="$install_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH=/no-such-dir expect_ok "$BIN" completion install fish

@@ -8,9 +8,15 @@
 #include "dispatch.h"
 #include "dispatch_store.h"
 
+typedef enum {
+    TUI_SCREEN_BOARD,
+    TUI_SCREEN_TASK_INSPECTOR
+} DispatchTuiScreen;
+
 typedef struct {
     DispatchBoard board;
     int board_loaded;
+    DispatchTuiScreen screen;
     char status[256];
     char search[128];
     int search_active;
@@ -117,6 +123,33 @@ static void clamp_selection(DispatchTui *tui) {
     }
 }
 
+static DispatchTask *selected_visible_task(DispatchTui *tui) {
+    if (!tui->board_loaded)
+        return NULL;
+
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.tasks.count; i++) {
+        DispatchTask *task = &tui->board.tasks.items[i];
+        if (!task_is_visible(&tui->board, task, tui->search))
+            continue;
+        if (visible_index == tui->selected_task)
+            return task;
+        visible_index++;
+    }
+    return NULL;
+}
+
+static DispatchWorkspace *workspace_for_task(DispatchBoard *board,
+                                             const char *task_id) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (strcmp(workspace->task_id, task_id) == 0 &&
+            workspace->state != DISPATCH_WORKSPACE_REMOVED)
+            return workspace;
+    }
+    return NULL;
+}
+
 static void draw_truncated(int y, int x, int width, const char *text) {
     if (width <= 0)
         return;
@@ -134,6 +167,8 @@ static void tui_render_help(void) {
         "q        quit",
         "?        toggle help",
         "R        reload board",
+        "Enter/i  inspect selected task",
+        "Esc/q    close inspector",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
@@ -160,6 +195,111 @@ static void tui_render_help(void) {
         attron(A_REVERSE);
         draw_truncated(top + i + 1, left + 2, width - 4, lines[i]);
         attroff(A_REVERSE);
+    }
+}
+
+static int draw_line(int y, int rows, int cols, const char *label,
+                     const char *value) {
+    if (y >= rows - 1)
+        return y;
+    char line[1024];
+    snprintf(line, sizeof(line), "%s%s%s", label ? label : "",
+             label && label[0] ? " " : "", value ? value : "-");
+    draw_truncated(y, 0, cols, line);
+    return y + 1;
+}
+
+static int draw_string_list(int y, int rows, int cols, const char *label,
+                            const DispatchStringList *list) {
+    if (list->count == 0)
+        return draw_line(y, rows, cols, label, "-");
+
+    char line[1024];
+    snprintf(line, sizeof(line), "%s", label);
+    size_t used = strlen(line);
+    for (size_t i = 0; i < list->count && used + 2 < sizeof(line); i++) {
+        int written = snprintf(line + used, sizeof(line) - used, "%s%s",
+                               i == 0 ? " " : ",", list->items[i]);
+        if (written < 0)
+            break;
+        used += (size_t)written;
+    }
+    return draw_line(y, rows, cols, "", line);
+}
+
+static int draw_blocked_by(int y, int rows, int cols, DispatchBoard *board,
+                           const char *task_id) {
+    char line[1024] = "Blocks:";
+    size_t used = strlen(line);
+    int count = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *candidate = &board->tasks.items[i];
+        for (size_t dep = 0; dep < candidate->depends_on.count; dep++) {
+            if (strcmp(candidate->depends_on.items[dep], task_id) != 0)
+                continue;
+            int written = snprintf(line + used, sizeof(line) - used, " %s",
+                                   candidate->id);
+            if (written > 0)
+                used += (size_t)written;
+            count++;
+            break;
+        }
+    }
+    if (count == 0)
+        snprintf(line, sizeof(line), "Blocks: -");
+    return draw_line(y, rows, cols, "", line);
+}
+
+static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        draw_truncated(2, 0, cols, "No selected task.");
+        return;
+    }
+
+    char line[1024];
+    int y = 2;
+    snprintf(line, sizeof(line), "%s  %s", task->id, task->title);
+    attron(A_BOLD);
+    y = draw_line(y, rows, cols, "", line);
+    attroff(A_BOLD);
+
+    y = draw_line(y + 1, rows, cols, "Description:", task->description);
+    y = draw_line(y, rows, cols, "Group:", task->group);
+    y = draw_line(y, rows, cols, "State:",
+                  dispatch_state_name(dispatch_task_effective_state(
+                      &tui->board, task)));
+    y = draw_line(y, rows, cols, "Requires review:",
+                  task->requires_review ? "yes" : "no");
+    y = draw_line(y, rows, cols, "Assigned to:",
+                  task->assigned_to ? task->assigned_to : "-");
+    y = draw_line(y, rows, cols, "Started by:",
+                  task->started_by ? task->started_by : "-");
+    y = draw_line(y, rows, cols, "Completed by:",
+                  task->completed_by ? task->completed_by : "-");
+    y = draw_string_list(y, rows, cols, "Depends on:", &task->depends_on);
+    y = draw_blocked_by(y, rows, cols, &tui->board, task->id);
+    y = draw_string_list(y, rows, cols, "Commits:", &task->commits);
+
+    DispatchWorkspace *workspace = workspace_for_task(&tui->board, task->id);
+    if (workspace) {
+        y = draw_line(y + 1, rows, cols, "Workspace actor:", workspace->actor);
+        y = draw_line(y, rows, cols, "Workspace path:", workspace->path);
+        y = draw_line(y, rows, cols, "Workspace branch:", workspace->branch);
+    }
+
+    y = draw_line(y + 1, rows, cols, "History:", "");
+    if (task->history.count == 0) {
+        y = draw_line(y, rows, cols, "  -", "");
+    } else {
+        for (size_t i = 0; i < task->history.count && y < rows - 1; i++) {
+            DispatchHistoryEntry *entry = &task->history.items[i];
+            snprintf(line, sizeof(line), "  %s by %s%s%s", entry->action,
+                     entry->actor,
+                     entry->note && entry->note[0] ? ": " : "",
+                     entry->note && entry->note[0] ? entry->note : "");
+            y = draw_line(y, rows, cols, "", line);
+        }
     }
 }
 
@@ -234,11 +374,16 @@ static void tui_render(DispatchTui *tui) {
     clamp_selection(tui);
 
     attron(A_BOLD);
-    draw_truncated(0, 0, cols, "Dispatch TUI - Board");
+    draw_truncated(0, 0, cols,
+                   tui->screen == TUI_SCREEN_TASK_INSPECTOR
+                       ? "Dispatch TUI - Task"
+                       : "Dispatch TUI - Board");
     attroff(A_BOLD);
 
     if (!tui->board_loaded) {
         draw_truncated(2, 0, cols, "Board not loaded.");
+    } else if (tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
+        draw_task_inspector(tui, rows, cols);
     } else {
         char line[512];
         snprintf(line, sizeof(line), "Board: %s    Repo: %s", tui->board.name,
@@ -273,7 +418,9 @@ static void tui_render(DispatchTui *tui) {
         mvhline(rows - 1, 0, ' ', cols);
         char status[512];
         snprintf(status, sizeof(status),
-                 " %s | q quit | ? help | R reload | / search | j/k move",
+                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
+                     ? " %s | q/Esc back | ? help | R reload"
+                     : " %s | q quit | Enter/i inspect | ? help | R reload | / search | j/k move",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
         attroff(A_REVERSE);
@@ -305,7 +452,18 @@ static int tui_run(void) {
         int ch = getch();
         switch (ch) {
         case 'q':
-            tui.running = 0;
+            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
+                tui.screen = TUI_SCREEN_BOARD;
+            else
+                tui.running = 0;
+            break;
+        case '\n':
+        case KEY_ENTER:
+        case 'i':
+            if (tui.screen == TUI_SCREEN_BOARD && selected_visible_task(&tui)) {
+                tui.screen = TUI_SCREEN_TASK_INSPECTOR;
+                tui_set_status(&tui, "Inspecting task");
+            }
             break;
         case '?':
             tui.show_help = !tui.show_help;
@@ -315,10 +473,15 @@ static int tui_run(void) {
             tui_set_status(&tui, "Search");
             break;
         case 27:
-            tui.search_active = 0;
-            tui.search[0] = '\0';
-            tui.selected_task = 0;
-            tui_set_status(&tui, "Search cleared");
+            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
+                tui.screen = TUI_SCREEN_BOARD;
+                tui_set_status(&tui, "Board");
+            } else {
+                tui.search_active = 0;
+                tui.search[0] = '\0';
+                tui.selected_task = 0;
+                tui_set_status(&tui, "Search cleared");
+            }
             break;
         case KEY_UP:
         case 'k':
@@ -383,6 +546,40 @@ static int tui_smoke(void) {
     return 0;
 }
 
+static int tui_inspect_smoke(const char *task_id) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui inspect smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        fprintf(stderr, "No task with id %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Task: %s\n", task->id);
+    printf("Title: %s\n", task->title);
+    printf("State: %s\n",
+           dispatch_state_name(dispatch_task_effective_state(&board, task)));
+    printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
+    printf("Depends on: %zu\n", task->depends_on.count);
+    printf("Commits: %zu\n", task->commits.count);
+    printf("History: %zu\n", task->history.count);
+    DispatchWorkspace *workspace = workspace_for_task(&board, task->id);
+    printf("Workspace: %s\n", workspace ? workspace->id : "-");
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -398,6 +595,8 @@ int dispatch_tui_main(int argc, char **argv) {
     }
     if (argc == 3 && strcmp(argv[2], "--smoke") == 0)
         return tui_smoke();
+    if (argc == 4 && strcmp(argv[2], "--inspect-smoke") == 0)
+        return tui_inspect_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;
