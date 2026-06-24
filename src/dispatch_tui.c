@@ -891,6 +891,8 @@ static int tui_inspect_smoke(const char *task_id) {
     printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
     printf("Depends on: %zu\n", task->depends_on.count);
     printf("Commits: %zu\n", task->commits.count);
+    for (size_t i = 0; i < task->commits.count; i++)
+        printf("Commit: %s\n", task->commits.items[i]);
     printf("History: %zu\n", task->history.count);
     DispatchWorkspace *workspace = workspace_for_task(&board, task->id);
     printf("Workspace: %s\n", workspace ? workspace->id : "-");
