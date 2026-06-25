@@ -184,6 +184,8 @@ expect_ok "$BIN" agent command codex-a
 assert_contains "codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/codex-a-PROMPT.md')\""
 expect_ok "$BIN" tui --agent-run-command-smoke codex-a
 assert_contains ".dispatch/agents/codex-a/run.sh"
+expect_ok "$BIN" tui --osc52-smoke "run agent"
+assert_contains "OSC52 payload: cnVuIGFnZW50"
 
 expect_ok "$BIN" agent resume codex-a
 assert_contains "codex resume --model 'gpt-test' --last"

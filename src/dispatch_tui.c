@@ -788,6 +788,50 @@ static char *tui_shell_quote(const char *value) {
     return quoted;
 }
 
+static char *tui_base64_encode(const unsigned char *data, size_t len) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_len = ((len + 2) / 3) * 4;
+    char *encoded = malloc(out_len + 1);
+    if (!encoded) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    size_t in = 0;
+    size_t out = 0;
+    while (in < len) {
+        size_t remaining = len - in;
+        unsigned int a = data[in++];
+        unsigned int b = remaining > 1 ? data[in++] : 0;
+        unsigned int c = remaining > 2 ? data[in++] : 0;
+        unsigned int triple = (a << 16) | (b << 8) | c;
+
+        encoded[out++] = alphabet[(triple >> 18) & 0x3f];
+        encoded[out++] = alphabet[(triple >> 12) & 0x3f];
+        encoded[out++] = remaining > 1 ? alphabet[(triple >> 6) & 0x3f] : '=';
+        encoded[out++] = remaining > 2 ? alphabet[triple & 0x3f] : '=';
+    }
+
+    encoded[out_len] = '\0';
+    return encoded;
+}
+
+static char *osc52_sequence_for_text(const char *text) {
+    const char *value = text ? text : "";
+    char *payload =
+        tui_base64_encode((const unsigned char *)value, strlen(value));
+    size_t size = strlen("\033]52;c;\a") + strlen(payload) + 1;
+    char *sequence = malloc(size);
+    if (!sequence) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(sequence, size, "\033]52;c;%s\a", payload);
+    free(payload);
+    return sequence;
+}
+
 static char *diff_command_for_task(const DispatchBoard *board,
                                    const DispatchTask *task) {
     if (!task || task->commits.count == 0)
@@ -1016,6 +1060,20 @@ static int copy_command_to_tmux_buffer(const char *command) {
     return ok;
 }
 
+static int send_command_to_osc52_clipboard(const char *command) {
+    if (!command)
+        return 0;
+
+    char *sequence = osc52_sequence_for_text(command);
+    def_prog_mode();
+    endwin();
+    int ok = fputs(sequence, stdout) != EOF && fflush(stdout) == 0;
+    reset_prog_mode();
+    refresh();
+    free(sequence);
+    return ok;
+}
+
 static void copy_selected_agent_run_command(DispatchTui *tui) {
     DispatchAgent *agent = selected_agent(tui);
     if (!agent) {
@@ -1030,7 +1088,15 @@ static void copy_selected_agent_run_command(DispatchTui *tui) {
     }
 
     char message[512];
-    if (copy_command_to_tmux_buffer(command)) {
+    int sent_osc52 = send_command_to_osc52_clipboard(command);
+    int copied_tmux = copy_command_to_tmux_buffer(command);
+    if (sent_osc52 && copied_tmux) {
+        snprintf(message, sizeof(message),
+                 "Sent OSC 52 copy and tmux buffer for %s", agent->name);
+    } else if (sent_osc52) {
+        snprintf(message, sizeof(message), "Sent OSC 52 copy for %s",
+                 agent->name);
+    } else if (copied_tmux) {
         snprintf(message, sizeof(message), "Copied run command for %s to tmux buffer",
                  agent->name);
     } else {
@@ -3269,6 +3335,18 @@ static int tui_agent_run_command_smoke(const char *name) {
     return 0;
 }
 
+static int tui_osc52_smoke(const char *text) {
+    const char *value = text ? text : "";
+    char *payload =
+        tui_base64_encode((const unsigned char *)value, strlen(value));
+    char *sequence = osc52_sequence_for_text(value);
+    printf("OSC52 payload: %s\n", payload);
+    printf("OSC52 sequence bytes: %zu\n", strlen(sequence));
+    free(payload);
+    free(sequence);
+    return 0;
+}
+
 static int tui_create_group_smoke(const char *name, const char *prefix) {
     char message[256] = {0};
     if (!create_group(name, strcmp(prefix, "-") == 0 ? "" : prefix, message,
@@ -3604,6 +3682,7 @@ static void print_tui_help(void) {
     puts("  --agent-archive-smoke <name> archive|restore");
     puts("  --agent-selection-smoke enabled|all <selected-index>");
     puts("  --agent-run-command-smoke <name>");
+    puts("  --osc52-smoke <text>        print OSC 52 payload metadata and exit");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
@@ -3647,6 +3726,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_selection_smoke(argv[3], atoi(argv[4]));
     if (argc == 4 && strcmp(argv[2], "--agent-run-command-smoke") == 0)
         return tui_agent_run_command_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--osc52-smoke") == 0)
+        return tui_osc52_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--create-group-smoke") == 0)
         return tui_create_group_smoke(argv[3], argv[4]);
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)
