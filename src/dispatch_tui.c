@@ -47,6 +47,7 @@ typedef struct {
     char actor[64];
     char status[256];
     char search[128];
+    char inspected_task_id[64];
     int search_active;
     int selected_task;
     int selected_agent;
@@ -511,10 +512,12 @@ static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui) {
 }
 
 static int select_task_by_id(DispatchTui *tui, const char *task_id) {
-    tui->filter = TUI_FILTER_ALL;
-    tui->group_filter = -1;
-    tui->actor_filter = -1;
-    tui->search[0] = '\0';
+    DispatchTask *requested = dispatch_board_find_task(&tui->board, task_id);
+    if (!requested)
+        return 0;
+
+    snprintf(tui->inspected_task_id, sizeof(tui->inspected_task_id), "%s",
+             requested->id);
     int visible_index = 0;
     for (size_t i = 0; i < tui->board.tasks.count; i++) {
         DispatchTask *task = &tui->board.tasks.items[i];
@@ -526,7 +529,7 @@ static int select_task_by_id(DispatchTui *tui, const char *task_id) {
         }
         visible_index++;
     }
-    return 0;
+    return 1;
 }
 
 static int select_agent_by_name(DispatchTui *tui, const char *name) {
@@ -758,6 +761,11 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
 static DispatchTask *selected_visible_task(DispatchTui *tui) {
     if (!tui->board_loaded)
         return NULL;
+
+    if (tui->screen == TUI_SCREEN_TASK_INSPECTOR &&
+        tui->inspected_task_id[0]) {
+        return dispatch_board_find_task(&tui->board, tui->inspected_task_id);
+    }
 
     int visible_index = 0;
     for (size_t i = 0; i < tui->board.tasks.count; i++) {
@@ -2323,9 +2331,10 @@ static int tui_run(void) {
         int ch = getch();
         switch (ch) {
         case 'q':
-            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
+            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
+                tui.inspected_task_id[0] = '\0';
                 tui.screen = TUI_SCREEN_BOARD;
-            else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+            } else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
                 tui.screen = TUI_SCREEN_AGENTS;
             else if (tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
                 tui.screen = TUI_SCREEN_WORKSPACES;
@@ -2360,6 +2369,7 @@ static int tui_run(void) {
         case KEY_ENTER:
         case 'i':
             if (tui.screen == TUI_SCREEN_BOARD && selected_visible_task(&tui)) {
+                tui.inspected_task_id[0] = '\0';
                 tui.screen = TUI_SCREEN_TASK_INSPECTOR;
                 tui_set_status(&tui, "Inspecting task");
             } else if (tui.screen == TUI_SCREEN_AGENTS && selected_agent(&tui)) {
@@ -2496,6 +2506,7 @@ static int tui_run(void) {
             break;
         case 27:
             if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
+                tui.inspected_task_id[0] = '\0';
                 tui.screen = TUI_SCREEN_BOARD;
                 tui_set_status(&tui, "Board");
             } else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR) {
