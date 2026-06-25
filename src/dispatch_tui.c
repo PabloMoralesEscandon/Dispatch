@@ -960,6 +960,90 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
     tui_load_board(tui);
 }
 
+static char *agent_run_command_text(const DispatchAgent *agent) {
+    if (!agent)
+        return NULL;
+    if (agent->run_script_path && agent->run_script_path[0])
+        return strdup(agent->run_script_path);
+
+    char *prompt_q = tui_shell_quote(agent->prompt_path ? agent->prompt_path : "");
+    char *model_q = agent->model && agent->model[0]
+                        ? tui_shell_quote(agent->model)
+                        : NULL;
+    const char *format;
+    if (strcmp(agent->runner, "codex") == 0) {
+        format = model_q ? "codex --model %s \"$(cat %s)\""
+                         : "codex \"$(cat %s)\"";
+    } else if (strcmp(agent->runner, "claude") == 0) {
+        format = "claude \"$(cat %s)\"";
+    } else {
+        format = "%s \"$(cat %s)\"";
+    }
+
+    size_t size = strlen(format) + strlen(prompt_q) +
+                  (model_q ? strlen(model_q) : strlen(agent->runner)) + 1;
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    if (strcmp(agent->runner, "codex") == 0 && model_q)
+        snprintf(command, size, format, model_q, prompt_q);
+    else if (strcmp(agent->runner, "codex") == 0)
+        snprintf(command, size, format, prompt_q);
+    else if (strcmp(agent->runner, "claude") == 0)
+        snprintf(command, size, format, prompt_q);
+    else
+        snprintf(command, size, format, agent->runner, prompt_q);
+
+    free(prompt_q);
+    free(model_q);
+    return command;
+}
+
+static int copy_command_to_tmux_buffer(const char *command) {
+    if (!getenv("TMUX") || !command_available("tmux"))
+        return 0;
+
+    char *command_q = tui_shell_quote(command);
+    size_t size = strlen("printf %s  | tmux load-buffer -") +
+                  strlen(command_q) + 1;
+    char *copy = malloc(size);
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(copy, size, "printf %%s %s | tmux load-buffer -", command_q);
+    int ok = system(copy) == 0;
+    free(command_q);
+    free(copy);
+    return ok;
+}
+
+static void copy_selected_agent_run_command(DispatchTui *tui) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        tui_set_status(tui, "No selected agent");
+        return;
+    }
+
+    char *command = agent_run_command_text(agent);
+    if (!command) {
+        tui_set_status(tui, "Could not build agent command");
+        return;
+    }
+
+    char message[512];
+    if (copy_command_to_tmux_buffer(command)) {
+        snprintf(message, sizeof(message), "Copied run command for %s to tmux buffer",
+                 agent->name);
+    } else {
+        snprintf(message, sizeof(message), "Run command: %s", command);
+    }
+    tui_set_status(tui, message);
+    free(command);
+}
+
 static DispatchTask *selected_visible_task(DispatchTui *tui) {
     if (!tui->board_loaded)
         return NULL;
@@ -1977,6 +2061,7 @@ static void tui_render_help(void) {
         ">/<      add/remove dependency in task inspector",
         "d        open selected task commit diff",
         "e        edit selected agent prompt",
+        "y        copy/show selected agent run command",
         "Enter/i  inspect selected task",
         "Esc/q    close inspector",
         "Tab/a    switch to agents",
@@ -2505,7 +2590,7 @@ static void tui_render(DispatchTui *tui) {
                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
                      ? " %s | q/Esc back | > add dep | < remove dep | d diff"
                      : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
-                           ? " %s | q/Esc back | e edit prompt | x clear session"
+                           ? " %s | q/Esc back | y run command | e edit prompt | x clear session"
                      : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
                            ? " %s | q/Esc back | x remove | X force remove"
                      : tui->screen == TUI_SCREEN_WORKSPACES
@@ -2513,7 +2598,7 @@ static void tui_render(DispatchTui *tui) {
                      : tui->screen == TUI_SCREEN_LOGS
                            ? " %s | b board | F filter | C clear | j/k move"
                      : tui->screen == TUI_SCREEN_AGENTS
-                           ? " %s | A all/enabled | z archive/restore | Enter/i inspect"
+                           ? " %s | y run command | A all/enabled | z archive/restore | Enter/i inspect"
                            : " %s | : palette | Tab/a agents | w workspaces | n task | + group",
                  tui->status[0] ? tui->status : "Ready");
         draw_truncated(rows - 1, 0, cols, status);
@@ -2709,6 +2794,11 @@ static int tui_run(void) {
             if (tui.screen == TUI_SCREEN_AGENTS ||
                 tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
                 toggle_selected_agent_archived(&tui);
+            break;
+        case 'y':
+            if (tui.screen == TUI_SCREEN_AGENTS ||
+                tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                copy_selected_agent_run_command(&tui);
             break;
         case 'G':
             cycle_group_filter(&tui);
@@ -3152,6 +3242,37 @@ static int tui_agent_selection_smoke(const char *mode, int selected_index) {
     return 0;
 }
 
+static int tui_agent_run_command_smoke(const char *name) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui agent run command smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    if (!agent) {
+        fprintf(stderr, "No agent named %s\n", name);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    char *command = agent_run_command_text(agent);
+    if (!command) {
+        fprintf(stderr, "Could not build agent command for %s\n", name);
+        dispatch_board_free(&board);
+        return 1;
+    }
+    printf("%s\n", command);
+    free(command);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int tui_create_group_smoke(const char *name, const char *prefix) {
     char message[256] = {0};
     if (!create_group(name, strcmp(prefix, "-") == 0 ? "" : prefix, message,
@@ -3486,6 +3607,7 @@ static void print_tui_help(void) {
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
     puts("  --agent-archive-smoke <name> archive|restore");
     puts("  --agent-selection-smoke enabled|all <selected-index>");
+    puts("  --agent-run-command-smoke <name>");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
@@ -3527,6 +3649,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_archive_smoke(argv[3], argv[4]);
     if (argc == 5 && strcmp(argv[2], "--agent-selection-smoke") == 0)
         return tui_agent_selection_smoke(argv[3], atoi(argv[4]));
+    if (argc == 4 && strcmp(argv[2], "--agent-run-command-smoke") == 0)
+        return tui_agent_run_command_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--create-group-smoke") == 0)
         return tui_create_group_smoke(argv[3], argv[4]);
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)

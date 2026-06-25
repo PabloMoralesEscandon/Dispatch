@@ -352,8 +352,10 @@ removes a dependency, and `d` opens the selected task commit with `git show`
 when commit metadata exists.
 
 The agents view lists enabled agents by default. `A` toggles enabled/all,
-`z` archives or restores the selected agent, `e` edits the agent prompt in
-`$EDITOR`, and `x` clears the stored session ID from the agent inspector.
+`z` archives or restores the selected agent, `y` copies the selected agent run
+command to a tmux buffer when available or shows it in the status bar, `e`
+edits the agent prompt in `$EDITOR`, and `x` clears the stored session ID from
+the agent inspector.
 
 The workspaces view shows actor, path, branch, task state, workspace state, git
 worktree presence, and dirty status. `n` runs the existing workspace creation

@@ -182,6 +182,8 @@ assert_contains "Last workspace: -"
 
 expect_ok "$BIN" agent command codex-a
 assert_contains "codex --model gpt-test \"\$(cat '.dispatch/agents/codex-a/codex-a-PROMPT.md')\""
+expect_ok "$BIN" tui --agent-run-command-smoke codex-a
+assert_contains ".dispatch/agents/codex-a/run.sh"
 
 expect_ok "$BIN" agent resume codex-a
 assert_contains "codex resume --model 'gpt-test' --last"
@@ -235,6 +237,8 @@ expect_ok "$BIN" agent create --name claude-a --runner claude --no-run-script --
 assert_contains "Created agent claude-a (claude)"
 assert_contains "command: claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 expect_ok "$BIN" agent command claude-a --print-command
+assert_contains "claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
+expect_ok "$BIN" tui --agent-run-command-smoke claude-a
 assert_contains "claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 expect_ok "$BIN" agent show claude-a
 assert_contains "Run script: -"
