@@ -58,6 +58,12 @@ typedef struct {
     int running;
 } DispatchTui;
 
+typedef struct {
+    json_t **items;
+    size_t count;
+    size_t capacity;
+} TuiLogRecords;
+
 static DispatchTask *selected_visible_task(DispatchTui *tui);
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
 static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
@@ -213,6 +219,49 @@ static int log_record_matches_filter(json_t *record, const char *field,
     return 1;
 }
 
+static void log_records_append(TuiLogRecords *records, json_t *record) {
+    if (records->count >= records->capacity) {
+        records->capacity = records->capacity == 0 ? 16 : records->capacity * 2;
+        records->items = realloc(records->items,
+                                 records->capacity * sizeof(*records->items));
+        if (!records->items) {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
+    }
+    records->items[records->count++] = record;
+}
+
+static void log_records_free(TuiLogRecords *records) {
+    for (size_t i = 0; i < records->count; i++)
+        json_decref(records->items[i]);
+    free(records->items);
+    memset(records, 0, sizeof(*records));
+}
+
+static int load_matching_log_records(const char *field, const char *value,
+                                     TuiLogRecords *records) {
+    memset(records, 0, sizeof(*records));
+    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
+    if (!file)
+        return 0;
+
+    char line[8192];
+    while (fgets(line, sizeof(line), file)) {
+        json_error_t error;
+        json_t *record = json_loads(line, 0, &error);
+        if (!record)
+            continue;
+        if (log_record_matches_filter(record, field, value)) {
+            log_records_append(records, record);
+        } else {
+            json_decref(record);
+        }
+    }
+    fclose(file);
+    return 1;
+}
+
 static int task_matches_search(const DispatchTask *task, const char *search) {
     return text_contains_casefold(task->id, search) ||
            text_contains_casefold(task->title, search) ||
@@ -336,23 +385,12 @@ static void clamp_workspace_selection(DispatchTui *tui) {
 }
 
 static int visible_log_count(const DispatchTui *tui) {
-    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
-    if (!file)
+    TuiLogRecords records;
+    if (!load_matching_log_records(tui->log_filter_field, tui->log_filter_value,
+                                   &records))
         return 0;
-
-    int count = 0;
-    char line[8192];
-    while (fgets(line, sizeof(line), file)) {
-        json_error_t error;
-        json_t *record = json_loads(line, 0, &error);
-        if (record) {
-            if (log_record_matches_filter(record, tui->log_filter_field,
-                                          tui->log_filter_value))
-                count++;
-            json_decref(record);
-        }
-    }
-    fclose(file);
+    int count = (int)records.count;
+    log_records_free(&records);
     return count;
 }
 
@@ -1735,25 +1773,17 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
 
 static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
-    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
-    if (!file) {
+    TuiLogRecords records;
+    if (!load_matching_log_records(tui->log_filter_field, tui->log_filter_value,
+                                   &records)) {
         draw_truncated(y, 0, cols, "(no dispatch.log)");
         return;
     }
 
     int visible_index = 0;
     int any_visible = 0;
-    char line[8192];
-    while (fgets(line, sizeof(line), file) && y < rows - 1) {
-        json_error_t error;
-        json_t *record = json_loads(line, 0, &error);
-        if (!record)
-            continue;
-        if (!log_record_matches_filter(record, tui->log_filter_field,
-                                       tui->log_filter_value)) {
-            json_decref(record);
-            continue;
-        }
+    for (size_t i = records.count; i > 0 && y < rows - 1; i--) {
+        json_t *record = records.items[i - 1];
 
         const char *time = json_string_field(record, "timestamp");
         const char *actor = json_string_field(record, "actor");
@@ -1782,9 +1812,8 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
             attroff(A_REVERSE);
         visible_index++;
         any_visible = 1;
-        json_decref(record);
     }
-    fclose(file);
+    log_records_free(&records);
     if (!any_visible)
         draw_truncated(y, 0, cols, "(no matching log records)");
 }
@@ -2888,23 +2917,15 @@ static int tui_workspace_inspect_smoke(const char *target) {
 }
 
 static int tui_logs_smoke(const char *field, const char *value) {
-    FILE *file = fopen(DISPATCH_LOG_FILE, "r");
-    if (!file) {
+    TuiLogRecords records;
+    if (!load_matching_log_records(field, value, &records)) {
         fprintf(stderr, "No %s\n", DISPATCH_LOG_FILE);
         return 1;
     }
 
     int count = 0;
-    char line[8192];
-    while (fgets(line, sizeof(line), file)) {
-        json_error_t error;
-        json_t *record = json_loads(line, 0, &error);
-        if (!record)
-            continue;
-        if (!log_record_matches_filter(record, field, value)) {
-            json_decref(record);
-            continue;
-        }
+    for (size_t i = records.count; i > 0; i--) {
+        json_t *record = records.items[i - 1];
         const char *actor = json_string_field(record, "actor");
         const char *command = json_string_field(record, "command");
         const char *action = json_string_field(record, "action");
@@ -2916,10 +2937,9 @@ static int tui_logs_smoke(const char *field, const char *value) {
                action, task[0] ? task : "-", agent[0] ? agent : "-",
                workspace[0] ? workspace : "-");
         count++;
-        json_decref(record);
     }
-    fclose(file);
     printf("Logs: %d\n", count);
+    log_records_free(&records);
     return 0;
 }
 

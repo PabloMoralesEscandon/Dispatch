@@ -506,6 +506,10 @@ expect_ok "$BIN" tui --logs-smoke
 assert_contains "Logs:"
 assert_contains "user group add"
 assert_contains "codex finish finish task:DE-01"
+first_log_line="$(printf '%s\n' "$RUN_OUTPUT" | sed -n '1p')"
+if [ "$first_log_line" != "codex finish finish task:DE-01 agent:- workspace:-" ]; then
+    fail "expected newest log record first"
+fi
 expect_ok "$BIN" tui --logs-smoke actor codex
 assert_contains "codex start start task:DE-01"
 assert_contains "codex finish finish task:DE-01"
@@ -516,6 +520,10 @@ assert_contains "user group add"
 expect_ok "$BIN" tui --logs-smoke task DE-01
 assert_contains "alice ready ready task:DE-01"
 assert_contains "codex finish finish task:DE-01"
+first_task_log_line="$(printf '%s\n' "$RUN_OUTPUT" | sed -n '1p')"
+if [ "$first_task_log_line" != "codex finish finish task:DE-01 agent:- workspace:-" ]; then
+    fail "expected newest task log record first"
+fi
 
 case_dir="$(make_case_dir id-prefix-display)"
 cd "$case_dir"
