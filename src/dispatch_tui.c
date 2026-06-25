@@ -92,7 +92,7 @@ static void tui_handle_sigint(int signal_number) {
 }
 
 static void tui_style_header_on(void) {
-    attron(A_BOLD | A_REVERSE);
+    attron(A_BOLD);
     if (tui_colors_enabled)
         attron(COLOR_PAIR(TUI_COLOR_HEADER));
 }
@@ -100,7 +100,7 @@ static void tui_style_header_on(void) {
 static void tui_style_header_off(void) {
     if (tui_colors_enabled)
         attroff(COLOR_PAIR(TUI_COLOR_HEADER));
-    attroff(A_BOLD | A_REVERSE);
+    attroff(A_BOLD);
 }
 
 static void tui_style_title_on(void) {
@@ -2625,7 +2625,7 @@ static int tui_run(void) {
     if (has_colors()) {
         start_color();
         use_default_colors();
-        init_pair(TUI_COLOR_HEADER, COLOR_WHITE, COLOR_BLUE);
+        init_pair(TUI_COLOR_HEADER, COLOR_CYAN, -1);
         init_pair(TUI_COLOR_ALT_ROW, COLOR_WHITE, COLOR_BLACK);
         init_pair(TUI_COLOR_SELECTED, COLOR_BLACK, COLOR_CYAN);
         init_pair(TUI_COLOR_TITLE, COLOR_BLACK, COLOR_CYAN);
