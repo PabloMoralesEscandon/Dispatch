@@ -524,6 +524,11 @@ first_task_log_line="$(printf '%s\n' "$RUN_OUTPUT" | sed -n '1p')"
 if [ "$first_task_log_line" != "codex finish finish task:DE-01 agent:- workspace:-" ]; then
     fail "expected newest task log record first"
 fi
+expect_ok "$BIN" tui --logs-window-smoke 2 3
+assert_contains "Selected: 3"
+assert_contains "Top: 2"
+assert_contains "Row: alice ready ready task:DE-01"
+assert_contains "Shown: 2"
 
 case_dir="$(make_case_dir id-prefix-display)"
 cd "$case_dir"

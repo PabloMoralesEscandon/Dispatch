@@ -52,6 +52,7 @@ typedef struct {
     int selected_agent;
     int selected_workspace;
     int selected_log;
+    int log_top;
     char log_filter_field[32];
     char log_filter_value[128];
     int show_help;
@@ -398,11 +399,30 @@ static void clamp_log_selection(DispatchTui *tui) {
     int count = visible_log_count(tui);
     if (count <= 0) {
         tui->selected_log = 0;
+        tui->log_top = 0;
     } else if (tui->selected_log >= count) {
         tui->selected_log = count - 1;
     } else if (tui->selected_log < 0) {
         tui->selected_log = 0;
     }
+    if (tui->log_top >= count)
+        tui->log_top = count - 1;
+    if (tui->log_top < 0)
+        tui->log_top = 0;
+}
+
+static void sync_log_scroll(DispatchTui *tui, int visible_rows) {
+    if (visible_rows <= 0) {
+        tui->log_top = 0;
+        return;
+    }
+    clamp_log_selection(tui);
+    if (tui->selected_log < tui->log_top)
+        tui->log_top = tui->selected_log;
+    if (tui->selected_log >= tui->log_top + visible_rows)
+        tui->log_top = tui->selected_log - visible_rows + 1;
+    if (tui->log_top < 0)
+        tui->log_top = 0;
 }
 
 static DispatchAgent *selected_agent(DispatchTui *tui) {
@@ -1213,6 +1233,7 @@ static void set_log_filter(DispatchTui *tui, const char *field,
     snprintf(tui->log_filter_value, sizeof(tui->log_filter_value), "%s",
              value ? value : "");
     tui->selected_log = 0;
+    tui->log_top = 0;
     char message[256];
     if (tui->log_filter_field[0]) {
         snprintf(message, sizeof(message), "Log filter %s=%s",
@@ -1780,10 +1801,16 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         return;
     }
 
+    int visible_rows = rows - start_y - 1;
+    sync_log_scroll(tui, visible_rows);
     int visible_index = 0;
     int any_visible = 0;
     for (size_t i = records.count; i > 0 && y < rows - 1; i--) {
         json_t *record = records.items[i - 1];
+        if (visible_index < tui->log_top) {
+            visible_index++;
+            continue;
+        }
 
         const char *time = json_string_field(record, "timestamp");
         const char *actor = json_string_field(record, "actor");
@@ -2943,6 +2970,45 @@ static int tui_logs_smoke(const char *field, const char *value) {
     return 0;
 }
 
+static int tui_logs_window_smoke(int visible_rows, int selected_index,
+                                 const char *field, const char *value) {
+    DispatchTui tui;
+    tui_init(&tui);
+    tui.selected_log = selected_index;
+    snprintf(tui.log_filter_field, sizeof(tui.log_filter_field), "%s",
+             field ? field : "");
+    snprintf(tui.log_filter_value, sizeof(tui.log_filter_value), "%s",
+             value ? value : "");
+    sync_log_scroll(&tui, visible_rows);
+
+    TuiLogRecords records;
+    if (!load_matching_log_records(tui.log_filter_field, tui.log_filter_value,
+                                   &records)) {
+        fprintf(stderr, "No %s\n", DISPATCH_LOG_FILE);
+        return 1;
+    }
+
+    printf("Selected: %d\n", tui.selected_log);
+    printf("Top: %d\n", tui.log_top);
+    int visible_index = 0;
+    int shown = 0;
+    for (size_t i = records.count; i > 0 && shown < visible_rows; i--) {
+        json_t *record = records.items[i - 1];
+        if (visible_index++ < tui.log_top)
+            continue;
+        const char *actor = json_string_field(record, "actor");
+        const char *command = json_string_field(record, "command");
+        const char *action = json_string_field(record, "action");
+        const char *task = json_nested_string_field(record, "targets", "task");
+        printf("Row: %s %s %s task:%s\n", actor, command, action,
+               task[0] ? task : "-");
+        shown++;
+    }
+    printf("Shown: %d\n", shown);
+    log_records_free(&records);
+    return 0;
+}
+
 static const char *screen_name(DispatchTuiScreen screen) {
     switch (screen) {
     case TUI_SCREEN_BOARD:
@@ -3037,6 +3103,7 @@ static void print_tui_help(void) {
     puts("  --workspaces-smoke          print workspace dashboard data and exit");
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
     puts("  --logs-smoke [actor|command|action|task|agent|workspace <value>]");
+    puts("  --logs-window-smoke <visible-rows> <selected-index> [field value]");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
 }
@@ -3080,6 +3147,10 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_workspace_inspect_smoke(argv[3]);
     if ((argc == 3 || argc == 5) && strcmp(argv[2], "--logs-smoke") == 0)
         return tui_logs_smoke(argc == 5 ? argv[3] : "", argc == 5 ? argv[4] : "");
+    if ((argc == 5 || argc == 7) && strcmp(argv[2], "--logs-window-smoke") == 0)
+        return tui_logs_window_smoke(atoi(argv[3]), atoi(argv[4]),
+                                    argc == 7 ? argv[5] : "",
+                                    argc == 7 ? argv[6] : "");
     if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)
