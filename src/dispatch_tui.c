@@ -68,6 +68,7 @@ typedef struct {
 static DispatchTask *selected_visible_task(DispatchTui *tui);
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
 static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
+static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent);
 
 static int title_starts_with_dispatch_id_like(const char *title) {
     if (!title)
@@ -353,11 +354,23 @@ static void clamp_selection(DispatchTui *tui) {
     }
 }
 
+static int visible_agent_count(const DispatchTui *tui) {
+    if (!tui->board_loaded)
+        return 0;
+    int count = 0;
+    for (size_t i = 0; i < tui->board.agents.count; i++) {
+        if (agent_is_visible(tui, &tui->board.agents.items[i]))
+            count++;
+    }
+    return count;
+}
+
 static void clamp_agent_selection(DispatchTui *tui) {
-    if (!tui->board_loaded || tui->board.agents.count == 0) {
+    int count = visible_agent_count(tui);
+    if (count <= 0) {
         tui->selected_agent = 0;
-    } else if ((size_t)tui->selected_agent >= tui->board.agents.count) {
-        tui->selected_agent = (int)tui->board.agents.count - 1;
+    } else if (tui->selected_agent >= count) {
+        tui->selected_agent = count - 1;
     } else if (tui->selected_agent < 0) {
         tui->selected_agent = 0;
     }
@@ -426,11 +439,19 @@ static void sync_log_scroll(DispatchTui *tui, int visible_rows) {
 }
 
 static DispatchAgent *selected_agent(DispatchTui *tui) {
-    if (!tui->board_loaded || tui->board.agents.count == 0 ||
-        tui->selected_agent < 0 ||
-        (size_t)tui->selected_agent >= tui->board.agents.count)
+    if (!tui->board_loaded)
         return NULL;
-    return &tui->board.agents.items[tui->selected_agent];
+
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.agents.count; i++) {
+        DispatchAgent *agent = &tui->board.agents.items[i];
+        if (!agent_is_visible(tui, agent))
+            continue;
+        if (visible_index == tui->selected_agent)
+            return agent;
+        visible_index++;
+    }
+    return NULL;
 }
 
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui) {
@@ -469,12 +490,17 @@ static int select_task_by_id(DispatchTui *tui, const char *task_id) {
 }
 
 static int select_agent_by_name(DispatchTui *tui, const char *name) {
+    tui->show_archived_agents = 1;
+    int visible_index = 0;
     for (size_t i = 0; i < tui->board.agents.count; i++) {
-        if (strcmp(tui->board.agents.items[i].name, name) == 0) {
-            tui->selected_agent = (int)i;
-            tui->show_archived_agents = 1;
+        DispatchAgent *agent = &tui->board.agents.items[i];
+        if (!agent_is_visible(tui, agent))
+            continue;
+        if (strcmp(agent->name, name) == 0) {
+            tui->selected_agent = visible_index;
             return 1;
         }
+        visible_index++;
     }
     return 0;
 }
@@ -1732,6 +1758,7 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
 
     draw_truncated(y++, 0, cols,
                    "Name             Runner   Status    Session  Current task  Last workspace");
+    int visible_index = 0;
     for (size_t i = 0; i < tui->board.agents.count && y < rows - 1; i++) {
         DispatchAgent *agent = &tui->board.agents.items[i];
         if (!agent_is_visible(tui, agent))
@@ -1743,11 +1770,12 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                  agent->session_id ? "yes" : "no",
                  agent->current_task ? agent->current_task : "-",
                  agent->last_workspace ? agent->last_workspace : "-");
-        if ((int)i == tui->selected_agent)
+        if (visible_index == tui->selected_agent)
             attron(A_REVERSE);
         draw_truncated(y++, 0, cols, line);
-        if ((int)i == tui->selected_agent)
+        if (visible_index == tui->selected_agent)
             attroff(A_REVERSE);
+        visible_index++;
     }
 }
 
@@ -2399,6 +2427,7 @@ static int tui_run(void) {
         case 'A':
             if (tui.screen == TUI_SCREEN_AGENTS) {
                 tui.show_archived_agents = !tui.show_archived_agents;
+                clamp_agent_selection(&tui);
                 tui_set_status(&tui, tui.show_archived_agents
                                         ? "Showing all agents"
                                         : "Showing enabled agents");
@@ -2803,6 +2832,25 @@ static int tui_agent_archive_smoke(const char *name, const char *action) {
     return 0;
 }
 
+static int tui_agent_selection_smoke(const char *mode, int selected_index) {
+    DispatchTui tui;
+    tui_init(&tui);
+    tui.show_archived_agents = strcmp(mode, "all") == 0;
+    tui.selected_agent = selected_index;
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+    clamp_agent_selection(&tui);
+    DispatchAgent *agent = selected_agent(&tui);
+    printf("Mode: %s\n", tui.show_archived_agents ? "all" : "enabled");
+    printf("Visible agents: %d\n", visible_agent_count(&tui));
+    printf("Selected index: %d\n", tui.selected_agent);
+    printf("Selected agent: %s\n", agent ? agent->name : "-");
+    tui_free_board(&tui);
+    return 0;
+}
+
 static int tui_create_group_smoke(const char *name, const char *prefix) {
     char message[256] = {0};
     if (!create_group(name, strcmp(prefix, "-") == 0 ? "" : prefix, message,
@@ -3095,6 +3143,7 @@ static void print_tui_help(void) {
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
     puts("  --agent-archive-smoke <name> archive|restore");
+    puts("  --agent-selection-smoke enabled|all <selected-index>");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
@@ -3132,6 +3181,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_prompt_edit_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--agent-archive-smoke") == 0)
         return tui_agent_archive_smoke(argv[3], argv[4]);
+    if (argc == 5 && strcmp(argv[2], "--agent-selection-smoke") == 0)
+        return tui_agent_selection_smoke(argv[3], atoi(argv[4]));
     if (argc == 5 && strcmp(argv[2], "--create-group-smoke") == 0)
         return tui_create_group_smoke(argv[3], argv[4]);
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)

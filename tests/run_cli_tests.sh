@@ -924,6 +924,14 @@ expect_ok "$BIN" tui --agent-archive-smoke dormant archive
 assert_contains "Archived agent dormant"
 expect_ok "$BIN" tui --agents-smoke
 assert_contains "dormant codex archived"
+expect_ok "$BIN" tui --agent-selection-smoke enabled 1
+assert_contains "Visible agents: 1"
+assert_contains "Selected index: 0"
+assert_contains "Selected agent: codex-a"
+expect_ok "$BIN" tui --agent-selection-smoke all 1
+assert_contains "Visible agents: 2"
+assert_contains "Selected index: 1"
+assert_contains "Selected agent: dormant"
 expect_ok "$BIN" tui --agent-archive-smoke dormant restore
 assert_contains "Restored agent dormant"
 
