@@ -1254,6 +1254,10 @@ expect_ok "$BIN" tui --palette-complete-smoke "group D"
 assert_contains "DE"
 expect_ok "$BIN" tui --palette-complete-smoke "agent co"
 assert_contains "codex-a"
+expect_ok "$BIN" tui --search-smoke rsfvanwl
+assert_contains "Search active: yes"
+assert_contains "Search: rsfvanwl"
+assert_contains "Screen: board"
 expect_ok "$BIN" tui --help
 assert_contains "Interactive keys:"
 assert_contains "Ctrl+C or :q quits"

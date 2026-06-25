@@ -618,6 +618,42 @@ static void clear_secondary_filters(DispatchTui *tui) {
     tui_set_status(tui, "Filters cleared");
 }
 
+static int handle_search_key(DispatchTui *tui, int ch) {
+    if (!tui->search_active)
+        return 0;
+
+    if (ch == 27) {
+        tui->search_active = 0;
+        tui->search[0] = '\0';
+        tui->selected_task = 0;
+        tui_set_status(tui, "Search cleared");
+        return 1;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        tui->search_active = 0;
+        tui_set_status(tui, "Search applied");
+        return 1;
+    }
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        size_t len = strlen(tui->search);
+        if (len > 0) {
+            tui->search[len - 1] = '\0';
+            tui->selected_task = 0;
+        }
+        return 1;
+    }
+    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch)) {
+        size_t len = strlen(tui->search);
+        if (len + 1 < sizeof(tui->search)) {
+            tui->search[len] = (char)ch;
+            tui->search[len + 1] = '\0';
+            tui->selected_task = 0;
+        }
+        return 1;
+    }
+    return 1;
+}
+
 static char *tui_shell_quote(const char *value) {
     size_t len = strlen(value ? value : "");
     size_t size = len * 4 + 3;
@@ -2353,6 +2389,8 @@ static int tui_run(void) {
             tui.running = 0;
             break;
         }
+        if (handle_search_key(&tui, ch))
+            continue;
         switch (ch) {
         case 'q':
             if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
@@ -3206,6 +3244,19 @@ static int tui_palette_complete_smoke(const char *input) {
     return 0;
 }
 
+static int tui_search_smoke(const char *keys) {
+    DispatchTui tui;
+    tui_init(&tui);
+    tui.search_active = 1;
+    for (size_t i = 0; keys && keys[i] != '\0'; i++)
+        handle_search_key(&tui, (unsigned char)keys[i]);
+    printf("Search active: %s\n", tui.search_active ? "yes" : "no");
+    printf("Search: %s\n", tui.search);
+    printf("Screen: %s\n", screen_name(tui.screen));
+    printf("Status: %s\n", tui.status);
+    return 0;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -3238,6 +3289,7 @@ static void print_tui_help(void) {
     puts("  --logs-window-smoke <visible-rows> <selected-index> [field value]");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
+    puts("  --search-smoke <keys>");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -3289,6 +3341,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)
         return tui_palette_complete_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--search-smoke") == 0)
+        return tui_search_smoke(argv[3]);
     if (argc != 2) {
         print_tui_help();
         return 1;
