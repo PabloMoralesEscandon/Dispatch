@@ -92,15 +92,11 @@ static void tui_handle_sigint(int signal_number) {
 }
 
 static void tui_style_header_on(void) {
-    attron(A_BOLD);
-    if (tui_colors_enabled)
-        attron(COLOR_PAIR(TUI_COLOR_HEADER));
+    attron(A_BOLD | A_REVERSE);
 }
 
 static void tui_style_header_off(void) {
-    if (tui_colors_enabled)
-        attroff(COLOR_PAIR(TUI_COLOR_HEADER));
-    attroff(A_BOLD);
+    attroff(A_BOLD | A_REVERSE);
 }
 
 static void tui_style_title_on(void) {
