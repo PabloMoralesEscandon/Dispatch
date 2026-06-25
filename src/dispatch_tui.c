@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -57,6 +59,8 @@ typedef struct {
     int log_top;
     char log_filter_field[32];
     char log_filter_value[128];
+    time_t board_mtime;
+    off_t board_size;
     int show_help;
     int running;
 } DispatchTui;
@@ -157,15 +161,22 @@ static void tui_free_board(DispatchTui *tui) {
 
 static int tui_load_board(DispatchTui *tui) {
     char error[256] = {0};
-    tui_free_board(tui);
+    DispatchBoard board;
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
                                   sizeof(error)) ||
-        !dispatch_store_load(&tui->board, DISPATCH_STORE_FILE, error,
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
                              sizeof(error))) {
         tui_set_status(tui, error[0] ? error : "could not load board");
         return 0;
     }
+    tui_free_board(tui);
+    tui->board = board;
     tui->board_loaded = 1;
+    struct stat info;
+    if (stat(DISPATCH_STORE_FILE, &info) == 0) {
+        tui->board_mtime = info.st_mtime;
+        tui->board_size = info.st_size;
+    }
     if (tui->group_filter >= 0 &&
         (size_t)tui->group_filter >= tui->board.groups.count)
         tui->group_filter = -1;
@@ -174,6 +185,13 @@ static int tui_load_board(DispatchTui *tui) {
         tui->actor_filter = -1;
     tui_set_status(tui, "Ready");
     return 1;
+}
+
+static int board_file_changed(const DispatchTui *tui) {
+    struct stat info;
+    if (stat(DISPATCH_STORE_FILE, &info) != 0)
+        return 0;
+    return info.st_mtime != tui->board_mtime || info.st_size != tui->board_size;
 }
 
 static int task_count_for_state(const DispatchBoard *board,
@@ -569,6 +587,89 @@ static int select_workspace_by_id(DispatchTui *tui, const char *target) {
         visible_index++;
     }
     return 0;
+}
+
+static void restore_task_selection(DispatchTui *tui, const char *task_id) {
+    if (!task_id || !task_id[0]) {
+        clamp_selection(tui);
+        return;
+    }
+
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.tasks.count; i++) {
+        DispatchTask *task = &tui->board.tasks.items[i];
+        if (!tui_task_is_visible(tui, task))
+            continue;
+        if (strcmp(task->id, task_id) == 0) {
+            tui->selected_task = visible_index;
+            return;
+        }
+        visible_index++;
+    }
+    clamp_selection(tui);
+}
+
+static void restore_agent_selection(DispatchTui *tui, const char *name) {
+    if (!name || !name[0]) {
+        clamp_agent_selection(tui);
+        return;
+    }
+
+    int visible_index = 0;
+    for (size_t i = 0; i < tui->board.agents.count; i++) {
+        DispatchAgent *agent = &tui->board.agents.items[i];
+        if (!agent_is_visible(tui, agent))
+            continue;
+        if (strcmp(agent->name, name) == 0) {
+            tui->selected_agent = visible_index;
+            return;
+        }
+        visible_index++;
+    }
+    clamp_agent_selection(tui);
+}
+
+static void restore_workspace_selection(DispatchTui *tui, const char *target) {
+    if (!target || !target[0]) {
+        clamp_workspace_selection(tui);
+        return;
+    }
+    if (!select_workspace_by_id(tui, target))
+        clamp_workspace_selection(tui);
+}
+
+static int tui_reload_if_changed(DispatchTui *tui) {
+    if (!tui->board_loaded || !board_file_changed(tui))
+        return 0;
+
+    char task_id[64] = "";
+    char agent_name[128] = "";
+    char workspace_id[64] = "";
+    DispatchTask *task = selected_visible_task(tui);
+    DispatchAgent *agent = selected_agent(tui);
+    DispatchWorkspace *workspace = selected_visible_workspace(tui);
+    if (task)
+        snprintf(task_id, sizeof(task_id), "%s", task->id);
+    if (agent)
+        snprintf(agent_name, sizeof(agent_name), "%s", agent->name);
+    if (workspace)
+        snprintf(workspace_id, sizeof(workspace_id), "%s", workspace->task_id);
+
+    if (!tui_load_board(tui))
+        return 0;
+
+    if (tui->inspected_task_id[0] &&
+        !dispatch_board_find_task(&tui->board, tui->inspected_task_id)) {
+        tui->inspected_task_id[0] = '\0';
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            tui->screen = TUI_SCREEN_BOARD;
+    }
+    restore_task_selection(tui, task_id);
+    restore_agent_selection(tui, agent_name);
+    restore_workspace_selection(tui, workspace_id);
+    clamp_log_selection(tui);
+    tui_set_status(tui, "Board reloaded");
+    return 1;
 }
 
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent) {
@@ -2367,6 +2468,7 @@ static int tui_run(void) {
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
+    timeout(1000);
     curs_set(0);
     if (has_colors()) {
         start_color();
@@ -2383,12 +2485,15 @@ static int tui_run(void) {
             tui.running = 0;
             break;
         }
+        tui_reload_if_changed(&tui);
         tui_render(&tui);
         int ch = getch();
         if (tui_quit_requested) {
             tui.running = 0;
             break;
         }
+        if (ch == ERR)
+            continue;
         if (handle_search_key(&tui, ch))
             continue;
         switch (ch) {
@@ -3257,6 +3362,32 @@ static int tui_search_smoke(const char *keys) {
     return 0;
 }
 
+static int tui_refresh_smoke(void) {
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+    size_t before = tui.board.groups.count;
+
+    char message[256] = {0};
+    if (!create_group("Refresh Smoke", "RS", message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        tui_free_board(&tui);
+        return 1;
+    }
+
+    int reloaded = tui_reload_if_changed(&tui);
+    printf("Reloaded: %s\n", reloaded ? "yes" : "no");
+    printf("Groups before: %zu\n", before);
+    printf("Groups after: %zu\n", tui.board.groups.count);
+    printf("Status: %s\n", tui.status);
+    int ok = reloaded && tui.board.groups.count == before + 1;
+    tui_free_board(&tui);
+    return ok ? 0 : 1;
+}
+
 static void print_tui_help(void) {
     puts("Usage: dispatch tui [--smoke]");
     puts("");
@@ -3290,6 +3421,7 @@ static void print_tui_help(void) {
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
+    puts("  --refresh-smoke");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -3343,6 +3475,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_palette_complete_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--search-smoke") == 0)
         return tui_search_smoke(argv[3]);
+    if (argc == 3 && strcmp(argv[2], "--refresh-smoke") == 0)
+        return tui_refresh_smoke();
     if (argc != 2) {
         print_tui_help();
         return 1;

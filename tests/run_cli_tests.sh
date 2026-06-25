@@ -1258,6 +1258,20 @@ expect_ok "$BIN" tui --search-smoke rsfvanwl
 assert_contains "Search active: yes"
 assert_contains "Search: rsfvanwl"
 assert_contains "Screen: board"
+case_dir="$(make_case_dir tui-refresh)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" tui --refresh-smoke
+assert_contains "Reloaded: yes"
+assert_contains "Groups before: 0"
+assert_contains "Groups after: 1"
+assert_contains "Status: Board reloaded"
+
+case_dir="$(make_case_dir tui-palette-help)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
 expect_ok "$BIN" tui --help
 assert_contains "Interactive keys:"
 assert_contains "Ctrl+C or :q quits"
