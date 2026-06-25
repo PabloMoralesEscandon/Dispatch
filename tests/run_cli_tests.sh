@@ -1240,6 +1240,12 @@ assert_contains "Status: Readied DE-01"
 expect_ok "$BIN" tui --palette-smoke "log task DE-01"
 assert_contains "Screen: logs"
 assert_contains "Log filter: task=DE-01"
+expect_ok "$BIN" tui --palette-smoke q
+assert_contains "Running: no"
+assert_contains "Status: Quit"
+expect_ok "$BIN" tui --palette-complete-smoke q
+assert_contains "q"
+assert_contains "quit"
 expect_ok "$BIN" tui --palette-complete-smoke ta
 assert_contains "task"
 expect_ok "$BIN" tui --palette-complete-smoke "task DE"
@@ -1250,6 +1256,7 @@ expect_ok "$BIN" tui --palette-complete-smoke "agent co"
 assert_contains "codex-a"
 expect_ok "$BIN" tui --help
 assert_contains "Interactive keys:"
+assert_contains "Ctrl+C or :q quits"
 assert_contains "tmux: no control-prefix bindings"
 assert_contains "--palette-smoke"
 assert_contains "--logs-smoke"

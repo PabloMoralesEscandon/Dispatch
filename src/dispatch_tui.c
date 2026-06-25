@@ -2,6 +2,7 @@
 
 #include <ncurses.h>
 #include <ctype.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,6 +79,12 @@ enum {
 };
 
 static int tui_colors_enabled = 0;
+static volatile sig_atomic_t tui_quit_requested = 0;
+
+static void tui_handle_sigint(int signal_number) {
+    (void)signal_number;
+    tui_quit_requested = 1;
+}
 
 static void tui_style_header_on(void) {
     attron(A_BOLD | A_REVERSE);
@@ -1362,6 +1369,11 @@ static void execute_palette_command(DispatchTui *tui, const char *command) {
         return;
     }
 
+    if (strcmp(verb, "q") == 0 || strcmp(verb, "quit") == 0) {
+        tui->running = 0;
+        tui_set_status(tui, "Quit");
+        return;
+    }
     if (strcmp(verb, "board") == 0 || strcmp(verb, "b") == 0) {
         tui->screen = TUI_SCREEN_BOARD;
         tui_set_status(tui, "Board");
@@ -1500,7 +1512,8 @@ static void run_command_palette(DispatchTui *tui) {
 
 static void print_palette_completion(const DispatchBoard *board,
                                      const char *input) {
-    const char *commands[] = {"board",     "agents", "workspaces", "logs",
+    const char *commands[] = {"q",         "quit",   "board",      "agents",
+                              "workspaces", "logs",
                               "filter",    "group",  "actor",      "log",
                               "task",      "agent",  "workspace",  "ready",
                               "start",     "finish", "review",     NULL};
@@ -1751,7 +1764,8 @@ static void tui_render_help(void) {
     const char *lines[] = {
         "Dispatch TUI Help",
         "",
-        "q        quit",
+        "q        back from inspectors",
+        "Ctrl+C   quit",
         "?        toggle help",
         "u        reload board",
         "r/s/f/v  ready/start/finish/review selected task",
@@ -1765,6 +1779,7 @@ static void tui_render_help(void) {
         "w        switch to workspaces",
         "l/L      logs / selected task or agent logs",
         ":        command palette",
+        ":q       quit",
         "/        search tasks",
         "Esc      clear search",
         "arrows   move selection",
@@ -2325,10 +2340,19 @@ static int tui_run(void) {
         init_pair(TUI_COLOR_SELECTED, COLOR_BLACK, COLOR_CYAN);
         tui_colors_enabled = 1;
     }
+    signal(SIGINT, tui_handle_sigint);
 
     while (tui.running) {
+        if (tui_quit_requested) {
+            tui.running = 0;
+            break;
+        }
         tui_render(&tui);
         int ch = getch();
+        if (tui_quit_requested) {
+            tui.running = 0;
+            break;
+        }
         switch (ch) {
         case 'q':
             if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
@@ -2339,7 +2363,7 @@ static int tui_run(void) {
             else if (tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
                 tui.screen = TUI_SCREEN_WORKSPACES;
             else
-                tui.running = 0;
+                tui_set_status(&tui, "Use :q or Ctrl+C to quit");
             break;
         case '\t':
             tui.screen = tui.screen == TUI_SCREEN_AGENTS ? TUI_SCREEN_BOARD
@@ -3147,6 +3171,7 @@ static int tui_palette_smoke(const char *command) {
     }
     execute_palette_command(&tui, command);
     printf("Screen: %s\n", screen_name(tui.screen));
+    printf("Running: %s\n", tui.running ? "yes" : "no");
     printf("Status: %s\n", tui.status);
     printf("Filter: %s\n", filter_name(tui.filter));
     if (tui.log_filter_field[0])
@@ -3189,6 +3214,7 @@ static void print_tui_help(void) {
     puts("Interactive keys:");
     puts("  b board, a/Tab agents, w workspaces, l logs, : command palette");
     puts("  j/k or arrows move, Enter/i inspect, q/Esc backs out");
+    puts("  Ctrl+C or :q quits");
     puts("  r/s/f/v ready/start/finish/review selected task");
     puts("  tmux: no control-prefix bindings; run alongside tmux panes");
     puts("");

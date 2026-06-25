@@ -334,6 +334,8 @@ l          logs
 Enter/i    inspect selected item
 q or Esc   leave inspector
 :          command palette
+:q         quit
+Ctrl+C     quit
 ?          help
 ```
 
@@ -367,6 +369,7 @@ The command palette accepts compact commands:
 
 ```text
 board | agents | workspaces | logs
+q | quit
 filter ready|blocked|review|doing|done|attention|all|not-done
 group <prefix>|all
 actor <agent>|all
@@ -385,12 +388,13 @@ checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
 Tmux keymap validation:
 
 ```text
-No Dispatch action uses Ctrl-a, Ctrl-b, or any other control-prefix chord.
+No Dispatch action uses Ctrl-a, Ctrl-b, or tmux prefix chords.
 Core movement uses arrows or j/k.
 Major views use b, a/Tab, w, and l.
 Mutations use printable single keys plus focused confirmations for destructive
 workspace actions.
-The command palette uses :, leaving tmux prefix handling entirely to tmux.
+The command palette uses :, and quitting is explicit through :q or Ctrl+C,
+leaving tmux prefix handling entirely to tmux.
 ```
 
 Dispatch does not launch or manage tmux panes in v1. Run `dispatch tui` in one
