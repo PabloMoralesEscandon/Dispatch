@@ -652,16 +652,14 @@ static char *editor_command_for_path(const char *path) {
     const char *editor = getenv("EDITOR");
     if (!editor || !editor[0])
         editor = "vi";
-    char *editor_q = tui_shell_quote(editor);
     char *path_q = tui_shell_quote(path);
-    size_t size = strlen(editor_q) + strlen(path_q) + 2;
+    size_t size = strlen(editor) + strlen(path_q) + 2;
     char *command = malloc(size);
     if (!command) {
         fprintf(stderr, "Out of memory\n");
         exit(1);
     }
-    snprintf(command, size, "%s %s", editor_q, path_q);
-    free(editor_q);
+    snprintf(command, size, "%s %s", editor, path_q);
     free(path_q);
     return command;
 }
@@ -672,7 +670,7 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
         tui_set_status(tui, "No selected agent");
         return;
     }
-    if (!agent->prompt_path || access(agent->prompt_path, R_OK) != 0) {
+    if (!agent->prompt_path || access(agent->prompt_path, F_OK) != 0) {
         tui_set_status(tui, "Prompt file missing");
         return;
     }
