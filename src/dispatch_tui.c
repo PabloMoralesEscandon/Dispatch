@@ -70,6 +70,46 @@ static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
 static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent);
 
+enum {
+    TUI_COLOR_HEADER = 1,
+    TUI_COLOR_ALT_ROW = 2,
+    TUI_COLOR_SELECTED = 3,
+};
+
+static int tui_colors_enabled = 0;
+
+static void tui_style_header_on(void) {
+    attron(A_BOLD | A_REVERSE);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_HEADER));
+}
+
+static void tui_style_header_off(void) {
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_HEADER));
+    attroff(A_BOLD | A_REVERSE);
+}
+
+static void tui_style_row_on(int row_index, int selected) {
+    if (selected) {
+        attron(A_REVERSE);
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_SELECTED));
+    } else if ((row_index % 2) == 1 && tui_colors_enabled) {
+        attron(COLOR_PAIR(TUI_COLOR_ALT_ROW));
+    }
+}
+
+static void tui_style_row_off(int row_index, int selected) {
+    if (selected) {
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_SELECTED));
+        attroff(A_REVERSE);
+    } else if ((row_index % 2) == 1 && tui_colors_enabled) {
+        attroff(COLOR_PAIR(TUI_COLOR_ALT_ROW));
+    }
+}
+
 static int title_starts_with_dispatch_id_like(const char *title) {
     if (!title)
         return 0;
@@ -1756,8 +1796,10 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         return;
     }
 
+    tui_style_header_on();
     draw_truncated(y++, 0, cols,
                    "Name             Runner   Status    Session  Current task  Last workspace");
+    tui_style_header_off();
     int visible_index = 0;
     for (size_t i = 0; i < tui->board.agents.count && y < rows - 1; i++) {
         DispatchAgent *agent = &tui->board.agents.items[i];
@@ -1770,11 +1812,10 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                  agent->session_id ? "yes" : "no",
                  agent->current_task ? agent->current_task : "-",
                  agent->last_workspace ? agent->last_workspace : "-");
-        if (visible_index == tui->selected_agent)
-            attron(A_REVERSE);
+        int selected = visible_index == tui->selected_agent;
+        tui_style_row_on(visible_index, selected);
         draw_truncated(y++, 0, cols, line);
-        if (visible_index == tui->selected_agent)
-            attroff(A_REVERSE);
+        tui_style_row_off(visible_index, selected);
         visible_index++;
     }
 }
@@ -1788,8 +1829,10 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         return;
     }
 
+    tui_style_header_on();
     draw_truncated(y++, 0, cols,
                    "Task     Task state  Workspace  Actor       Dirty  Git      Branch / Path");
+    tui_style_header_off();
     for (size_t i = 0; i < tui->board.workspaces.count && y < rows - 1; i++) {
         DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
         if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
@@ -1809,11 +1852,10 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
                  workspace->actor, dirty ? "yes" : "no",
                  git_present ? "present" : "missing", workspace->branch,
                  workspace->path);
-        if (visible_index == tui->selected_workspace)
-            attron(A_REVERSE);
+        int selected = visible_index == tui->selected_workspace;
+        tui_style_row_on(visible_index, selected);
         draw_truncated(y++, 0, cols, line);
-        if (visible_index == tui->selected_workspace)
-            attroff(A_REVERSE);
+        tui_style_row_off(visible_index, selected);
         visible_index++;
     }
 }
@@ -1827,10 +1869,14 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         return;
     }
 
-    int visible_rows = rows - start_y - 1;
+    int visible_rows = rows - start_y - 2;
     sync_log_scroll(tui, visible_rows);
     int visible_index = 0;
     int any_visible = 0;
+    tui_style_header_on();
+    draw_truncated(y++, 0, cols,
+                   "Time                 Actor        Command    Action             Target  Message");
+    tui_style_header_off();
     for (size_t i = records.count; i > 0 && y < rows - 1; i--) {
         json_t *record = records.items[i - 1];
         if (visible_index < tui->log_top) {
@@ -1858,11 +1904,10 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         char row[1400];
         snprintf(row, sizeof(row), "%s %-12s %-10s %-18s%s  %s", time,
                  actor, command, action, target, message);
-        if (visible_index == tui->selected_log)
-            attron(A_REVERSE);
+        int selected = visible_index == tui->selected_log;
+        tui_style_row_on(visible_index, selected);
         draw_truncated(y++, 0, cols, row);
-        if (visible_index == tui->selected_log)
-            attroff(A_REVERSE);
+        tui_style_row_off(visible_index, selected);
         visible_index++;
         any_visible = 1;
     }
@@ -2083,9 +2128,9 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         char heading[256];
         snprintf(heading, sizeof(heading), "[%s] %s", group->prefix,
                  group->name);
-        attron(A_BOLD);
+        tui_style_header_on();
         draw_truncated(y++, 0, cols, heading);
-        attroff(A_BOLD);
+        tui_style_header_off();
 
         for (size_t i = 0; i < tui->board.tasks.count && y < rows - 1; i++) {
             DispatchTask *task = &tui->board.tasks.items[i];
@@ -2107,11 +2152,10 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                      task->requires_review ? " review:yes" : "",
                      task->commits.count > 0 ? " commits" : "", meta);
 
-            if (visible_index == tui->selected_task)
-                attron(A_REVERSE);
+            int selected = visible_index == tui->selected_task;
+            tui_style_row_on(visible_index, selected);
             draw_truncated(y++, 0, cols, line);
-            if (visible_index == tui->selected_task)
-                attroff(A_REVERSE);
+            tui_style_row_off(visible_index, selected);
             visible_index++;
             any_visible = 1;
         }
@@ -2268,6 +2312,10 @@ static int tui_run(void) {
     if (has_colors()) {
         start_color();
         use_default_colors();
+        init_pair(TUI_COLOR_HEADER, COLOR_CYAN, -1);
+        init_pair(TUI_COLOR_ALT_ROW, COLOR_BLUE, -1);
+        init_pair(TUI_COLOR_SELECTED, COLOR_BLACK, COLOR_CYAN);
+        tui_colors_enabled = 1;
     }
 
     while (tui.running) {
