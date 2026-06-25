@@ -80,6 +80,7 @@ enum {
     TUI_COLOR_HEADER = 1,
     TUI_COLOR_ALT_ROW = 2,
     TUI_COLOR_SELECTED = 3,
+    TUI_COLOR_TITLE = 4,
 };
 
 static int tui_colors_enabled = 0;
@@ -99,6 +100,18 @@ static void tui_style_header_on(void) {
 static void tui_style_header_off(void) {
     if (tui_colors_enabled)
         attroff(COLOR_PAIR(TUI_COLOR_HEADER));
+    attroff(A_BOLD | A_REVERSE);
+}
+
+static void tui_style_title_on(void) {
+    attron(A_BOLD | A_REVERSE);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_TITLE));
+}
+
+static void tui_style_title_off(void) {
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_TITLE));
     attroff(A_BOLD | A_REVERSE);
 }
 
@@ -1940,6 +1953,13 @@ static void draw_truncated(int y, int x, int width, const char *text) {
     mvaddnstr(y, x, text ? text : "", width);
 }
 
+static void draw_padded(int y, int x, int width, const char *text) {
+    if (width <= 0)
+        return;
+    mvhline(y, x, ' ', width);
+    mvaddnstr(y, x, text ? text : "", width);
+}
+
 static void tui_render_help(void) {
     int rows = 0;
     int cols = 0;
@@ -1999,13 +2019,13 @@ static void tui_render_help(void) {
 static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     if (tui->board.agents.count == 0) {
-        draw_truncated(y, 0, cols, "(no agents)");
+        draw_padded(y, 0, cols, "(no agents)");
         return;
     }
 
     tui_style_header_on();
-    draw_truncated(y++, 0, cols,
-                   "Name             Runner   Status    Session  Current task  Last workspace");
+    draw_padded(y++, 0, cols,
+                "Name             Runner   Status    Session  Current task  Last workspace");
     tui_style_header_off();
     int visible_index = 0;
     for (size_t i = 0; i < tui->board.agents.count && y < rows - 1; i++) {
@@ -2021,7 +2041,7 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                  agent->last_workspace ? agent->last_workspace : "-");
         int selected = visible_index == tui->selected_agent;
         tui_style_row_on(visible_index, selected);
-        draw_truncated(y++, 0, cols, line);
+        draw_padded(y++, 0, cols, line);
         tui_style_row_off(visible_index, selected);
         visible_index++;
     }
@@ -2032,13 +2052,13 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
     int y = start_y;
     int visible_index = 0;
     if (visible_workspace_count(tui) == 0) {
-        draw_truncated(y, 0, cols, "(no active workspaces)");
+        draw_padded(y, 0, cols, "(no active workspaces)");
         return;
     }
 
     tui_style_header_on();
-    draw_truncated(y++, 0, cols,
-                   "Task     Task state  Workspace  Actor       Dirty  Git      Branch / Path");
+    draw_padded(y++, 0, cols,
+                "Task     Task state  Workspace  Actor       Dirty  Git      Branch / Path");
     tui_style_header_off();
     for (size_t i = 0; i < tui->board.workspaces.count && y < rows - 1; i++) {
         DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
@@ -2061,7 +2081,7 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
                  workspace->path);
         int selected = visible_index == tui->selected_workspace;
         tui_style_row_on(visible_index, selected);
-        draw_truncated(y++, 0, cols, line);
+        draw_padded(y++, 0, cols, line);
         tui_style_row_off(visible_index, selected);
         visible_index++;
     }
@@ -2072,7 +2092,7 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     TuiLogRecords records;
     if (!load_matching_log_records(tui->log_filter_field, tui->log_filter_value,
                                    &records)) {
-        draw_truncated(y, 0, cols, "(no dispatch.log)");
+        draw_padded(y, 0, cols, "(no dispatch.log)");
         return;
     }
 
@@ -2081,8 +2101,8 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int visible_index = 0;
     int any_visible = 0;
     tui_style_header_on();
-    draw_truncated(y++, 0, cols,
-                   "Time                 Actor        Command    Action             Target  Message");
+    draw_padded(y++, 0, cols,
+                "Time                 Actor        Command    Action             Target  Message");
     tui_style_header_off();
     for (size_t i = records.count; i > 0 && y < rows - 1; i--) {
         json_t *record = records.items[i - 1];
@@ -2113,14 +2133,14 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                  actor, command, action, target, message);
         int selected = visible_index == tui->selected_log;
         tui_style_row_on(visible_index, selected);
-        draw_truncated(y++, 0, cols, row);
+        draw_padded(y++, 0, cols, row);
         tui_style_row_off(visible_index, selected);
         visible_index++;
         any_visible = 1;
     }
     log_records_free(&records);
     if (!any_visible)
-        draw_truncated(y, 0, cols, "(no matching log records)");
+        draw_padded(y, 0, cols, "(no matching log records)");
 }
 
 static int draw_line(int y, int rows, int cols, const char *label,
@@ -2336,7 +2356,7 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         snprintf(heading, sizeof(heading), "[%s] %s", group->prefix,
                  group->name);
         tui_style_header_on();
-        draw_truncated(y++, 0, cols, heading);
+        draw_padded(y++, 0, cols, heading);
         tui_style_header_off();
 
         for (size_t i = 0; i < tui->board.tasks.count && y < rows - 1; i++) {
@@ -2361,7 +2381,7 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
 
             int selected = visible_index == tui->selected_task;
             tui_style_row_on(visible_index, selected);
-            draw_truncated(y++, 0, cols, line);
+            draw_padded(y++, 0, cols, line);
             tui_style_row_off(visible_index, selected);
             visible_index++;
             any_visible = 1;
@@ -2369,9 +2389,9 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     }
 
     if (!any_visible && y < rows - 1) {
-        draw_truncated(y, 0, cols,
-                       tui->search[0] ? "(no matching not-done tasks)"
-                                      : "(no not-done tasks)");
+        draw_padded(y, 0, cols,
+                    tui->search[0] ? "(no matching not-done tasks)"
+                                   : "(no not-done tasks)");
     }
 }
 
@@ -2382,26 +2402,26 @@ static void tui_render(DispatchTui *tui) {
     erase();
     clamp_selection(tui);
 
-    attron(A_BOLD);
-    draw_truncated(0, 0, cols,
-                   tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                       ? "Dispatch TUI - Task"
-                       : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
-                             ? "Dispatch TUI - Agent"
-                       : tui->screen == TUI_SCREEN_TASK_FORM
-                             ? "Dispatch TUI - New Task"
-                       : tui->screen == TUI_SCREEN_GROUP_FORM
-                             ? "Dispatch TUI - New Group"
-                       : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
-                             ? "Dispatch TUI - Workspace"
-                       : tui->screen == TUI_SCREEN_WORKSPACES
-                             ? "Dispatch TUI - Workspaces"
-                       : tui->screen == TUI_SCREEN_LOGS
-                             ? "Dispatch TUI - Logs"
-                       : tui->screen == TUI_SCREEN_AGENTS
-                             ? "Dispatch TUI - Agents"
-                             : "Dispatch TUI - Board");
-    attroff(A_BOLD);
+    tui_style_title_on();
+    draw_padded(0, 0, cols,
+                tui->screen == TUI_SCREEN_TASK_INSPECTOR
+                    ? "Dispatch TUI - Task"
+                    : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
+                          ? "Dispatch TUI - Agent"
+                    : tui->screen == TUI_SCREEN_TASK_FORM
+                          ? "Dispatch TUI - New Task"
+                    : tui->screen == TUI_SCREEN_GROUP_FORM
+                          ? "Dispatch TUI - New Group"
+                    : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
+                          ? "Dispatch TUI - Workspace"
+                    : tui->screen == TUI_SCREEN_WORKSPACES
+                          ? "Dispatch TUI - Workspaces"
+                    : tui->screen == TUI_SCREEN_LOGS
+                          ? "Dispatch TUI - Logs"
+                    : tui->screen == TUI_SCREEN_AGENTS
+                          ? "Dispatch TUI - Agents"
+                          : "Dispatch TUI - Board");
+    tui_style_title_off();
 
     if (!tui->board_loaded) {
         draw_truncated(2, 0, cols, "Board not loaded.");
@@ -2520,9 +2540,10 @@ static int tui_run(void) {
     if (has_colors()) {
         start_color();
         use_default_colors();
-        init_pair(TUI_COLOR_HEADER, COLOR_CYAN, -1);
-        init_pair(TUI_COLOR_ALT_ROW, COLOR_BLUE, -1);
+        init_pair(TUI_COLOR_HEADER, COLOR_WHITE, COLOR_BLUE);
+        init_pair(TUI_COLOR_ALT_ROW, COLOR_WHITE, COLOR_BLACK);
         init_pair(TUI_COLOR_SELECTED, COLOR_BLACK, COLOR_CYAN);
+        init_pair(TUI_COLOR_TITLE, COLOR_BLACK, COLOR_CYAN);
         tui_colors_enabled = 1;
     }
     signal(SIGINT, tui_handle_sigint);
