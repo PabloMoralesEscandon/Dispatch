@@ -2591,7 +2591,7 @@ static int cmd_task(int argc, char **argv) {
     if (argc < 5 || strcmp(argv[2], "add") != 0) {
         fprintf(stderr,
                 "Usage: dispatch task add <group> <title> [--description "
-                "text] [--no-review]\n");
+                "text] [--actor <name>] [--no-review]\n");
         fprintf(stderr, "       dispatch task delete <id> [--force]\n");
         return 1;
     }
@@ -2599,6 +2599,7 @@ static int cmd_task(int argc, char **argv) {
     const char *group = argv[3];
     const char *title = argv[4];
     const char *description = "";
+    const char *actor = "user";
     int requires_review = 1;
 
     if (title_starts_with_dispatch_id(title)) {
@@ -2610,12 +2611,19 @@ static int cmd_task(int argc, char **argv) {
     for (int i = 5; i < argc; i++) {
         if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
             description = argv[++i];
+        } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
         } else if (strcmp(argv[i], "--no-review") == 0) {
             requires_review = 0;
         } else {
             fprintf(stderr, "Unknown task option: %s\n", argv[i]);
             return 1;
         }
+    }
+    if (!dispatch_actor_label_is_valid(actor)) {
+        fprintf(stderr,
+                "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+        return 1;
     }
 
     LockedBoard locked;
@@ -2624,7 +2632,8 @@ static int cmd_task(int argc, char **argv) {
     DispatchBoard *board = &locked.board;
 
     DispatchTask *task =
-        dispatch_board_add_task(board, group, title, description);
+        dispatch_board_add_task_with_actor(board, group, title, description,
+                                           actor);
     if (!task) {
         locked_board_close(&locked);
         fprintf(stderr, "Could not add task '%s' to group '%s'\n", title,
@@ -2651,7 +2660,7 @@ static int cmd_task(int argc, char **argv) {
     };
     char message[256];
     snprintf(message, sizeof(message), "Added task %s", task_id);
-    append_dispatch_log("user", "task", "add", targets, 2, context, 2,
+    append_dispatch_log(actor, "task", "add", targets, 2, context, 2,
                         message);
     free(task_id);
     locked_board_close(&locked);
@@ -2976,7 +2985,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      group) [[ $sub == ready ]] && _dispatch_complete_words "
         "\"--actor --no-review\" ;;\n"
         "      task) [[ $sub == delete ]] && _dispatch_complete_words "
-        "\"--force\" || _dispatch_complete_words \"--description --no-review\" ;;\n"
+        "\"--force\" || _dispatch_complete_words \"--description --actor --no-review\" ;;\n"
         "      commit) [[ $sub == add ]] && _dispatch_complete_words \"--actor\" ;;\n"
         "      ready) _dispatch_complete_words \"--actor --no-review\" ;;\n"
         "      start|finish|review) _dispatch_complete_words \"--actor\" ;;\n"
@@ -3147,6 +3156,8 @@ static int cmd_completion_fish(int argc, char **argv) {
         "__fish_seen_subcommand_from ready' -l no-review\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
         "__fish_seen_subcommand_from add' -l description\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
+        "__fish_seen_subcommand_from add' -l actor\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "
         "__fish_seen_subcommand_from add' -l no-review\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from task; and "

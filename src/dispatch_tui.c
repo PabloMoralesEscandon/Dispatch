@@ -1108,7 +1108,7 @@ static int add_dependencies_from_text(DispatchBoard *board, const char *task_id,
 
 static int create_task(const char *group, const char *title,
                        const char *description, int requires_review,
-                       const char *depends_text, char *message,
+                       const char *depends_text, const char *actor, char *message,
                        size_t message_size) {
     if (!group || !group[0]) {
         snprintf(message, message_size, "Group is required");
@@ -1143,7 +1143,9 @@ static int create_task(const char *group, const char *title,
     }
 
     DispatchTask *task =
-        dispatch_board_add_task(&board, group, title, description ? description : "");
+        dispatch_board_add_task_with_actor(&board, group, title,
+                                           description ? description : "",
+                                           actor && actor[0] ? actor : "user");
     if (!task) {
         snprintf(message, message_size, "Could not add task %s", title);
         dispatch_board_free(&board);
@@ -1323,7 +1325,7 @@ static void run_task_form(DispatchTui *tui) {
         return;
 
     char message[256] = {0};
-    create_task(group, title, description, requires_review, deps, message,
+    create_task(group, title, description, requires_review, deps, tui->actor, message,
                 sizeof(message));
     tui_load_board(tui);
     tui_set_status(tui, message);
@@ -3104,7 +3106,7 @@ static int tui_create_task_smoke(const char *group, const char *title,
 
     char message[256] = {0};
     if (!create_task(group, title, strcmp(description, "-") == 0 ? "" : description,
-                     requires_review, depends_text, message, sizeof(message))) {
+                     requires_review, depends_text, "user", message, sizeof(message))) {
         fprintf(stderr, "%s\n", message);
         return 1;
     }

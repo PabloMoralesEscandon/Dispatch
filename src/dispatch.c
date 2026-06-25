@@ -541,6 +541,15 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
                                       const char *group_id,
                                       const char *title,
                                       const char *description) {
+    return dispatch_board_add_task_with_actor(board, group_id, title,
+                                              description, "system");
+}
+
+DispatchTask *dispatch_board_add_task_with_actor(DispatchBoard *board,
+                                                 const char *group_id,
+                                                 const char *title,
+                                                 const char *description,
+                                                 const char *actor) {
     DispatchGroup *group = dispatch_board_find_group(board, group_id);
     if (!board || !group || !title || title[0] == '\0')
         return NULL;
@@ -566,7 +575,8 @@ DispatchTask *dispatch_board_add_task(DispatchBoard *board,
     task->requires_review = 1;
     task->created_at = time(NULL);
     task->updated_at = task->created_at;
-    dispatch_task_append_history(task, "system", "created", "");
+    dispatch_task_append_history(task, actor && actor[0] ? actor : "system",
+                                 "created", "");
     return task;
 }
 

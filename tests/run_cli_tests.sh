@@ -490,7 +490,11 @@ if [ "$before_failed" -ne "$after_failed" ]; then
     fail "failed mutation appended to dispatch.log"
 fi
 
-expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE Root --actor planner --no-review
+assert_file_contains dispatch.log '"actor":"planner"'
+assert_file_contains dispatch.log '"command":"task"'
+expect_ok "$BIN" show DE-01
+assert_contains "created by planner"
 expect_ok "$BIN" ready DE-01 --actor alice --no-review
 assert_file_contains dispatch.log '"actor":"alice"'
 assert_file_contains dispatch.log '"command":"ready"'
@@ -1041,6 +1045,7 @@ assert_contains "candidates bash fish zsh install"
 assert_contains "all \$(_dispatch_candidate_values groups)"
 assert_contains "_dispatch_complete_candidates tasks"
 assert_contains "--actor --no-review"
+assert_contains "--description --actor --no-review"
 
 expect_fail "$BIN" completion bash extra
 assert_contains "Usage: dispatch completion candidates"
@@ -1048,6 +1053,7 @@ assert_contains "Usage: dispatch completion candidates"
 expect_ok "$BIN" completion fish
 assert_contains "function __dispatch_command"
 assert_contains "function __dispatch_candidates"
+assert_contains "__fish_seen_subcommand_from add' -l actor"
 assert_contains "command \$cmd completion candidates \$argv[1]"
 assert_contains "candidates bash fish zsh install"
 assert_contains "all (__dispatch_candidates groups)"

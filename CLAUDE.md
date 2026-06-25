@@ -74,7 +74,7 @@ dispatch finish <TASK-ID> --actor <agent-id>
 dispatch review <TASK-ID> --actor <user-or-reviewer-id>
 dispatch group add <name> --prefix <PREFIX>
 dispatch group ready <group> --actor <name> [--no-review]
-dispatch task add <group> <title> [--description <text>] [--no-review]
+dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
 dispatch commit add <TASK-ID> <sha> [--actor <agent-id>]
@@ -249,9 +249,9 @@ Example agent flow:
 
 ```bash
 dispatch group add "Development" --prefix DE
-dispatch task add DE "Design JSON output contract" --description "Define the machine-readable output shape for list, ready, blocked, and show."
-dispatch task add DE "Implement JSON output flag" --description "Add --json output for supported commands."
-dispatch task add DE "Test JSON output commands" --description "Verify valid JSON and expected fields."
+dispatch task add DE "Design JSON output contract" --actor claude --description "Define the machine-readable output shape for list, ready, blocked, and show."
+dispatch task add DE "Implement JSON output flag" --actor claude --description "Add --json output for supported commands."
+dispatch task add DE "Test JSON output commands" --actor claude --description "Verify valid JSON and expected fields."
 dispatch dep add DE-01 DE-02  # DE-02 depends on DE-01
 dispatch dep add DE-02 DE-03  # DE-03 depends on DE-02
 dispatch ready DE-01 --actor user
