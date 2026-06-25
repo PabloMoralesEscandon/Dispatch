@@ -861,10 +861,49 @@ static void run_selected_task_diff(DispatchTui *tui) {
     free(command);
 }
 
-static char *editor_command_for_path(const char *path) {
+static int command_available(const char *command) {
+    char *command_q = tui_shell_quote(command);
+    size_t size = strlen("command -v  >/dev/null 2>&1") + strlen(command_q) + 1;
+    char *check = malloc(size);
+    if (!check) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(check, size, "command -v %s >/dev/null 2>&1", command_q);
+    int ok = system(check) == 0;
+    free(command_q);
+    free(check);
+    return ok;
+}
+
+static const char *fallback_editor(void) {
+    const char *editors[] = {"nano", "vim", "vi", "sensible-editor", NULL};
+    for (int i = 0; editors[i]; i++) {
+        if (command_available(editors[i]))
+            return editors[i];
+    }
+    return NULL;
+}
+
+static const char *configured_editor(void) {
+    const char *visual = getenv("VISUAL");
+    if (visual && visual[0])
+        return visual;
     const char *editor = getenv("EDITOR");
-    if (!editor || !editor[0])
-        editor = "vi";
+    if (editor && editor[0])
+        return editor;
+    return fallback_editor();
+}
+
+static char *editor_command_for_path(const char *path, char *error,
+                                     size_t error_size) {
+    const char *editor = configured_editor();
+    if (!editor || !editor[0]) {
+        snprintf(error, error_size,
+                 "No editor configured; set VISUAL or EDITOR to edit %s",
+                 path ? path : "the prompt");
+        return NULL;
+    }
     char *path_q = tui_shell_quote(path);
     size_t size = strlen(editor) + strlen(path_q) + 2;
     char *command = malloc(size);
@@ -888,7 +927,13 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
         return;
     }
 
-    char *command = editor_command_for_path(agent->prompt_path);
+    char error[256] = {0};
+    char *command = editor_command_for_path(agent->prompt_path, error,
+                                           sizeof(error));
+    if (!command) {
+        tui_set_status(tui, error);
+        return;
+    }
     def_prog_mode();
     endwin();
     int result = system(command);
@@ -3033,7 +3078,14 @@ static int tui_prompt_edit_smoke(const char *name) {
         return 1;
     }
 
-    char *command = editor_command_for_path(agent->prompt_path);
+    char editor_error[256] = {0};
+    char *command = editor_command_for_path(agent->prompt_path, editor_error,
+                                           sizeof(editor_error));
+    if (!command) {
+        fprintf(stderr, "%s\n", editor_error);
+        dispatch_board_free(&board);
+        return 1;
+    }
     printf("%s\n", command);
     free(command);
     dispatch_board_free(&board);

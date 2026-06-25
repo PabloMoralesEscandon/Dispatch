@@ -921,8 +921,12 @@ assert_contains "Session ID: tui-session-2"
 
 EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "ed '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+VISUAL=nano EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
+assert_contains "nano '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
 EDITOR="code --wait" expect_ok "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "code --wait '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+expect_fail /usr/bin/env PATH=/nonexistent EDITOR= VISUAL= "$BIN" tui --prompt-edit-smoke codex-a
+assert_contains "No editor configured"
 
 expect_ok "$BIN" tui --agent-archive-smoke dormant archive
 assert_contains "Archived agent dormant"
