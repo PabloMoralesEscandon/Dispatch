@@ -111,6 +111,10 @@ enum {
 static int tui_colors_enabled = 0;
 static volatile sig_atomic_t tui_quit_requested = 0;
 
+enum {
+    TUI_ESCAPE_DELAY_MS = 25,
+};
+
 static void tui_handle_sigint(int signal_number) {
     (void)signal_number;
     tui_quit_requested = 1;
@@ -3042,6 +3046,7 @@ static int tui_run(void) {
     tui_load_board(&tui);
 
     initscr();
+    set_escdelay(TUI_ESCAPE_DELAY_MS);
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
@@ -3800,6 +3805,11 @@ static int tui_prompt_cancel_smoke(void) {
     return cancelled && !done ? 0 : 1;
 }
 
+static int tui_escdelay_smoke(void) {
+    printf("Escape delay ms: %d\n", TUI_ESCAPE_DELAY_MS);
+    return TUI_ESCAPE_DELAY_MS <= 50 ? 0 : 1;
+}
+
 static int tui_dependency_smoke(const char *action, const char *dependency_id,
                                 const char *dependent_id) {
     int add;
@@ -4106,6 +4116,7 @@ static void print_tui_help(void) {
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --task-form-submit-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --prompt-cancel-smoke");
+    puts("  --escdelay-smoke");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
     puts("  --workspaces-smoke          print workspace dashboard data and exit");
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
@@ -4161,6 +4172,8 @@ int dispatch_tui_main(int argc, char **argv) {
                                          argv[7]);
     if (argc == 3 && strcmp(argv[2], "--prompt-cancel-smoke") == 0)
         return tui_prompt_cancel_smoke();
+    if (argc == 3 && strcmp(argv[2], "--escdelay-smoke") == 0)
+        return tui_escdelay_smoke();
     if (argc == 6 && strcmp(argv[2], "--dependency-smoke") == 0)
         return tui_dependency_smoke(argv[3], argv[4], argv[5]);
     if (argc == 3 && strcmp(argv[2], "--workspaces-smoke") == 0)
