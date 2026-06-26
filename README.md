@@ -350,10 +350,10 @@ doing, `7` done, and `R` attention. `G` cycles groups, `A` cycles actors, `/`
 searches, and `c` clears secondary filters.
 
 Task actions are available from the board and task inspector: `r` ready, `s`
-start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` creates
-a task, `+` creates a group, `>` adds a dependency to the inspected task, `<`
-removes a dependency, and `d` opens the selected task commit with `git show`
-when commit metadata exists.
+start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a
+full-screen task creation form with boxed fields, `+` creates a group, `>` adds
+a dependency to the inspected task, `<` removes a dependency, and `d` opens the
+selected task commit with `git show` when commit metadata exists.
 
 The agents view lists enabled agents by default. `A` toggles enabled/all,
 `z` archives or restores the selected agent, `y` copies the selected agent run

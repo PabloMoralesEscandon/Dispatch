@@ -71,12 +71,33 @@ typedef struct {
     size_t capacity;
 } TuiLogRecords;
 
+typedef struct {
+    char group[32];
+    char title[256];
+    char description[512];
+    char deps[256];
+    int requires_review;
+    int active_field;
+    char status[256];
+} TuiTaskForm;
+
+enum {
+    TUI_TASK_FORM_GROUP = 0,
+    TUI_TASK_FORM_TITLE = 1,
+    TUI_TASK_FORM_DESCRIPTION = 2,
+    TUI_TASK_FORM_DEPS = 3,
+    TUI_TASK_FORM_REVIEW = 4,
+    TUI_TASK_FORM_FIELD_COUNT = 5,
+};
+
 static DispatchTask *selected_visible_task(DispatchTui *tui);
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
 static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent);
 static int prompt_line(const char *label, char *buffer, size_t buffer_size,
                        const char *initial);
+static void draw_truncated(int y, int x, int width, const char *text);
+static void draw_padded(int y, int x, int width, const char *text);
 
 enum {
     TUI_COLOR_HEADER = 1,
@@ -1533,30 +1554,275 @@ static void run_group_form(DispatchTui *tui) {
     tui_set_status(tui, message);
 }
 
+static void task_form_buffer(TuiTaskForm *form, int field, char **buffer,
+                             size_t *buffer_size) {
+    *buffer = NULL;
+    *buffer_size = 0;
+    switch (field) {
+    case TUI_TASK_FORM_GROUP:
+        *buffer = form->group;
+        *buffer_size = sizeof(form->group);
+        break;
+    case TUI_TASK_FORM_TITLE:
+        *buffer = form->title;
+        *buffer_size = sizeof(form->title);
+        break;
+    case TUI_TASK_FORM_DESCRIPTION:
+        *buffer = form->description;
+        *buffer_size = sizeof(form->description);
+        break;
+    case TUI_TASK_FORM_DEPS:
+        *buffer = form->deps;
+        *buffer_size = sizeof(form->deps);
+        break;
+    default:
+        break;
+    }
+}
+
+static void draw_task_form_box(int y, int x, int width, int height,
+                               const char *label, const char *value,
+                               int active) {
+    if (width < 8 || height < 3)
+        return;
+
+    if (active)
+        attron(A_BOLD);
+    mvaddnstr(y, x, label, width);
+    if (active)
+        attroff(A_BOLD);
+
+    int box_y = y + 1;
+    if (active)
+        attron(A_REVERSE);
+    mvaddch(box_y, x, ACS_ULCORNER);
+    mvhline(box_y, x + 1, ACS_HLINE, width - 2);
+    mvaddch(box_y, x + width - 1, ACS_URCORNER);
+    for (int row = 1; row < height - 1; row++) {
+        mvaddch(box_y + row, x, ACS_VLINE);
+        mvhline(box_y + row, x + 1, ' ', width - 2);
+        mvaddch(box_y + row, x + width - 1, ACS_VLINE);
+    }
+    mvaddch(box_y + height - 1, x, ACS_LLCORNER);
+    mvhline(box_y + height - 1, x + 1, ACS_HLINE, width - 2);
+    mvaddch(box_y + height - 1, x + width - 1, ACS_LRCORNER);
+    if (active)
+        attroff(A_REVERSE);
+
+    int inner_width = width - 4;
+    if (inner_width <= 0)
+        return;
+    const char *text = value ? value : "";
+    for (int row = 0; row < height - 2; row++) {
+        size_t offset = (size_t)row * (size_t)inner_width;
+        if (offset >= strlen(text))
+            break;
+        mvaddnstr(box_y + 1 + row, x + 2, text + offset, inner_width);
+    }
+}
+
+static void draw_task_form_review_box(int y, int x, int width,
+                                      const TuiTaskForm *form) {
+    draw_task_form_box(y, x, width, 3, "Requires review",
+                       form->requires_review ? "yes" : "no",
+                       form->active_field == TUI_TASK_FORM_REVIEW);
+}
+
+static void task_form_move_cursor(const TuiTaskForm *form, int rows, int cols,
+                                  int left, int width, int desc_height) {
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    TuiTaskForm mutable_form = *form;
+    task_form_buffer(&mutable_form, form->active_field, &buffer, &buffer_size);
+    (void)buffer_size;
+    if (!buffer)
+        return;
+
+    int y = 3;
+    int height = 3;
+    if (form->active_field == TUI_TASK_FORM_TITLE) {
+        y += 4;
+    } else if (form->active_field == TUI_TASK_FORM_DESCRIPTION) {
+        y += 8;
+        height = desc_height;
+    } else if (form->active_field == TUI_TASK_FORM_DEPS) {
+        y += 9 + desc_height;
+    }
+
+    int inner_width = width - 4;
+    if (inner_width <= 0)
+        return;
+    size_t len = strlen(buffer);
+    int max_pos = inner_width * (height - 2) - 1;
+    int pos = (int)(len > (size_t)max_pos ? (size_t)max_pos : len);
+    int cursor_y = y + 2 + pos / inner_width;
+    int cursor_x = left + 2 + pos % inner_width;
+    if (cursor_y < rows - 1 && cursor_x < cols)
+        move(cursor_y, cursor_x);
+}
+
+static void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    erase();
+
+    tui_style_title_on();
+    draw_padded(0, 0, cols, "Dispatch TUI - New Task");
+    tui_style_title_off();
+
+    if (rows < 24 || cols < 50) {
+        draw_truncated(2, 0, cols, "Terminal too small for task form.");
+        draw_truncated(3, 0, cols, "Resize to at least 50x24.");
+        refresh();
+        return;
+    }
+
+    int width = cols - 4;
+    if (width > 76)
+        width = 76;
+    int left = (cols - width) / 2;
+    int desc_height = rows >= 30 ? 5 : 3;
+
+    char heading[256];
+    snprintf(heading, sizeof(heading), "Actor: %s", tui->actor);
+    draw_truncated(1, left, width, heading);
+
+    int y = 3;
+    draw_task_form_box(y, left, width, 3, "Group", form->group,
+                       form->active_field == TUI_TASK_FORM_GROUP);
+    y += 4;
+    draw_task_form_box(y, left, width, 3, "Title", form->title,
+                       form->active_field == TUI_TASK_FORM_TITLE);
+    y += 4;
+    draw_task_form_box(y, left, width, desc_height, "Description",
+                       form->description,
+                       form->active_field == TUI_TASK_FORM_DESCRIPTION);
+    y += desc_height + 1;
+    draw_task_form_box(y, left, width, 3, "Depends on", form->deps,
+                       form->active_field == TUI_TASK_FORM_DEPS);
+    y += 4;
+    draw_task_form_review_box(y, left, width, form);
+
+    attron(A_REVERSE);
+    mvhline(rows - 1, 0, ' ', cols);
+    char status[512];
+    snprintf(status, sizeof(status),
+             " %s | Enter next/save | Tab move | Space review | Esc cancel",
+             form->status[0] ? form->status : "New task");
+    draw_truncated(rows - 1, 0, cols, status);
+    attroff(A_REVERSE);
+
+    task_form_move_cursor(form, rows, cols, left, width, desc_height);
+    refresh();
+}
+
+static int task_form_submit(const TuiTaskForm *form, const char *actor,
+                            char *message, size_t message_size) {
+    return create_task(form->group, form->title, form->description,
+                       form->requires_review, form->deps, actor, message,
+                       message_size);
+}
+
+static int handle_task_form_key(TuiTaskForm *form, int ch, int *submit,
+                                int *cancel) {
+    *submit = 0;
+    *cancel = 0;
+    if (ch == 27) {
+        *cancel = 1;
+        return 1;
+    }
+    if (ch == '\t' || ch == KEY_DOWN) {
+        form->active_field = (form->active_field + 1) % TUI_TASK_FORM_FIELD_COUNT;
+        return 1;
+    }
+    if (ch == KEY_UP) {
+        form->active_field =
+            (form->active_field + TUI_TASK_FORM_FIELD_COUNT - 1) %
+            TUI_TASK_FORM_FIELD_COUNT;
+        return 1;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        if (form->active_field == TUI_TASK_FORM_REVIEW) {
+            *submit = 1;
+        } else {
+            form->active_field++;
+        }
+        return 1;
+    }
+    if (form->active_field == TUI_TASK_FORM_REVIEW) {
+        if (ch == ' ' || ch == 'y' || ch == 'Y' || ch == 'n' || ch == 'N') {
+            if (ch == 'y' || ch == 'Y')
+                form->requires_review = 1;
+            else if (ch == 'n' || ch == 'N')
+                form->requires_review = 0;
+            else
+                form->requires_review = !form->requires_review;
+            return 1;
+        }
+        return 1;
+    }
+
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    task_form_buffer(form, form->active_field, &buffer, &buffer_size);
+    if (!buffer || buffer_size == 0)
+        return 1;
+    size_t len = strlen(buffer);
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        if (len > 0)
+            buffer[len - 1] = '\0';
+        return 1;
+    }
+    if (ch == 21) {
+        buffer[0] = '\0';
+        return 1;
+    }
+    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
+        len + 1 < buffer_size) {
+        buffer[len] = (char)ch;
+        buffer[len + 1] = '\0';
+    }
+    return 1;
+}
+
 static void run_task_form(DispatchTui *tui) {
-    char group[32];
-    char title[256];
-    char description[512];
-    char deps[256];
+    TuiTaskForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.group, sizeof(form.group), "%s", selected_task_group(tui));
+    form.requires_review = 1;
+    form.active_field = TUI_TASK_FORM_GROUP;
+    snprintf(form.status, sizeof(form.status), "Fill task fields");
 
-    if (!prompt_line("Task group: ", group, sizeof(group),
-                     selected_task_group(tui)))
-        return;
-    if (!prompt_line("Task title: ", title, sizeof(title), ""))
-        return;
-    if (!prompt_line("Description: ", description, sizeof(description), ""))
-        return;
-    int requires_review = prompt_yes_no("Requires review? [Y/n]: ", 1);
-    if (!prompt_line("Depends on (comma/space IDs, blank none): ", deps,
-                     sizeof(deps), ""))
-        return;
-
-    char message[256] = {0};
-    create_task(group, title, description, requires_review, deps, tui->actor, message,
-                sizeof(message));
-    tui_load_board(tui);
-    tui_set_status(tui, message);
-    clamp_selection(tui);
+    timeout(-1);
+    curs_set(1);
+    int running = 1;
+    while (running) {
+        render_task_form_screen(tui, &form);
+        int ch = getch();
+        if (ch == KEY_RESIZE)
+            continue;
+        int submit = 0;
+        int cancel = 0;
+        handle_task_form_key(&form, ch, &submit, &cancel);
+        if (cancel) {
+            tui_set_status(tui, "Task creation cancelled");
+            break;
+        }
+        if (submit) {
+            char message[256] = {0};
+            if (task_form_submit(&form, tui->actor, message, sizeof(message))) {
+                tui_load_board(tui);
+                tui_set_status(tui, message);
+                clamp_selection(tui);
+                running = 0;
+            } else {
+                snprintf(form.status, sizeof(form.status), "%s", message);
+            }
+        }
+    }
+    curs_set(0);
+    timeout(1000);
 }
 
 static void run_dependency_prompt(DispatchTui *tui, int add) {
@@ -3451,6 +3717,35 @@ static int tui_create_task_smoke(const char *group, const char *title,
     return 0;
 }
 
+static int tui_task_form_submit_smoke(const char *group, const char *title,
+                                      const char *description,
+                                      const char *review_mode,
+                                      const char *depends_text) {
+    TuiTaskForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.group, sizeof(form.group), "%s", group ? group : "");
+    snprintf(form.title, sizeof(form.title), "%s", title ? title : "");
+    snprintf(form.description, sizeof(form.description), "%s",
+             strcmp(description, "-") == 0 ? "" : description);
+    snprintf(form.deps, sizeof(form.deps), "%s", depends_text ? depends_text : "");
+    if (strcmp(review_mode, "review") == 0) {
+        form.requires_review = 1;
+    } else if (strcmp(review_mode, "no-review") == 0) {
+        form.requires_review = 0;
+    } else {
+        fprintf(stderr, "Review mode must be review or no-review\n");
+        return 1;
+    }
+
+    char message[256] = {0};
+    if (!task_form_submit(&form, "user", message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static int tui_dependency_smoke(const char *action, const char *dependency_id,
                                 const char *dependent_id) {
     int add;
@@ -3755,6 +4050,7 @@ static void print_tui_help(void) {
     puts("  --osc52-smoke <text>        print OSC 52 payload metadata and exit");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
+    puts("  --task-form-submit-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
     puts("  --workspaces-smoke          print workspace dashboard data and exit");
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
@@ -3805,6 +4101,9 @@ int dispatch_tui_main(int argc, char **argv) {
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)
         return tui_create_task_smoke(argv[3], argv[4], argv[5], argv[6],
                                     argv[7]);
+    if (argc == 8 && strcmp(argv[2], "--task-form-submit-smoke") == 0)
+        return tui_task_form_submit_smoke(argv[3], argv[4], argv[5], argv[6],
+                                         argv[7]);
     if (argc == 6 && strcmp(argv[2], "--dependency-smoke") == 0)
         return tui_dependency_smoke(argv[3], argv[4], argv[5]);
     if (argc == 3 && strcmp(argv[2], "--workspaces-smoke") == 0)

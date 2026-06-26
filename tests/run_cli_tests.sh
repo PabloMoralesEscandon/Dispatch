@@ -1215,11 +1215,16 @@ expect_ok "$BIN" tui --create-task-smoke DE Root "Root task" no-review -
 assert_contains "Added task DE-01"
 expect_ok "$BIN" tui --create-task-smoke DE Followup "Follow-up task" review DE-01
 assert_contains "Added task DE-02"
+expect_ok "$BIN" tui --task-form-submit-smoke DE FormTask "Form task" review -
+assert_contains "Added task DE-03"
 expect_ok "$BIN" show DE-01
 assert_contains "Requires review: no"
 expect_ok "$BIN" show DE-02
 assert_contains "Requires review: yes"
 assert_contains "Depends on: DE-01"
+expect_ok "$BIN" show DE-03
+assert_contains "Title: FormTask"
+assert_contains "Requires review: yes"
 expect_fail "$BIN" tui --create-task-smoke DE "DE-99 Bad title" - review -
 assert_contains "Task title should not include an ID"
 
