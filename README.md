@@ -354,6 +354,7 @@ start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a
 full-screen task creation form with boxed fields, `+` creates a group, `>` adds
 a dependency to the inspected task, `<` removes a dependency, and `d` opens the
 selected task commit with `git show` when commit metadata exists.
+Bottom-line prompt forms, including group creation, can be cancelled with `Esc`.
 
 The agents view lists enabled agents by default. `A` toggles enabled/all,
 `z` archives or restores the selected agent, `y` copies the selected agent run

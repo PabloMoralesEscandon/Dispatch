@@ -96,6 +96,8 @@ static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent);
 static int prompt_line(const char *label, char *buffer, size_t buffer_size,
                        const char *initial);
+static int handle_prompt_line_key(char *buffer, size_t buffer_size, int ch,
+                                  int *done, int *cancelled);
 static void draw_truncated(int y, int x, int width, const char *text);
 static void draw_padded(int y, int x, int width, const char *text);
 
@@ -1496,6 +1498,39 @@ static void run_selected_task_action(DispatchTui *tui,
     clamp_selection(tui);
 }
 
+static int handle_prompt_line_key(char *buffer, size_t buffer_size, int ch,
+                                  int *done, int *cancelled) {
+    *done = 0;
+    *cancelled = 0;
+    if (ch == 27) {
+        *cancelled = 1;
+        return 1;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        *done = 1;
+        return 1;
+    }
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        size_t len = strlen(buffer);
+        if (len > 0)
+            buffer[len - 1] = '\0';
+        return 1;
+    }
+    if (ch == 21) {
+        buffer[0] = '\0';
+        return 1;
+    }
+    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch)) {
+        size_t len = strlen(buffer);
+        if (len + 1 < buffer_size) {
+            buffer[len] = (char)ch;
+            buffer[len + 1] = '\0';
+        }
+        return 1;
+    }
+    return 1;
+}
+
 static int prompt_line(const char *label, char *buffer, size_t buffer_size,
                        const char *initial) {
     int rows = 0;
@@ -1506,19 +1541,27 @@ static int prompt_line(const char *label, char *buffer, size_t buffer_size,
     else
         buffer[0] = '\0';
 
-    echo();
     curs_set(1);
-    attron(A_REVERSE);
-    mvhline(rows - 1, 0, ' ', cols);
-    mvprintw(rows - 1, 0, "%s", label);
-    attroff(A_REVERSE);
-    move(rows - 1, (int)strlen(label));
-    timeout(-1);
-    int result = getnstr(buffer, (int)buffer_size - 1);
-    timeout(1000);
     noecho();
+    timeout(-1);
+    int done = 0;
+    int cancelled = 0;
+    while (!done && !cancelled) {
+        attron(A_REVERSE);
+        mvhline(rows - 1, 0, ' ', cols);
+        mvprintw(rows - 1, 0, "%s%s", label, buffer);
+        attroff(A_REVERSE);
+        int cursor_x = (int)(strlen(label) + strlen(buffer));
+        if (cursor_x >= cols)
+            cursor_x = cols - 1;
+        move(rows - 1, cursor_x);
+        refresh();
+        handle_prompt_line_key(buffer, buffer_size, getch(), &done,
+                               &cancelled);
+    }
+    timeout(1000);
     curs_set(0);
-    return result == OK;
+    return !cancelled;
 }
 
 static int prompt_yes_no(const char *label, int default_yes) {
@@ -3746,6 +3789,17 @@ static int tui_task_form_submit_smoke(const char *group, const char *title,
     return 0;
 }
 
+static int tui_prompt_cancel_smoke(void) {
+    char buffer[32] = "Group";
+    int done = 0;
+    int cancelled = 0;
+    handle_prompt_line_key(buffer, sizeof(buffer), 27, &done, &cancelled);
+    printf("Done: %s\n", done ? "yes" : "no");
+    printf("Cancelled: %s\n", cancelled ? "yes" : "no");
+    printf("Buffer: %s\n", buffer);
+    return cancelled && !done ? 0 : 1;
+}
+
 static int tui_dependency_smoke(const char *action, const char *dependency_id,
                                 const char *dependent_id) {
     int add;
@@ -4051,6 +4105,7 @@ static void print_tui_help(void) {
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --task-form-submit-smoke <group> <title> <description|-> review|no-review <deps|->");
+    puts("  --prompt-cancel-smoke");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
     puts("  --workspaces-smoke          print workspace dashboard data and exit");
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
@@ -4104,6 +4159,8 @@ int dispatch_tui_main(int argc, char **argv) {
     if (argc == 8 && strcmp(argv[2], "--task-form-submit-smoke") == 0)
         return tui_task_form_submit_smoke(argv[3], argv[4], argv[5], argv[6],
                                          argv[7]);
+    if (argc == 3 && strcmp(argv[2], "--prompt-cancel-smoke") == 0)
+        return tui_prompt_cancel_smoke();
     if (argc == 6 && strcmp(argv[2], "--dependency-smoke") == 0)
         return tui_dependency_smoke(argv[3], argv[4], argv[5]);
     if (argc == 3 && strcmp(argv[2], "--workspaces-smoke") == 0)

@@ -1211,6 +1211,8 @@ mkdir repo
 expect_ok "$BIN" init repo
 expect_ok "$BIN" tui --create-group-smoke Development DE
 assert_contains "Added group Development (DE)"
+expect_ok "$BIN" tui --prompt-cancel-smoke
+assert_contains "Cancelled: yes"
 expect_ok "$BIN" tui --create-task-smoke DE Root "Root task" no-review -
 assert_contains "Added task DE-01"
 expect_ok "$BIN" tui --create-task-smoke DE Followup "Follow-up task" review DE-01
