@@ -53,8 +53,11 @@ typedef struct {
     char inspected_task_id[64];
     int search_active;
     int selected_task;
+    int task_top;
     int selected_agent;
+    int agent_top;
     int selected_workspace;
+    int workspace_top;
     int selected_log;
     int log_top;
     char log_filter_field[32];
@@ -451,11 +454,16 @@ static void clamp_selection(DispatchTui *tui) {
     int count = tui->board_loaded ? visible_task_count_for_tui(tui) : 0;
     if (count <= 0) {
         tui->selected_task = 0;
+        tui->task_top = 0;
     } else if (tui->selected_task >= count) {
         tui->selected_task = count - 1;
     } else if (tui->selected_task < 0) {
         tui->selected_task = 0;
     }
+    if (tui->task_top >= count)
+        tui->task_top = count - 1;
+    if (tui->task_top < 0)
+        tui->task_top = 0;
 }
 
 static int visible_agent_count(const DispatchTui *tui) {
@@ -473,11 +481,16 @@ static void clamp_agent_selection(DispatchTui *tui) {
     int count = visible_agent_count(tui);
     if (count <= 0) {
         tui->selected_agent = 0;
+        tui->agent_top = 0;
     } else if (tui->selected_agent >= count) {
         tui->selected_agent = count - 1;
     } else if (tui->selected_agent < 0) {
         tui->selected_agent = 0;
     }
+    if (tui->agent_top >= count)
+        tui->agent_top = count - 1;
+    if (tui->agent_top < 0)
+        tui->agent_top = 0;
 }
 
 static int visible_workspace_count(const DispatchTui *tui) {
@@ -495,11 +508,46 @@ static void clamp_workspace_selection(DispatchTui *tui) {
     int count = visible_workspace_count(tui);
     if (count <= 0) {
         tui->selected_workspace = 0;
+        tui->workspace_top = 0;
     } else if (tui->selected_workspace >= count) {
         tui->selected_workspace = count - 1;
     } else if (tui->selected_workspace < 0) {
         tui->selected_workspace = 0;
     }
+    if (tui->workspace_top >= count)
+        tui->workspace_top = count - 1;
+    if (tui->workspace_top < 0)
+        tui->workspace_top = 0;
+}
+
+static void sync_index_scroll(int selected, int count, int visible_rows,
+                              int *top) {
+    if (visible_rows <= 0 || count <= 0) {
+        *top = 0;
+        return;
+    }
+    if (*top >= count)
+        *top = count - 1;
+    if (*top < 0)
+        *top = 0;
+    if (selected < *top)
+        *top = selected;
+    if (selected >= *top + visible_rows)
+        *top = selected - visible_rows + 1;
+    if (*top < 0)
+        *top = 0;
+}
+
+static void sync_agent_scroll(DispatchTui *tui, int visible_rows) {
+    clamp_agent_selection(tui);
+    sync_index_scroll(tui->selected_agent, visible_agent_count(tui),
+                      visible_rows, &tui->agent_top);
+}
+
+static void sync_workspace_scroll(DispatchTui *tui, int visible_rows) {
+    clamp_workspace_selection(tui);
+    sync_index_scroll(tui->selected_workspace, visible_workspace_count(tui),
+                      visible_rows, &tui->workspace_top);
 }
 
 static int visible_log_count(const DispatchTui *tui) {
@@ -540,6 +588,60 @@ static void sync_log_scroll(DispatchTui *tui, int visible_rows) {
         tui->log_top = tui->selected_log - visible_rows + 1;
     if (tui->log_top < 0)
         tui->log_top = 0;
+}
+
+static int board_selected_render_row_for_top(const DispatchTui *tui,
+                                             int task_top) {
+    int visible_index = 0;
+    int render_row = 0;
+    for (size_t g = 0; g < tui->board.groups.count; g++) {
+        DispatchGroup *group = &tui->board.groups.items[g];
+        int group_has_drawn_task = 0;
+        int group_header_row = render_row;
+        for (size_t i = 0; i < tui->board.tasks.count; i++) {
+            DispatchTask *task = &tui->board.tasks.items[i];
+            if (strcmp(task->group, group->id) != 0 ||
+                !tui_task_is_visible(tui, task)) {
+                continue;
+            }
+            if (visible_index < task_top) {
+                visible_index++;
+                continue;
+            }
+            if (!group_has_drawn_task) {
+                render_row++;
+                group_has_drawn_task = 1;
+            }
+            if (visible_index == tui->selected_task)
+                return render_row;
+            render_row++;
+            visible_index++;
+        }
+        if (!group_has_drawn_task)
+            render_row = group_header_row;
+    }
+    return -1;
+}
+
+static void sync_task_scroll(DispatchTui *tui, int visible_rows) {
+    clamp_selection(tui);
+    int count = visible_task_count_for_tui(tui);
+    if (visible_rows <= 0 || count <= 0) {
+        tui->task_top = 0;
+        return;
+    }
+    if (tui->selected_task < tui->task_top)
+        tui->task_top = tui->selected_task;
+    while (tui->task_top < tui->selected_task) {
+        int selected_row = board_selected_render_row_for_top(tui, tui->task_top);
+        if (selected_row >= 0 && selected_row < visible_rows)
+            break;
+        tui->task_top++;
+    }
+    if (tui->task_top < 0)
+        tui->task_top = 0;
+    if (tui->task_top >= count)
+        tui->task_top = count - 1;
 }
 
 static DispatchAgent *selected_agent(DispatchTui *tui) {
@@ -717,6 +819,7 @@ static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent) 
 static void set_filter(DispatchTui *tui, DispatchTuiFilter filter) {
     tui->filter = filter;
     tui->selected_task = 0;
+    tui->task_top = 0;
     char message[128];
     snprintf(message, sizeof(message), "Filter: %s", filter_name(filter));
     tui_set_status(tui, message);
@@ -732,6 +835,7 @@ static void cycle_group_filter(DispatchTui *tui) {
     if ((size_t)tui->group_filter >= tui->board.groups.count)
         tui->group_filter = -1;
     tui->selected_task = 0;
+    tui->task_top = 0;
     tui_set_status(tui, tui->group_filter >= 0 ? "Group filter" : "All groups");
 }
 
@@ -745,6 +849,7 @@ static void cycle_actor_filter(DispatchTui *tui) {
     if ((size_t)tui->actor_filter >= tui->board.agents.count)
         tui->actor_filter = -1;
     tui->selected_task = 0;
+    tui->task_top = 0;
     tui_set_status(tui, tui->actor_filter >= 0 ? "Actor filter" : "All actors");
 }
 
@@ -754,6 +859,7 @@ static void clear_secondary_filters(DispatchTui *tui) {
     tui->group_filter = -1;
     tui->actor_filter = -1;
     tui->selected_task = 0;
+    tui->task_top = 0;
     tui_set_status(tui, "Filters cleared");
 }
 
@@ -765,6 +871,7 @@ static int handle_search_key(DispatchTui *tui, int ch) {
         tui->search_active = 0;
         tui->search[0] = '\0';
         tui->selected_task = 0;
+        tui->task_top = 0;
         tui_set_status(tui, "Search cleared");
         return 1;
     }
@@ -778,6 +885,7 @@ static int handle_search_key(DispatchTui *tui, int ch) {
         if (len > 0) {
             tui->search[len - 1] = '\0';
             tui->selected_task = 0;
+            tui->task_top = 0;
         }
         return 1;
     }
@@ -787,6 +895,7 @@ static int handle_search_key(DispatchTui *tui, int ch) {
             tui->search[len] = (char)ch;
             tui->search[len + 1] = '\0';
             tui->selected_task = 0;
+            tui->task_top = 0;
         }
         return 1;
     }
@@ -2104,6 +2213,7 @@ static void execute_palette_command(DispatchTui *tui, const char *command) {
         }
         tui->screen = TUI_SCREEN_BOARD;
         tui->selected_task = 0;
+        tui->task_top = 0;
         tui_set_status(tui, "Group filter updated");
         return;
     }
@@ -2124,6 +2234,7 @@ static void execute_palette_command(DispatchTui *tui, const char *command) {
         }
         tui->screen = TUI_SCREEN_BOARD;
         tui->selected_task = 0;
+        tui->task_top = 0;
         tui_set_status(tui, "Actor filter updated");
         return;
     }
@@ -2532,11 +2643,13 @@ static void tui_render_help(void) {
 
 static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
-    if (tui->board.agents.count == 0) {
+    if (visible_agent_count(tui) == 0) {
         draw_padded(y, 0, cols, "(no agents)");
         return;
     }
 
+    int visible_rows = rows - start_y - 2;
+    sync_agent_scroll(tui, visible_rows);
     tui_style_header_on();
     draw_padded(y++, 0, cols,
                 "Name             Runner   Status    Session  Current task  Last workspace");
@@ -2546,6 +2659,10 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         DispatchAgent *agent = &tui->board.agents.items[i];
         if (!agent_is_visible(tui, agent))
             continue;
+        if (visible_index < tui->agent_top) {
+            visible_index++;
+            continue;
+        }
         char line[1024];
         snprintf(line, sizeof(line), "%-16s %-8s %-9s %-8s %-13s %s",
                  agent->name, agent->runner,
@@ -2570,6 +2687,8 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         return;
     }
 
+    int visible_rows = rows - start_y - 2;
+    sync_workspace_scroll(tui, visible_rows);
     tui_style_header_on();
     draw_padded(y++, 0, cols,
                 "Task     Task state  Workspace  Actor       Dirty  Git      Branch / Path");
@@ -2578,6 +2697,10 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
         if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
             continue;
+        if (visible_index < tui->workspace_top) {
+            visible_index++;
+            continue;
+        }
         DispatchTask *task =
             dispatch_board_find_task(&tui->board, workspace->task_id);
         const char *task_state =
@@ -2851,33 +2974,32 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     int visible_index = 0;
     int any_visible = 0;
+    int visible_rows = rows - start_y - 1;
+    sync_task_scroll(tui, visible_rows);
 
     for (size_t g = 0; g < tui->board.groups.count && y < rows - 1; g++) {
         DispatchGroup *group = &tui->board.groups.items[g];
-        int group_has_visible = 0;
+        int group_header_drawn = 0;
         for (size_t i = 0; i < tui->board.tasks.count; i++) {
-            DispatchTask *task = &tui->board.tasks.items[i];
-            if (strcmp(task->group, group->id) == 0 &&
-                tui_task_is_visible(tui, task)) {
-                group_has_visible = 1;
-                break;
-            }
-        }
-        if (!group_has_visible)
-            continue;
-
-        char heading[256];
-        snprintf(heading, sizeof(heading), "[%s] %s", group->prefix,
-                 group->name);
-        tui_style_header_on();
-        draw_padded(y++, 0, cols, heading);
-        tui_style_header_off();
-
-        for (size_t i = 0; i < tui->board.tasks.count && y < rows - 1; i++) {
             DispatchTask *task = &tui->board.tasks.items[i];
             if (strcmp(task->group, group->id) != 0 ||
                 !tui_task_is_visible(tui, task)) {
                 continue;
+            }
+            if (visible_index < tui->task_top) {
+                visible_index++;
+                continue;
+            }
+            if (!group_header_drawn) {
+                char heading[256];
+                snprintf(heading, sizeof(heading), "[%s] %s", group->prefix,
+                         group->name);
+                tui_style_header_on();
+                draw_padded(y++, 0, cols, heading);
+                tui_style_header_off();
+                group_header_drawn = 1;
+                if (y >= rows - 1)
+                    break;
             }
 
             DispatchState state = dispatch_task_effective_state(&tui->board, task);
@@ -3244,6 +3366,7 @@ static int tui_run(void) {
         case 'A':
             if (tui.screen == TUI_SCREEN_AGENTS) {
                 tui.show_archived_agents = !tui.show_archived_agents;
+                tui.agent_top = 0;
                 clamp_agent_selection(&tui);
                 tui_set_status(&tui, tui.show_archived_agents
                                         ? "Showing all agents"
@@ -3278,6 +3401,7 @@ static int tui_run(void) {
                 tui.search_active = 0;
                 tui.search[0] = '\0';
                 tui.selected_task = 0;
+                tui.task_top = 0;
                 tui_set_status(&tui, "Search cleared");
             }
             break;
@@ -3329,6 +3453,7 @@ static int tui_run(void) {
             if (tui.search_active && strlen(tui.search) > 0) {
                 tui.search[strlen(tui.search) - 1] = '\0';
                 tui.selected_task = 0;
+                tui.task_top = 0;
             }
             break;
         default:
@@ -3339,6 +3464,7 @@ static int tui_run(void) {
                     tui.search[len] = (char)ch;
                     tui.search[len + 1] = '\0';
                     tui.selected_task = 0;
+                    tui.task_top = 0;
                 }
             }
             break;
@@ -3979,6 +4105,54 @@ static int tui_logs_window_smoke(int visible_rows, int selected_index,
     return 0;
 }
 
+static int tui_scroll_smoke(const char *screen, int visible_rows,
+                            int selected_index) {
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+
+    if (strcmp(screen, "board") == 0) {
+        tui.selected_task = selected_index;
+        sync_task_scroll(&tui, visible_rows);
+        printf("Screen: board\n");
+        printf("Visible: %d\n", visible_task_count_for_tui(&tui));
+        printf("Selected: %d\n", tui.selected_task);
+        printf("Top: %d\n", tui.task_top);
+    } else if (strcmp(screen, "agents") == 0) {
+        tui.show_archived_agents = 1;
+        tui.selected_agent = selected_index;
+        sync_agent_scroll(&tui, visible_rows);
+        printf("Screen: agents\n");
+        printf("Visible: %d\n", visible_agent_count(&tui));
+        printf("Selected: %d\n", tui.selected_agent);
+        printf("Top: %d\n", tui.agent_top);
+    } else if (strcmp(screen, "workspaces") == 0) {
+        tui.selected_workspace = selected_index;
+        sync_workspace_scroll(&tui, visible_rows);
+        printf("Screen: workspaces\n");
+        printf("Visible: %d\n", visible_workspace_count(&tui));
+        printf("Selected: %d\n", tui.selected_workspace);
+        printf("Top: %d\n", tui.workspace_top);
+    } else if (strcmp(screen, "logs") == 0) {
+        tui.selected_log = selected_index;
+        sync_log_scroll(&tui, visible_rows);
+        printf("Screen: logs\n");
+        printf("Visible: %d\n", visible_log_count(&tui));
+        printf("Selected: %d\n", tui.selected_log);
+        printf("Top: %d\n", tui.log_top);
+    } else {
+        fprintf(stderr, "Scroll screen must be board, agents, workspaces, or logs\n");
+        tui_free_board(&tui);
+        return 1;
+    }
+
+    tui_free_board(&tui);
+    return 0;
+}
+
 static const char *screen_name(DispatchTuiScreen screen) {
     switch (screen) {
     case TUI_SCREEN_BOARD:
@@ -4122,6 +4296,7 @@ static void print_tui_help(void) {
     puts("  --workspace-inspect-smoke <task-id-or-workspace>");
     puts("  --logs-smoke [actor|command|action|task|agent|workspace <value>]");
     puts("  --logs-window-smoke <visible-rows> <selected-index> [field value]");
+    puts("  --scroll-smoke board|agents|workspaces|logs <visible-rows> <selected-index>");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
@@ -4186,6 +4361,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_logs_window_smoke(atoi(argv[3]), atoi(argv[4]),
                                     argc == 7 ? argv[5] : "",
                                     argc == 7 ? argv[6] : "");
+    if (argc == 6 && strcmp(argv[2], "--scroll-smoke") == 0)
+        return tui_scroll_smoke(argv[3], atoi(argv[4]), atoi(argv[5]));
     if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)

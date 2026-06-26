@@ -347,7 +347,8 @@ The board view shows grouped task rows with state, review flag, commit
 presence, and actor metadata. Use arrows or `j`/`k` to move. Filters are
 single-key: `1` not-done, `2` all, `3` ready, `4` blocked, `5` review, `6`
 doing, `7` done, and `R` attention. `G` cycles groups, `A` cycles actors, `/`
-searches, and `c` clears secondary filters.
+searches, and `c` clears secondary filters. Board, agents, workspaces, and logs
+scroll with the selected row.
 
 Task actions are available from the board and task inspector: `r` ready, `s`
 start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a

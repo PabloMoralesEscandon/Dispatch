@@ -540,6 +540,9 @@ assert_contains "Selected: 3"
 assert_contains "Top: 2"
 assert_contains "Row: alice ready ready task:DE-01"
 assert_contains "Shown: 2"
+expect_ok "$BIN" tui --scroll-smoke logs 2 3
+assert_contains "Screen: logs"
+assert_contains "Top: 2"
 
 case_dir="$(make_case_dir id-prefix-display)"
 cd "$case_dir"
@@ -635,6 +638,9 @@ expect_ok "$BIN" init repo
 expect_ok "$BIN" group add Development --prefix DE
 expect_ok "$BIN" task add DE Root
 expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" group add WorkspaceScroll --prefix WS
+expect_ok "$BIN" task add WS Extra
+expect_ok "$BIN" ready WS-01 --actor user
 expect_ok "$BIN" agent create --name Codex_A --runner codex --no-run-script
 
 expect_fail "$BIN" workspace create DE-01
@@ -655,6 +661,8 @@ expect_ok "$BIN" workspace create DE-01 --actor Codex_A
 assert_contains "Created workspace DE-01 for Codex_A"
 assert_contains "branch: agent/codex_a/DE-01"
 assert_contains "state: active"
+expect_ok "$BIN" workspace create WS-01 --actor Codex_A
+assert_contains "Created workspace WS-01 for Codex_A"
 if [ ! -e repo-agent-codex_a-DE-01/.git ]; then
     fail "workspace worktree was not created"
 fi
@@ -678,10 +686,13 @@ assert_contains "Codex_A"
 assert_contains "agent/codex_a/DE-01"
 
 expect_ok "$BIN" tui --workspaces-smoke
-assert_contains "Workspaces: 1"
+assert_contains "Workspaces: 2"
 assert_contains "DE-01 ready active actor:Codex_A"
 assert_contains "git:present"
 assert_contains "dirty:no"
+expect_ok "$BIN" tui --scroll-smoke workspaces 1 1
+assert_contains "Screen: workspaces"
+assert_contains "Top: 1"
 
 expect_ok "$BIN" workspace show DE-01
 assert_contains "Task: DE-01"
@@ -953,6 +964,9 @@ expect_ok "$BIN" tui --agent-selection-smoke all 1
 assert_contains "Visible agents: 2"
 assert_contains "Selected index: 1"
 assert_contains "Selected agent: dormant"
+expect_ok "$BIN" tui --scroll-smoke agents 1 1
+assert_contains "Screen: agents"
+assert_contains "Top: 1"
 expect_ok "$BIN" tui --agent-archive-smoke dormant restore
 assert_contains "Restored agent dormant"
 
@@ -1221,6 +1235,10 @@ expect_ok "$BIN" tui --create-task-smoke DE Followup "Follow-up task" review DE-
 assert_contains "Added task DE-02"
 expect_ok "$BIN" tui --task-form-submit-smoke DE FormTask "Form task" review -
 assert_contains "Added task DE-03"
+expect_ok "$BIN" tui --scroll-smoke board 3 2
+assert_contains "Screen: board"
+assert_contains "Selected: 2"
+assert_contains "Top: 1"
 expect_ok "$BIN" show DE-01
 assert_contains "Requires review: no"
 expect_ok "$BIN" show DE-02
