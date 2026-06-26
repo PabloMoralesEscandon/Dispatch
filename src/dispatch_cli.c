@@ -4558,8 +4558,19 @@ static int cmd_review(int argc, char **argv) {
 }
 
 int dispatch_cli_dispatch(int argc, char **argv) {
-    if (argc < 2 || strcmp(argv[1], "--help") == 0 ||
-        strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "help") == 0) {
+    if (argc < 2) {
+        char *tui_argv[] = {
+            argv[0],
+            "tui",
+            "--smoke",
+        };
+        if (getenv("DISPATCH_TUI_DEFAULT_SMOKE"))
+            return dispatch_tui_main(3, tui_argv);
+        return dispatch_tui_main(2, tui_argv);
+    }
+
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 ||
+        strcmp(argv[1], "help") == 0) {
         dispatch_cli_print_help();
         return 0;
     }

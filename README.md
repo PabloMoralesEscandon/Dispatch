@@ -319,10 +319,12 @@ worktree. Use `--dry-run` to preview prune actions.
 ### TUI
 
 ```bash
+dispatch
 dispatch tui
 ```
 
-`dispatch tui` opens the ncurses interface for the current workflow board. It
+`dispatch` with no command opens the ncurses interface for the current workflow
+board, equivalent to `dispatch tui`. It
 is designed for a remote shell alongside tmux: Dispatch uses single-key
 application controls and does not reserve tmux prefix combinations.
 

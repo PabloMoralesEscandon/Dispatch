@@ -971,6 +971,10 @@ expect_ok "$BIN" tui --smoke
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
 assert_contains "2 visible"
+DISPATCH_TUI_DEFAULT_SMOKE=1 expect_ok "$BIN"
+assert_contains "dispatch tui smoke ok:"
+assert_contains "2 tasks"
+assert_contains "2 visible"
 
 expect_ok "$BIN" tui --inspect-smoke DE-01
 assert_contains "Task: DE-01"
