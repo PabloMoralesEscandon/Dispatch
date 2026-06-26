@@ -925,6 +925,11 @@ assert_contains "Updated agent session codex-a"
 expect_ok "$BIN" tui --agent-inspect-smoke codex-a
 assert_contains "Session ID: tui-session-2"
 
+expect_ok "$BIN" tui --agent-set-session-smoke codex-a tui-session-3
+assert_contains "Updated agent session codex-a"
+expect_ok "$BIN" tui --agent-inspect-smoke codex-a
+assert_contains "Session ID: tui-session-3"
+
 EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "ed '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
 VISUAL=nano EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a

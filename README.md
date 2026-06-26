@@ -354,9 +354,10 @@ when commit metadata exists.
 The agents view lists enabled agents by default. `A` toggles enabled/all,
 `z` archives or restores the selected agent, `y` copies the selected agent run
 command with OSC 52 and also to a tmux buffer when available, `e` edits the
-agent prompt in `$EDITOR`, and `x` clears the stored session ID from the agent
-inspector. Terminals may ignore OSC 52 clipboard writes; when no clipboard path
-is available, Dispatch shows the run command in the status bar.
+agent prompt in `$EDITOR`, `S` opens a session ID form from the agent inspector,
+and `x` clears the stored session ID from the agent inspector. Terminals may
+ignore OSC 52 clipboard writes; when no clipboard path is available, Dispatch
+shows the run command in the status bar.
 
 The workspaces view shows actor, path, branch, task state, workspace state, git
 worktree presence, and dirty status. `n` runs the existing workspace creation

@@ -75,6 +75,8 @@ static DispatchTask *selected_visible_task(DispatchTui *tui);
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
 static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent);
+static int prompt_line(const char *label, char *buffer, size_t buffer_size,
+                       const char *initial);
 
 enum {
     TUI_COLOR_HEADER = 1,
@@ -2013,6 +2015,34 @@ static void clear_selected_agent_session(DispatchTui *tui) {
     tui_set_status(tui, message);
 }
 
+static int set_agent_session_id(const char *name, const char *session_id,
+                                char *message, size_t message_size) {
+    return update_agent_session_metadata(
+        name, session_id && session_id[0] ? session_id : NULL, NULL, NULL,
+        !session_id || !session_id[0], 0, 0, message, message_size);
+}
+
+static void set_selected_agent_session(DispatchTui *tui) {
+    DispatchAgent *agent = selected_agent(tui);
+    if (!agent) {
+        tui_set_status(tui, "No selected agent");
+        return;
+    }
+
+    char name[128];
+    snprintf(name, sizeof(name), "%s", agent->name);
+    char label[256];
+    snprintf(label, sizeof(label), "Session ID for %s (blank clears): ", name);
+    char session_id[256];
+    if (!prompt_line(label, session_id, sizeof(session_id), ""))
+        return;
+
+    char message[256] = {0};
+    set_agent_session_id(name, session_id, message, sizeof(message));
+    tui_load_board(tui);
+    tui_set_status(tui, message);
+}
+
 static int agent_has_live_workspace(DispatchBoard *board, const char *name) {
     for (size_t i = 0; i < board->workspaces.count; i++) {
         DispatchWorkspace *workspace = &board->workspaces.items[i];
@@ -2652,7 +2682,7 @@ static void tui_render(DispatchTui *tui) {
                 tui->screen == TUI_SCREEN_TASK_INSPECTOR
                      ? " %s | q/Esc back | > add dep | < remove dep | d diff"
                      : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
-                           ? " %s | q/Esc back | y run command | e edit prompt | x clear session"
+                           ? " %s | q/Esc back | y run | e prompt | S session | x clear"
                      : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
                            ? " %s | q/Esc back | x remove | X force remove"
                      : tui->screen == TUI_SCREEN_WORKSPACES
@@ -2822,6 +2852,10 @@ static int tui_run(void) {
             break;
         case 's':
             run_selected_task_action(&tui, TUI_ACTION_START);
+            break;
+        case 'S':
+            if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
+                set_selected_agent_session(&tui);
             break;
         case 'f':
             run_selected_task_action(&tui, TUI_ACTION_FINISH);
@@ -3220,6 +3254,17 @@ static int tui_agent_session_smoke(const char *name, const char *session_id,
         strcmp(session_id, "-") == 0, strcmp(current_task, "-") == 0,
         strcmp(last_workspace, "-") == 0, message, sizeof(message));
     if (!ok) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
+static int tui_agent_set_session_smoke(const char *name, const char *session_id) {
+    char message[256] = {0};
+    if (!set_agent_session_id(name, strcmp(session_id, "-") == 0 ? "" : session_id,
+                              message, sizeof(message))) {
         fprintf(stderr, "%s\n", message);
         return 1;
     }
@@ -3678,6 +3723,7 @@ static void print_tui_help(void) {
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
+    puts("  --agent-set-session-smoke <name> <session|->");
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
     puts("  --agent-archive-smoke <name> archive|restore");
     puts("  --agent-selection-smoke enabled|all <selected-index>");
@@ -3718,6 +3764,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_inspect_smoke(argv[3]);
     if (argc == 7 && strcmp(argv[2], "--agent-session-smoke") == 0)
         return tui_agent_session_smoke(argv[3], argv[4], argv[5], argv[6]);
+    if (argc == 5 && strcmp(argv[2], "--agent-set-session-smoke") == 0)
+        return tui_agent_set_session_smoke(argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[2], "--prompt-edit-smoke") == 0)
         return tui_prompt_edit_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--agent-archive-smoke") == 0)
