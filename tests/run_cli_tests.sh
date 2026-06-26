@@ -307,7 +307,7 @@ assert_contains "Task titles should not include Dispatch IDs"
 expect_ok "$BIN" task add DE First --description "First task"
 assert_contains "Added task DE-01"
 
-expect_ok "$BIN" agent session codex-a --session-id session-1 --current-task DE-01
+expect_ok "$BIN" agent session codex-a --session-id " session-1  " --current-task DE-01
 assert_contains "Updated agent session codex-a"
 
 expect_fail "$BIN" agent archive codex-a
@@ -315,6 +315,7 @@ assert_contains "Agent codex-a has active task DE-01"
 
 expect_ok "$BIN" agent show codex-a
 assert_contains "Session ID: session-1"
+assert_not_contains "Session ID:  session-1"
 assert_contains "Current task: DE-01"
 
 expect_ok "$BIN" agent resume codex-a
@@ -925,10 +926,11 @@ assert_contains "Updated agent session codex-a"
 expect_ok "$BIN" tui --agent-inspect-smoke codex-a
 assert_contains "Session ID: tui-session-2"
 
-expect_ok "$BIN" tui --agent-set-session-smoke codex-a tui-session-3
+expect_ok "$BIN" tui --agent-set-session-smoke codex-a " tui-session-3  "
 assert_contains "Updated agent session codex-a"
 expect_ok "$BIN" tui --agent-inspect-smoke codex-a
 assert_contains "Session ID: tui-session-3"
+assert_not_contains "Session ID:  tui-session-3"
 
 EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "ed '.dispatch/agents/codex-a/codex-a-PROMPT.md'"

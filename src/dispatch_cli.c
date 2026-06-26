@@ -263,6 +263,25 @@ static void replace_optional_string(char **target, const char *value) {
     *target = value && value[0] ? cli_strdup(value) : NULL;
 }
 
+static char *trimmed_copy(const char *value) {
+    const char *start = value ? value : "";
+    while (isspace((unsigned char)*start))
+        start++;
+    const char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1]))
+        end--;
+
+    size_t len = (size_t)(end - start);
+    char *copy = malloc(len + 1);
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    return copy;
+}
+
 static void append_dispatch_log(const char *actor, const char *command,
                                 const char *action,
                                 const DispatchLogField *targets,
@@ -981,8 +1000,9 @@ static int cmd_agent_session(int argc, char **argv) {
         return 1;
     }
 
+    char *trimmed_session_id = session_id ? trimmed_copy(session_id) : NULL;
     if (session_id || clear_session)
-        replace_optional_string(&agent->session_id, session_id);
+        replace_optional_string(&agent->session_id, trimmed_session_id);
     if (current_task || clear_current_task)
         replace_optional_string(&agent->current_task, current_task);
     if (last_workspace || clear_last_workspace)
@@ -990,6 +1010,7 @@ static int cmd_agent_session(int argc, char **argv) {
     agent->updated_at = time(NULL);
 
     if (!locked_board_save_or_error(&locked)) {
+        free(trimmed_session_id);
         locked_board_close(&locked);
         return 1;
     }
@@ -1007,6 +1028,7 @@ static int cmd_agent_session(int argc, char **argv) {
     snprintf(message, sizeof(message), "Updated agent session %s", name);
     append_dispatch_log("user", "agent", "session", targets, 1, context, 3,
                         message);
+    free(trimmed_session_id);
     locked_board_close(&locked);
     return 0;
 }
@@ -3641,6 +3663,7 @@ static int cmd_normalize(void) {
         return 1;
 
     dispatch_board_normalize_states(&locked.board);
+    int session_updates = dispatch_board_normalize_agent_sessions(&locked.board);
     int prompt_updates = normalize_agent_prompts(&locked.board);
     if (prompt_updates < 0) {
         locked_board_close(&locked);
@@ -3652,6 +3675,9 @@ static int cmd_normalize(void) {
     }
 
     printf("Normalized %s\n", DISPATCH_STORE_FILE);
+    if (session_updates > 0)
+        printf("Trimmed %d agent session ID%s\n", session_updates,
+               session_updates == 1 ? "" : "s");
     if (prompt_updates > 0)
         printf("Updated %d agent prompt%s\n", prompt_updates,
                prompt_updates == 1 ? "" : "s");

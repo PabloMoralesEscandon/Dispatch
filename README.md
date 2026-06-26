@@ -203,7 +203,8 @@ path, normally `repo`, when using the recommended parent workflow layout.
 `normalize` recomputes derived states such as blocked and ready. It also repairs
 older agent prompt records by moving them to the canonical
 `.dispatch/agents/<name>/<name>-PROMPT.md` prompt path, refreshing outdated
-generated prompt content, and regenerating affected agent run scripts.
+generated prompt content, regenerating affected agent run scripts, and trimming
+stored agent session IDs.
 
 Dispatch serializes board reads and writes through `dispatch.json.lock`. Saves
 are written to a temporary file and atomically moved into place, so concurrent
@@ -264,8 +265,9 @@ to archive agents that still have an active task or active workspace.
 `agent session` records runner session metadata on the agent record. The
 session ID identifies the runner session to resume, `current_task` records the
 task the agent is actively handling, and `last_workspace` records the most
-recent workspace used by that agent. These fields are shown by `agent show` and
-are used by runner-specific resume commands.
+recent workspace used by that agent. Session IDs are trimmed before saving.
+These fields are shown by `agent show` and are used by runner-specific resume
+commands.
 
 Codex session IDs are manual metadata. The Codex CLI creates its own session ID
 when an interactive session starts, so Dispatch cannot assign one ahead of time.

@@ -36,6 +36,30 @@ static void replace_string(char **target, const char *value) {
     *target = copy;
 }
 
+static void replace_optional_string(char **target, const char *value) {
+    free(*target);
+    *target = value && value[0] ? dispatch_strdup(value) : NULL;
+}
+
+static char *trimmed_copy(const char *value) {
+    const char *start = value ? value : "";
+    while (isspace((unsigned char)*start))
+        start++;
+    const char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1]))
+        end--;
+
+    size_t len = (size_t)(end - start);
+    char *copy = malloc(len + 1);
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    return copy;
+}
+
 static int string_list_contains(const DispatchStringList *list,
                                 const char *value) {
     for (size_t i = 0; i < list->count; i++) {
@@ -904,4 +928,25 @@ void dispatch_board_normalize_states(DispatchBoard *board) {
             task->state = DISPATCH_STATE_READY;
         }
     }
+}
+
+int dispatch_board_normalize_agent_sessions(DispatchBoard *board) {
+    if (!board)
+        return 0;
+
+    int changed = 0;
+    for (size_t i = 0; i < board->agents.count; i++) {
+        DispatchAgent *agent = &board->agents.items[i];
+        if (!agent->session_id)
+            continue;
+
+        char *trimmed = trimmed_copy(agent->session_id);
+        int differs = strcmp(agent->session_id, trimmed) != 0;
+        if (differs) {
+            replace_optional_string(&agent->session_id, trimmed);
+            changed++;
+        }
+        free(trimmed);
+    }
+    return changed;
 }

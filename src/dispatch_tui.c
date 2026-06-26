@@ -790,6 +790,25 @@ static char *tui_shell_quote(const char *value) {
     return quoted;
 }
 
+static char *tui_trimmed_copy(const char *value) {
+    const char *start = value ? value : "";
+    while (isspace((unsigned char)*start))
+        start++;
+    const char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1]))
+        end--;
+
+    size_t len = (size_t)(end - start);
+    char *copy = malloc(len + 1);
+    if (!copy) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    return copy;
+}
+
 static char *tui_base64_encode(const unsigned char *data, size_t len) {
     static const char alphabet[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -2019,9 +2038,12 @@ static void clear_selected_agent_session(DispatchTui *tui) {
 
 static int set_agent_session_id(const char *name, const char *session_id,
                                 char *message, size_t message_size) {
-    return update_agent_session_metadata(
-        name, session_id && session_id[0] ? session_id : NULL, NULL, NULL,
-        !session_id || !session_id[0], 0, 0, message, message_size);
+    char *trimmed = tui_trimmed_copy(session_id);
+    int ok = update_agent_session_metadata(
+        name, trimmed[0] ? trimmed : NULL, NULL, NULL, !trimmed[0], 0, 0,
+        message, message_size);
+    free(trimmed);
+    return ok;
 }
 
 static void set_selected_agent_session(DispatchTui *tui) {

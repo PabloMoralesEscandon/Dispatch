@@ -189,6 +189,7 @@ int dispatch_board_has_dependency_path(const DispatchBoard *board,
                                        const char *from_id,
                                        const char *to_id);
 void dispatch_board_normalize_states(DispatchBoard *board);
+int dispatch_board_normalize_agent_sessions(DispatchBoard *board);
 
 char *dispatch_next_task_id(const DispatchBoard *board, const char *group_id);
 

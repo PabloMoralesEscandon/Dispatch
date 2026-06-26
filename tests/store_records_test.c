@@ -162,6 +162,23 @@ static int verify_populated_round_trip(const char *path) {
         return fail("workspace sequence did not round trip", "");
     }
 
+    free(agent->session_id);
+    agent->session_id = copy_string("  codex-session-1  \t");
+    if (dispatch_board_normalize_agent_sessions(&loaded) != 1 ||
+        assert_string(agent->session_id, "codex-session-1",
+                      "trimmed agent session id")) {
+        dispatch_board_free(&loaded);
+        return 1;
+    }
+    free(agent->session_id);
+    agent->session_id = copy_string("  \t");
+    if (dispatch_board_normalize_agent_sessions(&loaded) != 1 ||
+        agent->session_id != NULL) {
+        dispatch_board_free(&loaded);
+        return fail("blank agent session id was not cleared", "");
+    }
+    agent->session_id = copy_string("codex-session-1");
+
     if (!dispatch_store_save(&loaded, path, error, sizeof(error))) {
         dispatch_board_free(&loaded);
         return fail("resave failed", error);
