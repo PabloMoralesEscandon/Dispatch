@@ -1473,7 +1473,9 @@ static int prompt_line(const char *label, char *buffer, size_t buffer_size,
     mvprintw(rows - 1, 0, "%s", label);
     attroff(A_REVERSE);
     move(rows - 1, (int)strlen(label));
+    timeout(-1);
     int result = getnstr(buffer, (int)buffer_size - 1);
+    timeout(1000);
     noecho();
     curs_set(0);
     return result == OK;
