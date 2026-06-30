@@ -2912,6 +2912,20 @@ static void tui_render_help(void) {
     }
 }
 
+/* Column header for the list views: accent, bold, drawn over a full-width row
+ * so it reads as a header band. */
+static void draw_list_header(int y, int cols, const char *text) {
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+    else
+        attron(A_BOLD | A_UNDERLINE);
+    draw_padded(y, 0, cols, text);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+    else
+        attroff(A_BOLD | A_UNDERLINE);
+}
+
 static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     if (visible_agent_count(tui) == 0) {
@@ -2921,10 +2935,11 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
 
     int visible_rows = rows - start_y - 2;
     sync_agent_scroll(tui, visible_rows);
-    tui_style_header_on();
-    draw_padded(y++, 0, cols,
-                "Name             Runner   Status    Session  Current task  Last workspace");
-    tui_style_header_off();
+    char header[256];
+    snprintf(header, sizeof(header), "  %-16s %-8s %-9s %-7s %-12s %s", "Name",
+             "Runner", "Status", "Session", "Task", "Workspace");
+    draw_list_header(y++, cols, header);
+
     int visible_index = 0;
     for (size_t i = 0; i < tui->board.agents.count && y < rows - 1; i++) {
         DispatchAgent *agent = &tui->board.agents.items[i];
@@ -2934,17 +2949,25 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
             visible_index++;
             continue;
         }
+        int selected = visible_index == tui->selected_agent;
+        const char *status = agent->archived ? "archived" : "enabled";
         char line[1024];
-        snprintf(line, sizeof(line), "%-16s %-8s %-9s %-8s %-13s %s",
-                 agent->name, agent->runner,
-                 agent->archived ? "archived" : "enabled",
+        snprintf(line, sizeof(line), "%s%-16s %-8s %-9s %-7s %-12s %s",
+                 selected ? " >" : "  ", agent->name, agent->runner, status,
                  agent->session_id ? "yes" : "no",
                  agent->current_task ? agent->current_task : "-",
                  agent->last_workspace ? agent->last_workspace : "-");
-        int selected = visible_index == tui->selected_agent;
         tui_style_row_on(visible_index, selected);
-        draw_padded(y++, 0, cols, line);
+        draw_padded(y, 0, cols, line);
         tui_style_row_off(visible_index, selected);
+
+        if (!selected && tui_colors_enabled) {
+            int color = agent->archived ? TUI_COLOR_MUTED : TUI_COLOR_STATE_READY;
+            attron(COLOR_PAIR(color) | A_BOLD);
+            mvaddnstr(y, 28, status, 9);
+            attroff(COLOR_PAIR(color) | A_BOLD);
+        }
+        y++;
         visible_index++;
     }
 }
@@ -3502,11 +3525,20 @@ static void tui_render(DispatchTui *tui) {
         draw_log_rows(tui, 4, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENTS) {
         char line[512];
+        int enabled = 0;
+        for (size_t i = 0; i < tui->board.agents.count; i++)
+            if (!tui->board.agents.items[i].archived)
+                enabled++;
         snprintf(line, sizeof(line),
-                 "Agents: %zu    view:%s    A toggle all    z archive/restore",
-                 tui->board.agents.count,
+                 "%zu agents   %d enabled   %zu archived   showing %s",
+                 tui->board.agents.count, enabled,
+                 tui->board.agents.count - (size_t)enabled,
                  tui->show_archived_agents ? "all" : "enabled");
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_truncated(2, 0, cols, line);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_agent_rows(tui, 4, rows, cols);
     } else {
         char line[512];
