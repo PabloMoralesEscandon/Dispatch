@@ -1702,19 +1702,7 @@ static const char *selected_task_group(DispatchTui *tui) {
     return "";
 }
 
-static void run_group_form(DispatchTui *tui) {
-    char name[128];
-    char prefix[16];
-    if (!prompt_line("New group name: ", name, sizeof(name), ""))
-        return;
-    if (!prompt_line("Prefix (blank auto): ", prefix, sizeof(prefix), ""))
-        return;
-
-    char message[256] = {0};
-    create_group(name, prefix, message, sizeof(message));
-    tui_load_board(tui);
-    tui_set_status(tui, message);
-}
+static void run_group_form(DispatchTui *tui);
 
 static void task_form_buffer(TuiTaskForm *form, int field, char **buffer,
                              size_t *buffer_size) {
@@ -1987,6 +1975,174 @@ static void run_task_form(DispatchTui *tui) {
                 tui_load_board(tui);
                 tui_set_status(tui, message);
                 clamp_selection(tui);
+                running = 0;
+            } else {
+                snprintf(form.status, sizeof(form.status), "%s", message);
+            }
+        }
+    }
+    curs_set(0);
+    timeout(1000);
+}
+
+/* New group form ----------------------------------------------------------- */
+
+typedef struct {
+    char name[128];
+    char prefix[16];
+    int active_field;
+    char status[256];
+} TuiGroupForm;
+
+enum {
+    TUI_GROUP_FORM_NAME = 0,
+    TUI_GROUP_FORM_PREFIX = 1,
+    TUI_GROUP_FORM_FIELD_COUNT = 2,
+};
+
+static void group_form_buffer(TuiGroupForm *form, int field, char **buffer,
+                              size_t *buffer_size) {
+    if (field == TUI_GROUP_FORM_PREFIX) {
+        *buffer = form->prefix;
+        *buffer_size = sizeof(form->prefix);
+    } else {
+        *buffer = form->name;
+        *buffer_size = sizeof(form->name);
+    }
+}
+
+static void render_group_form_screen(DispatchTui *tui,
+                                     const TuiGroupForm *form) {
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    erase();
+
+    draw_title_bar(tui, "New Group");
+
+    if (rows < 14 || cols < 40) {
+        draw_truncated(2, 0, cols, "Terminal too small for group form.");
+        draw_truncated(3, 0, cols, "Resize to at least 40x14.");
+        refresh();
+        return;
+    }
+
+    int width = cols - 4;
+    if (width > 60)
+        width = 60;
+    int left = (cols - width) / 2;
+
+    char heading[256];
+    snprintf(heading, sizeof(heading), "Creating group as %s", tui->actor);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    draw_truncated(1, left, width, heading);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+
+    draw_task_form_box(3, left, width, 3, "Name", form->name,
+                       form->active_field == TUI_GROUP_FORM_NAME);
+    draw_task_form_box(7, left, width, 3, "Prefix (blank = auto)", form->prefix,
+                       form->active_field == TUI_GROUP_FORM_PREFIX);
+
+    draw_footer(form->status[0] ? form->status : "New group",
+                tui_footer_hints(TUI_SCREEN_GROUP_FORM));
+
+    int box_y = form->active_field == TUI_GROUP_FORM_NAME ? 3 : 7;
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    TuiGroupForm mutable_form = *form;
+    group_form_buffer(&mutable_form, form->active_field, &buffer, &buffer_size);
+    int inner_width = width - 4;
+    if (buffer && inner_width > 0) {
+        int len = (int)strlen(buffer);
+        if (len > inner_width - 1)
+            len = inner_width - 1;
+        int cursor_y = box_y + 2;
+        int cursor_x = left + 2 + len;
+        if (cursor_y < rows - 1 && cursor_x < cols)
+            move(cursor_y, cursor_x);
+    }
+    refresh();
+}
+
+static int handle_group_form_key(TuiGroupForm *form, int ch, int *submit,
+                                 int *cancel) {
+    *submit = 0;
+    *cancel = 0;
+    if (ch == 27) {
+        *cancel = 1;
+        return 1;
+    }
+    if (ch == '\t' || ch == KEY_DOWN) {
+        form->active_field =
+            (form->active_field + 1) % TUI_GROUP_FORM_FIELD_COUNT;
+        return 1;
+    }
+    if (ch == KEY_UP) {
+        form->active_field =
+            (form->active_field + TUI_GROUP_FORM_FIELD_COUNT - 1) %
+            TUI_GROUP_FORM_FIELD_COUNT;
+        return 1;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        if (form->active_field == TUI_GROUP_FORM_PREFIX)
+            *submit = 1;
+        else
+            form->active_field++;
+        return 1;
+    }
+
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    group_form_buffer(form, form->active_field, &buffer, &buffer_size);
+    if (!buffer || buffer_size == 0)
+        return 1;
+    size_t len = strlen(buffer);
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        if (len > 0)
+            buffer[len - 1] = '\0';
+        return 1;
+    }
+    if (ch == 21) {
+        buffer[0] = '\0';
+        return 1;
+    }
+    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
+        len + 1 < buffer_size) {
+        buffer[len] = (char)ch;
+        buffer[len + 1] = '\0';
+    }
+    return 1;
+}
+
+static void run_group_form(DispatchTui *tui) {
+    TuiGroupForm form;
+    memset(&form, 0, sizeof(form));
+    form.active_field = TUI_GROUP_FORM_NAME;
+    snprintf(form.status, sizeof(form.status), "Fill group fields");
+
+    timeout(-1);
+    curs_set(1);
+    int running = 1;
+    while (running) {
+        render_group_form_screen(tui, &form);
+        int ch = getch();
+        if (ch == KEY_RESIZE)
+            continue;
+        int submit = 0;
+        int cancel = 0;
+        handle_group_form_key(&form, ch, &submit, &cancel);
+        if (cancel) {
+            tui_set_status(tui, "Group creation cancelled");
+            break;
+        }
+        if (submit) {
+            char message[256] = {0};
+            if (create_group(form.name, form.prefix, message,
+                             sizeof(message))) {
+                tui_load_board(tui);
+                tui_set_status(tui, message);
                 running = 0;
             } else {
                 snprintf(form.status, sizeof(form.status), "%s", message);
@@ -2720,7 +2876,7 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
     case TUI_SCREEN_TASK_FORM:
         return "Enter next/save   Tab move   Space review   Esc cancel";
     case TUI_SCREEN_GROUP_FORM:
-        return "Enter next   Esc cancel";
+        return "Enter next/save   Tab move   Esc cancel";
     case TUI_SCREEN_BOARD:
     default:
         return ": palette   Tab/a agents   w workspaces   n task   + group   ? help";
