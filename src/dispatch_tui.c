@@ -3093,35 +3093,6 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         draw_padded(y, 0, cols, "(no matching log records)");
 }
 
-static int draw_line(int y, int rows, int cols, const char *label,
-                     const char *value) {
-    if (y >= rows - 1)
-        return y;
-    char line[1024];
-    snprintf(line, sizeof(line), "%s%s%s", label ? label : "",
-             label && label[0] ? " " : "", value ? value : "-");
-    draw_truncated(y, 0, cols, line);
-    return y + 1;
-}
-
-static int draw_string_list(int y, int rows, int cols, const char *label,
-                            const DispatchStringList *list) {
-    if (list->count == 0)
-        return draw_line(y, rows, cols, label, "-");
-
-    char line[1024];
-    snprintf(line, sizeof(line), "%s", label);
-    size_t used = strlen(line);
-    for (size_t i = 0; i < list->count && used + 2 < sizeof(line); i++) {
-        int written = snprintf(line + used, sizeof(line) - used, "%s%s",
-                               i == 0 ? " " : ",", list->items[i]);
-        if (written < 0)
-            break;
-        used += (size_t)written;
-    }
-    return draw_line(y, rows, cols, "", line);
-}
-
 /* Shared inspector chrome --------------------------------------------------*/
 
 /* Inspector title: an accent ID, the title, and (optionally) a colored state
@@ -3362,33 +3333,39 @@ static void draw_workspace_inspector(DispatchTui *tui, int rows, int cols) {
 
     DispatchTask *task = dispatch_board_find_task(&tui->board,
                                                   workspace->task_id);
-    const char *task_state =
-        task ? dispatch_state_name(dispatch_task_effective_state(&tui->board,
-                                                                 task))
-             : "missing";
-    int y = 2;
-    char line[1024];
-    snprintf(line, sizeof(line), "%s  %s", workspace->task_id,
-             workspace->branch);
-    attron(A_BOLD);
-    y = draw_line(y, rows, cols, "", line);
-    attroff(A_BOLD);
+    int has_state = task != NULL;
+    DispatchState wstate =
+        has_state ? dispatch_task_effective_state(&tui->board, task)
+                  : DISPATCH_STATE_PROPOSED;
+    const char *task_state = has_state ? dispatch_state_name(wstate) : "missing";
+    int badge_color = has_state ? tui_state_color(wstate) : TUI_COLOR_MUTED;
 
-    y = draw_line(y + 1, rows, cols, "Task state:", task_state);
-    y = draw_line(y, rows, cols, "Workspace state:",
-                  dispatch_workspace_state_name(workspace->state));
-    y = draw_line(y, rows, cols, "Actor:", workspace->actor);
-    y = draw_line(y, rows, cols, "Path:", workspace->path);
-    y = draw_line(y, rows, cols, "Repo:", workspace->repo_path);
-    y = draw_line(y, rows, cols, "Branch:", workspace->branch);
-    y = draw_line(y, rows, cols, "Git worktree:",
-                  path_has_git_metadata(workspace->path) ? "present" : "missing");
-    y = draw_line(y, rows, cols, "Dirty:",
-                  workspace_is_dirty(workspace) ? "yes" : "no");
-    y = draw_string_list(y + 1, rows, cols, "Sequence tasks:",
-                         &workspace->sequence_tasks);
-    y = draw_line(y, rows, cols, "Review gate:",
-                  workspace->review_gate ? workspace->review_gate : "-");
+    char buf[1024];
+    int y = draw_inspector_header(2, rows, cols, workspace->task_id,
+                                  workspace->branch, task_state, badge_color);
+    y++;
+
+    y = draw_section(y, rows, cols, "Location");
+    y = draw_field(y, rows, cols, "Actor", workspace->actor);
+    y = draw_field(y, rows, cols, "Repo", workspace->repo_path);
+    y = draw_field(y, rows, cols, "Path", workspace->path);
+    y = draw_field(y, rows, cols, "Branch", workspace->branch);
+    y++;
+
+    y = draw_section(y, rows, cols, "Git");
+    y = draw_field(y, rows, cols, "WS state",
+                   dispatch_workspace_state_name(workspace->state));
+    y = draw_field(y, rows, cols, "Worktree",
+                   path_has_git_metadata(workspace->path) ? "present"
+                                                          : "missing");
+    y = draw_field(y, rows, cols, "Dirty",
+                   workspace_is_dirty(workspace) ? "yes" : "no");
+    y++;
+
+    y = draw_section(y, rows, cols, "Sequence");
+    join_string_list(&workspace->sequence_tasks, buf, sizeof(buf));
+    y = draw_field(y, rows, cols, "Tasks", buf);
+    y = draw_field(y, rows, cols, "Review gate", workspace->review_gate);
 }
 
 static int group_visible_task_count(DispatchTui *tui,
