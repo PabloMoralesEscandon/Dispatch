@@ -103,12 +103,22 @@ static int handle_prompt_line_key(char *buffer, size_t buffer_size, int ch,
                                   int *done, int *cancelled);
 static void draw_truncated(int y, int x, int width, const char *text);
 static void draw_padded(int y, int x, int width, const char *text);
+static void draw_title_bar(DispatchTui *tui, const char *view);
 
 enum {
     TUI_COLOR_HEADER = 1,
     TUI_COLOR_ALT_ROW = 2,
     TUI_COLOR_SELECTED = 3,
     TUI_COLOR_TITLE = 4,
+    TUI_COLOR_BRAND = 5,
+    TUI_COLOR_MUTED = 6,
+    TUI_COLOR_ACCENT = 7,
+    TUI_COLOR_STATE_READY = 8,
+    TUI_COLOR_STATE_DOING = 9,
+    TUI_COLOR_STATE_REVIEW = 10,
+    TUI_COLOR_STATE_BLOCKED = 11,
+    TUI_COLOR_STATE_DONE = 12,
+    TUI_COLOR_STATE_PROPOSED = 13,
 };
 
 static int tui_colors_enabled = 0;
@@ -132,15 +142,17 @@ static void tui_style_header_off(void) {
 }
 
 static void tui_style_title_on(void) {
-    attron(A_BOLD | A_REVERSE);
     if (tui_colors_enabled)
-        attron(COLOR_PAIR(TUI_COLOR_TITLE));
+        attron(COLOR_PAIR(TUI_COLOR_TITLE) | A_BOLD);
+    else
+        attron(A_BOLD | A_REVERSE);
 }
 
 static void tui_style_title_off(void) {
     if (tui_colors_enabled)
-        attroff(COLOR_PAIR(TUI_COLOR_TITLE));
-    attroff(A_BOLD | A_REVERSE);
+        attroff(COLOR_PAIR(TUI_COLOR_TITLE) | A_BOLD);
+    else
+        attroff(A_BOLD | A_REVERSE);
 }
 
 static void tui_style_row_on(int row_index, int selected) {
@@ -1823,9 +1835,7 @@ static void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
     getmaxyx(stdscr, rows, cols);
     erase();
 
-    tui_style_title_on();
-    draw_padded(0, 0, cols, "Dispatch TUI - New Task");
-    tui_style_title_off();
+    draw_title_bar(tui, "New Task");
 
     if (rows < 24 || cols < 50) {
         draw_truncated(2, 0, cols, "Terminal too small for task form.");
@@ -2584,6 +2594,76 @@ static void draw_padded(int y, int x, int width, const char *text) {
     mvaddnstr(y, x, text ? text : "", width);
 }
 
+static const char *tui_view_name(DispatchTuiScreen screen) {
+    switch (screen) {
+    case TUI_SCREEN_BOARD:
+        return "Board";
+    case TUI_SCREEN_TASK_INSPECTOR:
+        return "Task";
+    case TUI_SCREEN_AGENTS:
+        return "Agents";
+    case TUI_SCREEN_AGENT_INSPECTOR:
+        return "Agent";
+    case TUI_SCREEN_TASK_FORM:
+        return "New Task";
+    case TUI_SCREEN_GROUP_FORM:
+        return "New Group";
+    case TUI_SCREEN_WORKSPACES:
+        return "Workspaces";
+    case TUI_SCREEN_WORKSPACE_INSPECTOR:
+        return "Workspace";
+    case TUI_SCREEN_LOGS:
+        return "Logs";
+    }
+    return "Board";
+}
+
+/* Persistent branded title bar drawn at row 0 of every screen: a green
+ * "DISPATCH" chip, the current view name, and right-aligned actor/board
+ * context. */
+static void draw_title_bar(DispatchTui *tui, const char *view) {
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    (void)rows;
+    if (cols <= 0)
+        return;
+
+    tui_style_title_on();
+    mvhline(0, 0, ' ', cols);
+
+    const char *brand = " DISPATCH ";
+    int x = 0;
+    tui_style_title_off();
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_BRAND) | A_BOLD);
+    else
+        attron(A_REVERSE | A_BOLD);
+    mvaddnstr(0, x, brand, cols);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_BRAND) | A_BOLD);
+    else
+        attroff(A_REVERSE | A_BOLD);
+    x += (int)strlen(brand);
+
+    tui_style_title_on();
+    if (x < cols) {
+        char label[128];
+        snprintf(label, sizeof(label), "  %s", view ? view : "");
+        mvaddnstr(0, x, label, cols - x);
+    }
+
+    char context[256];
+    snprintf(context, sizeof(context), "actor:%s  board:%s ", tui->actor,
+             tui->board_loaded && tui->board.name ? tui->board.name : "-");
+    int ctx_len = (int)strlen(context);
+    int ctx_x = cols - ctx_len;
+    int label_end = x + (int)strlen(view ? view : "") + 2;
+    if (ctx_x > label_end + 1)
+        mvaddnstr(0, ctx_x, context, cols - ctx_x);
+    tui_style_title_off();
+}
+
 static void tui_render_help(void) {
     int rows = 0;
     int cols = 0;
@@ -3038,26 +3118,7 @@ static void tui_render(DispatchTui *tui) {
     erase();
     clamp_selection(tui);
 
-    tui_style_title_on();
-    draw_padded(0, 0, cols,
-                tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                    ? "Dispatch TUI - Task"
-                    : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
-                          ? "Dispatch TUI - Agent"
-                    : tui->screen == TUI_SCREEN_TASK_FORM
-                          ? "Dispatch TUI - New Task"
-                    : tui->screen == TUI_SCREEN_GROUP_FORM
-                          ? "Dispatch TUI - New Group"
-                    : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
-                          ? "Dispatch TUI - Workspace"
-                    : tui->screen == TUI_SCREEN_WORKSPACES
-                          ? "Dispatch TUI - Workspaces"
-                    : tui->screen == TUI_SCREEN_LOGS
-                          ? "Dispatch TUI - Logs"
-                    : tui->screen == TUI_SCREEN_AGENTS
-                          ? "Dispatch TUI - Agents"
-                          : "Dispatch TUI - Board");
-    tui_style_title_off();
+    draw_title_bar(tui, tui_view_name(tui->screen));
 
     if (!tui->board_loaded) {
         draw_truncated(2, 0, cols, "Board not loaded.");
@@ -3181,6 +3242,15 @@ static int tui_run(void) {
         init_pair(TUI_COLOR_ALT_ROW, COLOR_WHITE, COLOR_BLACK);
         init_pair(TUI_COLOR_SELECTED, COLOR_BLACK, COLOR_CYAN);
         init_pair(TUI_COLOR_TITLE, COLOR_BLACK, COLOR_CYAN);
+        init_pair(TUI_COLOR_BRAND, COLOR_BLACK, COLOR_GREEN);
+        init_pair(TUI_COLOR_MUTED, COLOR_WHITE, -1);
+        init_pair(TUI_COLOR_ACCENT, COLOR_CYAN, -1);
+        init_pair(TUI_COLOR_STATE_READY, COLOR_GREEN, -1);
+        init_pair(TUI_COLOR_STATE_DOING, COLOR_YELLOW, -1);
+        init_pair(TUI_COLOR_STATE_REVIEW, COLOR_MAGENTA, -1);
+        init_pair(TUI_COLOR_STATE_BLOCKED, COLOR_RED, -1);
+        init_pair(TUI_COLOR_STATE_DONE, COLOR_BLUE, -1);
+        init_pair(TUI_COLOR_STATE_PROPOSED, COLOR_CYAN, -1);
         tui_colors_enabled = 1;
     }
     signal(SIGINT, tui_handle_sigint);
