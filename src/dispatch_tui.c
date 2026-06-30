@@ -2717,6 +2717,78 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
     }
 }
 
+static int tui_state_color(DispatchState state) {
+    switch (state) {
+    case DISPATCH_STATE_READY:
+        return TUI_COLOR_STATE_READY;
+    case DISPATCH_STATE_DOING:
+        return TUI_COLOR_STATE_DOING;
+    case DISPATCH_STATE_REVIEW:
+        return TUI_COLOR_STATE_REVIEW;
+    case DISPATCH_STATE_BLOCKED:
+        return TUI_COLOR_STATE_BLOCKED;
+    case DISPATCH_STATE_DONE:
+        return TUI_COLOR_STATE_DONE;
+    case DISPATCH_STATE_PROPOSED:
+        return TUI_COLOR_STATE_PROPOSED;
+    case DISPATCH_STATE_PAUSED:
+        return TUI_COLOR_MUTED;
+    }
+    return TUI_COLOR_MUTED;
+}
+
+/* Draw a colored "<count> <label>" chip and return the next x position. */
+static int draw_count_chip(int y, int x, int cols, int count, const char *label,
+                           int color, int dim) {
+    if (x >= cols)
+        return x;
+    char chip[64];
+    snprintf(chip, sizeof(chip), "%d %s", count, label);
+    int attr = dim ? A_DIM : A_BOLD;
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(color) | attr);
+    else
+        attron(attr);
+    mvaddnstr(y, x, chip, cols - x);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(color) | attr);
+    else
+        attroff(attr);
+    return x + (int)strlen(chip) + 3;
+}
+
+/* Board header: a colored strip of live task-state counts. */
+static void draw_board_stats(DispatchTui *tui, int y, int cols) {
+    int x = 0;
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    mvaddnstr(y, x, "Tasks  ", cols);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    x += 7;
+
+    int proposed = task_count_for_state(&tui->board, DISPATCH_STATE_PROPOSED);
+    x = draw_count_chip(y, x, cols,
+                        task_count_for_state(&tui->board, DISPATCH_STATE_READY),
+                        "ready", tui_state_color(DISPATCH_STATE_READY), 0);
+    x = draw_count_chip(y, x, cols,
+                        task_count_for_state(&tui->board, DISPATCH_STATE_DOING),
+                        "doing", tui_state_color(DISPATCH_STATE_DOING), 0);
+    x = draw_count_chip(y, x, cols,
+                        task_count_for_state(&tui->board, DISPATCH_STATE_REVIEW),
+                        "review", tui_state_color(DISPATCH_STATE_REVIEW), 0);
+    x = draw_count_chip(y, x, cols,
+                        task_count_for_state(&tui->board, DISPATCH_STATE_BLOCKED),
+                        "blocked", tui_state_color(DISPATCH_STATE_BLOCKED), 0);
+    if (proposed > 0)
+        x = draw_count_chip(y, x, cols, proposed, "proposed",
+                            tui_state_color(DISPATCH_STATE_PROPOSED), 0);
+    x = draw_count_chip(y, x, cols,
+                        task_count_for_state(&tui->board, DISPATCH_STATE_DONE),
+                        "done", tui_state_color(DISPATCH_STATE_DONE), 1);
+    (void)x;
+}
+
 static void tui_render_help(void) {
     int rows = 0;
     int cols = 0;
@@ -3211,21 +3283,19 @@ static void tui_render(DispatchTui *tui) {
         draw_agent_rows(tui, 4, rows, cols);
     } else {
         char line[512];
-        snprintf(line, sizeof(line), "Board: %s    Repo: %s", tui->board.name,
-                 tui->board.repo_path ? tui->board.repo_path : ".");
-        draw_truncated(2, 0, cols, line);
+        draw_board_stats(tui, 2, cols);
 
         int visible = visible_task_count_for_tui(tui);
         snprintf(line, sizeof(line),
-                 "Tasks: %zu total  visible:%d  ready:%d  doing:%d  review:%d  blocked:%d  done:%d",
-                 tui->board.tasks.count,
-                 visible,
-                 task_count_for_state(&tui->board, DISPATCH_STATE_READY),
-                 task_count_for_state(&tui->board, DISPATCH_STATE_DOING),
-                 task_count_for_state(&tui->board, DISPATCH_STATE_REVIEW),
-                 task_count_for_state(&tui->board, DISPATCH_STATE_BLOCKED),
-                 task_count_for_state(&tui->board, DISPATCH_STATE_DONE));
+                 "Repo %s    %zu tasks (%d shown)    %zu groups    %zu agents    %zu workspaces",
+                 tui->board.repo_path ? tui->board.repo_path : ".",
+                 tui->board.tasks.count, visible, tui->board.groups.count,
+                 tui->board.agents.count, tui->board.workspaces.count);
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_truncated(4, 0, cols, line);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
 
         snprintf(line, sizeof(line),
                  "Filter: %s%s%s%s%s%s%s%s    Groups: %zu    Agents: %zu    Workspaces: %zu",
