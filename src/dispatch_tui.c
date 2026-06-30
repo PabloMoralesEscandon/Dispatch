@@ -2789,6 +2789,72 @@ static void draw_board_stats(DispatchTui *tui, int y, int cols) {
     (void)x;
 }
 
+/* Draw a small "<text>" chip with a leading/trailing space and return next x. */
+static int draw_tag(int y, int x, int cols, const char *text, int color,
+                    int reverse) {
+    if (x >= cols)
+        return x;
+    int attr = A_BOLD | (reverse ? A_REVERSE : 0);
+    char buf[128];
+    snprintf(buf, sizeof(buf), " %s ", text);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(color) | attr);
+    else
+        attron(attr);
+    mvaddnstr(y, x, buf, cols - x);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(color) | attr);
+    else
+        attroff(attr);
+    return x + (int)strlen(buf) + 1;
+}
+
+/* Board filter line: the active view filter highlighted as a chip, followed by
+ * chips for any active group / actor / search refinements. */
+static void draw_filter_line(DispatchTui *tui, int y, int cols) {
+    int x = 0;
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    mvaddnstr(y, x, "View  ", cols);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    x += 6;
+
+    x = draw_tag(y, x, cols, filter_name(tui->filter), TUI_COLOR_ACCENT, 1);
+
+    int has_refine = 0;
+    char tag[160];
+    if (tui->group_filter >= 0 &&
+        (size_t)tui->group_filter < tui->board.groups.count) {
+        snprintf(tag, sizeof(tag), "group %s",
+                 tui->board.groups.items[tui->group_filter].prefix);
+        x = draw_tag(y, x, cols, tag, TUI_COLOR_HEADER, 0);
+        has_refine = 1;
+    }
+    const char *actor = actor_filter_value(&tui->board, tui->actor_filter);
+    if (actor) {
+        snprintf(tag, sizeof(tag), "actor %s", actor);
+        x = draw_tag(y, x, cols, tag, TUI_COLOR_HEADER, 0);
+        has_refine = 1;
+    }
+    if (tui->search[0] || tui->search_active) {
+        snprintf(tag, sizeof(tag), "search %s%s", tui->search,
+                 tui->search_active ? "_" : "");
+        x = draw_tag(y, x, cols, tag, TUI_COLOR_STATE_DOING,
+                     tui->search_active);
+        has_refine = 1;
+    }
+
+    if (!has_refine && x + 4 < cols) {
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        draw_truncated(y, x + 2, cols - x - 2,
+                       "1-7/R filter   G group   A actor   / search   c clear");
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    }
+}
+
 static void tui_render_help(void) {
     int rows = 0;
     int cols = 0;
@@ -3297,22 +3363,7 @@ static void tui_render(DispatchTui *tui) {
         if (tui_colors_enabled)
             attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
 
-        snprintf(line, sizeof(line),
-                 "Filter: %s%s%s%s%s%s%s%s    Groups: %zu    Agents: %zu    Workspaces: %zu",
-                 filter_name(tui->filter),
-                 tui->group_filter >= 0 ? " group:" : "",
-                 tui->group_filter >= 0
-                     ? tui->board.groups.items[tui->group_filter].prefix
-                     : "",
-                 actor_filter_value(&tui->board, tui->actor_filter) ? " actor:" : "",
-                 actor_filter_value(&tui->board, tui->actor_filter)
-                     ? actor_filter_value(&tui->board, tui->actor_filter)
-                     : "",
-                 tui->search[0] ? " search:" : "",
-                 tui->search[0] ? tui->search : "",
-                 tui->search_active ? "_" : "", tui->board.groups.count,
-                 tui->board.agents.count, tui->board.workspaces.count);
-        draw_truncated(5, 0, cols, line);
+        draw_filter_line(tui, 5, cols);
 
         draw_board_rows(tui, 7, rows, cols);
     }
