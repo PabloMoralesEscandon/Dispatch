@@ -104,6 +104,8 @@ static int handle_prompt_line_key(char *buffer, size_t buffer_size, int ch,
 static void draw_truncated(int y, int x, int width, const char *text);
 static void draw_padded(int y, int x, int width, const char *text);
 static void draw_title_bar(DispatchTui *tui, const char *view);
+static void draw_footer(const char *message, const char *hints);
+static const char *tui_footer_hints(DispatchTuiScreen screen);
 
 enum {
     TUI_COLOR_HEADER = 1,
@@ -1870,14 +1872,8 @@ static void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
     y += 4;
     draw_task_form_review_box(y, left, width, form);
 
-    attron(A_REVERSE);
-    mvhline(rows - 1, 0, ' ', cols);
-    char status[512];
-    snprintf(status, sizeof(status),
-             " %s | Enter next/save | Tab move | Space review | Esc cancel",
-             form->status[0] ? form->status : "New task");
-    draw_truncated(rows - 1, 0, cols, status);
-    attroff(A_REVERSE);
+    draw_footer(form->status[0] ? form->status : "New task",
+                tui_footer_hints(TUI_SCREEN_TASK_FORM));
 
     task_form_move_cursor(form, rows, cols, left, width, desc_height);
     refresh();
@@ -2664,6 +2660,63 @@ static void draw_title_bar(DispatchTui *tui, const char *view) {
     tui_style_title_off();
 }
 
+/* Persistent footer at the last row: a bold status message on the left and
+ * right-aligned, recessed key hints on the right. */
+static void draw_footer(const char *message, const char *hints) {
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    if (rows < 1 || cols <= 0)
+        return;
+    int y = rows - 1;
+
+    attron(A_REVERSE);
+    mvhline(y, 0, ' ', cols);
+
+    char left[256];
+    snprintf(left, sizeof(left), " %s ",
+             message && message[0] ? message : "Ready");
+    attron(A_BOLD);
+    mvaddnstr(y, 0, left, cols);
+    attroff(A_BOLD);
+    int left_len = (int)strlen(left);
+
+    if (hints && hints[0]) {
+        int hlen = (int)strlen(hints);
+        int hx = cols - hlen - 1;
+        if (hx > left_len + 2) {
+            mvaddnstr(y, hx, hints, cols - hx);
+        } else if (left_len + 1 < cols) {
+            mvaddnstr(y, left_len + 1, hints, cols - left_len - 1);
+        }
+    }
+    attroff(A_REVERSE);
+}
+
+static const char *tui_footer_hints(DispatchTuiScreen screen) {
+    switch (screen) {
+    case TUI_SCREEN_TASK_INSPECTOR:
+        return "q/Esc back   > add dep   < remove dep   d diff   L logs";
+    case TUI_SCREEN_AGENT_INSPECTOR:
+        return "q/Esc back   y run   e prompt   S session   x clear   z archive";
+    case TUI_SCREEN_WORKSPACE_INSPECTOR:
+        return "q/Esc back   x remove   X force remove";
+    case TUI_SCREEN_WORKSPACES:
+        return "b board   a agents   n create   x/X remove   P prune";
+    case TUI_SCREEN_LOGS:
+        return "b board   F filter   C clear   j/k move";
+    case TUI_SCREEN_AGENTS:
+        return "Enter/i inspect   y run   A all/enabled   z archive   Tab board";
+    case TUI_SCREEN_TASK_FORM:
+        return "Enter next/save   Tab move   Space review   Esc cancel";
+    case TUI_SCREEN_GROUP_FORM:
+        return "Enter next   Esc cancel";
+    case TUI_SCREEN_BOARD:
+    default:
+        return ": palette   Tab/a agents   w workspaces   n task   + group   ? help";
+    }
+}
+
 static void tui_render_help(void) {
     int rows = 0;
     int cols = 0;
@@ -3194,28 +3247,8 @@ static void tui_render(DispatchTui *tui) {
         draw_board_rows(tui, 7, rows, cols);
     }
 
-    if (rows > 1) {
-        attron(A_REVERSE);
-        mvhline(rows - 1, 0, ' ', cols);
-        char status[512];
-        snprintf(status, sizeof(status),
-                tui->screen == TUI_SCREEN_TASK_INSPECTOR
-                     ? " %s | q/Esc back | > add dep | < remove dep | d diff"
-                     : tui->screen == TUI_SCREEN_AGENT_INSPECTOR
-                           ? " %s | q/Esc back | y run | e prompt | S session | x clear"
-                     : tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR
-                           ? " %s | q/Esc back | x remove | X force remove"
-                     : tui->screen == TUI_SCREEN_WORKSPACES
-                           ? " %s | b board | a agents | n create | x/X remove | P prune"
-                     : tui->screen == TUI_SCREEN_LOGS
-                           ? " %s | b board | F filter | C clear | j/k move"
-                     : tui->screen == TUI_SCREEN_AGENTS
-                           ? " %s | y run command | A all/enabled | z archive/restore | Enter/i inspect"
-                           : " %s | : palette | Tab/a agents | w workspaces | n task | + group",
-                 tui->status[0] ? tui->status : "Ready");
-        draw_truncated(rows - 1, 0, cols, status);
-        attroff(A_REVERSE);
-    }
+    if (rows > 1)
+        draw_footer(tui->status, tui_footer_hints(tui->screen));
 
     if (tui->show_help)
         tui_render_help();
