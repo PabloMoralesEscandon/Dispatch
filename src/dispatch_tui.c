@@ -2983,10 +2983,11 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
 
     int visible_rows = rows - start_y - 2;
     sync_workspace_scroll(tui, visible_rows);
-    tui_style_header_on();
-    draw_padded(y++, 0, cols,
-                "Task     Task state  Workspace  Actor       Dirty  Git      Branch / Path");
-    tui_style_header_off();
+    char header[256];
+    snprintf(header, sizeof(header), "  %-8s %-9s %-9s %-16s %-5s %-7s %s",
+             "Task", "State", "WS", "Actor", "Dirty", "Git", "Branch / Path");
+    draw_list_header(y++, cols, header);
+
     for (size_t i = 0; i < tui->board.workspaces.count && y < rows - 1; i++) {
         DispatchWorkspace *workspace = &tui->board.workspaces.items[i];
         if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
@@ -2997,23 +2998,41 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         }
         DispatchTask *task =
             dispatch_board_find_task(&tui->board, workspace->task_id);
-        const char *task_state =
-            task ? dispatch_state_name(dispatch_task_effective_state(&tui->board,
-                                                                     task))
-                 : "missing";
+        int has_state = task != NULL;
+        DispatchState wstate =
+            has_state ? dispatch_task_effective_state(&tui->board, task)
+                      : DISPATCH_STATE_PROPOSED;
+        const char *task_state = has_state ? dispatch_state_name(wstate)
+                                           : "missing";
         int git_present = path_has_git_metadata(workspace->path);
         int dirty = workspace_is_dirty(workspace);
-        char line[1200];
-        snprintf(line, sizeof(line), "%-8s %-11s %-10s %-11s %-6s %-8s %s  %s",
-                 workspace->task_id, task_state,
-                 dispatch_workspace_state_name(workspace->state),
-                 workspace->actor, dirty ? "yes" : "no",
-                 git_present ? "present" : "missing", workspace->branch,
-                 workspace->path);
         int selected = visible_index == tui->selected_workspace;
+
+        char branchpath[1100];
+        snprintf(branchpath, sizeof(branchpath), "%s  %s", workspace->branch,
+                 workspace->path);
+        char line[1200];
+        snprintf(line, sizeof(line),
+                 "%s%-8.8s %-9.9s %-9.9s %-16.16s %-5s %-7s %s",
+                 selected ? " >" : "  ", workspace->task_id, task_state,
+                 dispatch_workspace_state_name(workspace->state),
+                 workspace->actor, dirty ? "dirty" : "clean",
+                 git_present ? "git" : "no-git", branchpath);
         tui_style_row_on(visible_index, selected);
-        draw_padded(y++, 0, cols, line);
+        draw_padded(y, 0, cols, line);
         tui_style_row_off(visible_index, selected);
+
+        if (!selected && tui_colors_enabled) {
+            int sc = has_state ? tui_state_color(wstate) : TUI_COLOR_MUTED;
+            attron(COLOR_PAIR(sc) | A_BOLD);
+            mvaddnstr(y, 11, task_state, 9);
+            attroff(COLOR_PAIR(sc) | A_BOLD);
+            int dc = dirty ? TUI_COLOR_STATE_DOING : TUI_COLOR_MUTED;
+            attron(COLOR_PAIR(dc) | (dirty ? A_BOLD : A_DIM));
+            mvaddnstr(y, 48, dirty ? "dirty" : "clean", 5);
+            attroff(COLOR_PAIR(dc) | (dirty ? A_BOLD : A_DIM));
+        }
+        y++;
         visible_index++;
     }
 }
@@ -3509,10 +3528,13 @@ static void tui_render(DispatchTui *tui) {
         draw_workspace_inspector(tui, rows, cols);
     } else if (tui->screen == TUI_SCREEN_WORKSPACES) {
         char line[512];
-        snprintf(line, sizeof(line),
-                 "Workspaces: %d active    n create    x remove    X force remove    P prune done",
+        snprintf(line, sizeof(line), "%d active workspaces",
                  visible_workspace_count(tui));
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_truncated(2, 0, cols, line);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_workspace_rows(tui, 4, rows, cols);
     } else if (tui->screen == TUI_SCREEN_LOGS) {
         char line[512];
