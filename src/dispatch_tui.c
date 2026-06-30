@@ -3080,18 +3080,113 @@ static int draw_string_list(int y, int rows, int cols, const char *label,
     return draw_line(y, rows, cols, "", line);
 }
 
-static int draw_blocked_by(int y, int rows, int cols, DispatchBoard *board,
-                           const char *task_id) {
-    char line[1024] = "Blocks:";
-    size_t used = strlen(line);
+/* Shared inspector chrome --------------------------------------------------*/
+
+/* Inspector title: an accent ID, the title, and (optionally) a colored state
+ * badge on the right, with a dim rule underneath. Returns the next free row. */
+static int draw_inspector_header(int y, int rows, int cols, const char *id,
+                                 const char *title, int has_state,
+                                 DispatchState state) {
+    if (y >= rows - 1)
+        return y;
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+    else
+        attron(A_BOLD);
+    mvaddnstr(y, 2, id, cols - 2);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+    else
+        attroff(A_BOLD);
+
+    int x = 2 + (int)strlen(id) + 2;
+    if (title && title[0] && x < cols) {
+        attron(A_BOLD);
+        mvaddnstr(y, x, title, cols - x);
+        attroff(A_BOLD);
+    }
+    if (has_state) {
+        const char *sn = dispatch_state_name(state);
+        int bx = cols - (int)strlen(sn) - 3;
+        if (bx > x + (int)strlen(title ? title : "") + 1)
+            draw_tag(y, bx, cols, sn, tui_state_color(state), 1);
+    }
+    if (y + 1 < rows - 1) {
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        mvhline(y + 1, 2, ACS_HLINE, cols - 4);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    }
+    return y + 2;
+}
+
+/* A "Label   value" row with a dim fixed-width label. */
+static int draw_field(int y, int rows, int cols, const char *label,
+                      const char *value) {
+    if (y >= rows - 1)
+        return y;
+    char lab[24];
+    snprintf(lab, sizeof(lab), "%-13s", label ? label : "");
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    mvaddnstr(y, 2, lab, cols - 2);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    if (2 + 15 < cols)
+        draw_truncated(y, 2 + 15, cols - 2 - 15, value && value[0] ? value : "-");
+    return y + 1;
+}
+
+/* A bold, accented section heading. */
+static int draw_section(int y, int rows, int cols, const char *title) {
+    if (y >= rows - 1)
+        return y;
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+    else
+        attron(A_BOLD);
+    mvaddnstr(y, 0, title, cols);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+    else
+        attroff(A_BOLD);
+    return y + 1;
+}
+
+static void join_string_list(const DispatchStringList *list, char *buf,
+                             size_t size) {
+    if (size == 0)
+        return;
+    buf[0] = '\0';
+    if (list->count == 0) {
+        snprintf(buf, size, "-");
+        return;
+    }
+    size_t used = 0;
+    for (size_t i = 0; i < list->count && used + 2 < size; i++) {
+        int written = snprintf(buf + used, size - used, "%s%s",
+                               i == 0 ? "" : "  ", list->items[i]);
+        if (written < 0)
+            break;
+        used += (size_t)written;
+    }
+}
+
+static void blocks_text(DispatchBoard *board, const char *task_id, char *buf,
+                        size_t size) {
+    if (size == 0)
+        return;
+    buf[0] = '\0';
+    size_t used = 0;
     int count = 0;
-    for (size_t i = 0; i < board->tasks.count; i++) {
+    for (size_t i = 0; i < board->tasks.count && used + 2 < size; i++) {
         DispatchTask *candidate = &board->tasks.items[i];
         for (size_t dep = 0; dep < candidate->depends_on.count; dep++) {
             if (strcmp(candidate->depends_on.items[dep], task_id) != 0)
                 continue;
-            int written = snprintf(line + used, sizeof(line) - used, " %s",
-                                   candidate->id);
+            int written = snprintf(buf + used, size - used, "%s%s",
+                                   count == 0 ? "" : "  ", candidate->id);
             if (written > 0)
                 used += (size_t)written;
             count++;
@@ -3099,8 +3194,7 @@ static int draw_blocked_by(int y, int rows, int cols, DispatchBoard *board,
         }
     }
     if (count == 0)
-        snprintf(line, sizeof(line), "Blocks: -");
-    return draw_line(y, rows, cols, "", line);
+        snprintf(buf, size, "-");
 }
 
 static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
@@ -3110,48 +3204,58 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
         return;
     }
 
-    char line[1024];
-    int y = 2;
-    snprintf(line, sizeof(line), "%s  %s", task->id, task->title);
-    attron(A_BOLD);
-    y = draw_line(y, rows, cols, "", line);
-    attroff(A_BOLD);
+    char buf[1024];
+    DispatchState state = dispatch_task_effective_state(&tui->board, task);
+    int y = draw_inspector_header(2, rows, cols, task->id, task->title, 1, state);
+    y++;
 
-    y = draw_line(y + 1, rows, cols, "Description:", task->description);
-    y = draw_line(y, rows, cols, "Group:", task->group);
-    y = draw_line(y, rows, cols, "State:",
-                  dispatch_state_name(dispatch_task_effective_state(
-                      &tui->board, task)));
-    y = draw_line(y, rows, cols, "Requires review:",
-                  task->requires_review ? "yes" : "no");
-    y = draw_line(y, rows, cols, "Assigned to:",
-                  task->assigned_to ? task->assigned_to : "-");
-    y = draw_line(y, rows, cols, "Started by:",
-                  task->started_by ? task->started_by : "-");
-    y = draw_line(y, rows, cols, "Completed by:",
-                  task->completed_by ? task->completed_by : "-");
-    y = draw_string_list(y, rows, cols, "Depends on:", &task->depends_on);
-    y = draw_blocked_by(y, rows, cols, &tui->board, task->id);
-    y = draw_string_list(y, rows, cols, "Commits:", &task->commits);
+    y = draw_field(y, rows, cols, "Description",
+                   task->description[0] ? task->description : "-");
+    y++;
+
+    y = draw_section(y, rows, cols, "Details");
+    y = draw_field(y, rows, cols, "Group", task->group);
+    y = draw_field(y, rows, cols, "Review gate",
+                   task->requires_review ? "required" : "none");
+    y = draw_field(y, rows, cols, "Assigned", task->assigned_to);
+    y = draw_field(y, rows, cols, "Started by", task->started_by);
+    y = draw_field(y, rows, cols, "Completed by", task->completed_by);
+    y++;
+
+    y = draw_section(y, rows, cols, "Dependencies");
+    join_string_list(&task->depends_on, buf, sizeof(buf));
+    y = draw_field(y, rows, cols, "Depends on", buf);
+    blocks_text(&tui->board, task->id, buf, sizeof(buf));
+    y = draw_field(y, rows, cols, "Blocks", buf);
+    join_string_list(&task->commits, buf, sizeof(buf));
+    y = draw_field(y, rows, cols, "Commits", buf);
 
     DispatchWorkspace *workspace = workspace_for_task(&tui->board, task->id);
     if (workspace) {
-        y = draw_line(y + 1, rows, cols, "Workspace actor:", workspace->actor);
-        y = draw_line(y, rows, cols, "Workspace path:", workspace->path);
-        y = draw_line(y, rows, cols, "Workspace branch:", workspace->branch);
+        y++;
+        y = draw_section(y, rows, cols, "Workspace");
+        y = draw_field(y, rows, cols, "Actor", workspace->actor);
+        y = draw_field(y, rows, cols, "Branch", workspace->branch);
+        y = draw_field(y, rows, cols, "Path", workspace->path);
     }
 
-    y = draw_line(y + 1, rows, cols, "History:", "");
+    y++;
+    y = draw_section(y, rows, cols, "History");
     if (task->history.count == 0) {
-        y = draw_line(y, rows, cols, "  -", "");
+        draw_field(y, rows, cols, "", "-");
     } else {
         for (size_t i = 0; i < task->history.count && y < rows - 1; i++) {
             DispatchHistoryEntry *entry = &task->history.items[i];
-            snprintf(line, sizeof(line), "  %s by %s%s%s", entry->action,
-                     entry->actor,
-                     entry->note && entry->note[0] ? ": " : "",
+            snprintf(buf, sizeof(buf), "%s by %s%s%s", entry->action,
+                     entry->actor, entry->note && entry->note[0] ? ": " : "",
                      entry->note && entry->note[0] ? entry->note : "");
-            y = draw_line(y, rows, cols, "", line);
+            if (tui_colors_enabled)
+                attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+            mvaddnstr(y, 2, "-", cols - 2);
+            if (tui_colors_enabled)
+                attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+            draw_truncated(y, 4, cols - 4, buf);
+            y++;
         }
     }
 }
