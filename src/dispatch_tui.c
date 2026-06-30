@@ -1748,28 +1748,42 @@ static void draw_task_form_box(int y, int x, int width, int height,
     if (width < 8 || height < 3)
         return;
 
-    if (active)
-        attron(A_BOLD);
-    mvaddnstr(y, x, label, width);
-    if (active)
-        attroff(A_BOLD);
+    int border_attr = 0;
+    int label_attr = 0;
+    if (active) {
+        border_attr = (tui_colors_enabled ? COLOR_PAIR(TUI_COLOR_ACCENT) : 0) |
+                      A_BOLD;
+        label_attr = border_attr;
+    } else {
+        border_attr = (tui_colors_enabled ? COLOR_PAIR(TUI_COLOR_MUTED) : 0) |
+                      A_DIM;
+        label_attr = border_attr;
+    }
+
+    char lab[128];
+    snprintf(lab, sizeof(lab), "%s %s", active ? ">" : " ", label);
+    attron(label_attr);
+    mvaddnstr(y, x, lab, width);
+    attroff(label_attr);
 
     int box_y = y + 1;
-    if (active)
-        attron(A_REVERSE);
+    attron(border_attr);
     mvaddch(box_y, x, ACS_ULCORNER);
     mvhline(box_y, x + 1, ACS_HLINE, width - 2);
     mvaddch(box_y, x + width - 1, ACS_URCORNER);
     for (int row = 1; row < height - 1; row++) {
         mvaddch(box_y + row, x, ACS_VLINE);
-        mvhline(box_y + row, x + 1, ' ', width - 2);
         mvaddch(box_y + row, x + width - 1, ACS_VLINE);
     }
     mvaddch(box_y + height - 1, x, ACS_LLCORNER);
     mvhline(box_y + height - 1, x + 1, ACS_HLINE, width - 2);
     mvaddch(box_y + height - 1, x + width - 1, ACS_LRCORNER);
-    if (active)
-        attroff(A_REVERSE);
+    attroff(border_attr);
+
+    /* Interior and value text are drawn in the normal attribute so typed
+     * content and the cursor stay legible. */
+    for (int row = 1; row < height - 1; row++)
+        mvhline(box_y + row, x + 1, ' ', width - 2);
 
     int inner_width = width - 4;
     if (inner_width <= 0)
@@ -1845,8 +1859,12 @@ static void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
     int desc_height = rows >= 30 ? 5 : 3;
 
     char heading[256];
-    snprintf(heading, sizeof(heading), "Actor: %s", tui->actor);
+    snprintf(heading, sizeof(heading), "Creating task as %s", tui->actor);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
     draw_truncated(1, left, width, heading);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
 
     int y = 3;
     draw_task_form_box(y, left, width, 3, "Group", form->group,
