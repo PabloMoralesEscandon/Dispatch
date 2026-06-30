@@ -3021,61 +3021,125 @@ static void draw_filter_line(DispatchTui *tui, int y, int cols) {
     }
 }
 
+typedef struct {
+    const char *key;
+    const char *desc;
+} HelpItem;
+
+/* Draw one column of help items: NULL key means a section heading. */
+static void help_draw_column(int top_y, int x, int colw, const HelpItem *items,
+                             int n, int max_y) {
+    int y = top_y;
+    for (int i = 0; i < n && y < max_y; i++, y++) {
+        if (!items[i].key) {
+            if (tui_colors_enabled)
+                attron(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+            else
+                attron(A_BOLD | A_UNDERLINE);
+            mvaddnstr(y, x, items[i].desc, colw);
+            if (tui_colors_enabled)
+                attroff(COLOR_PAIR(TUI_COLOR_ACCENT) | A_BOLD);
+            else
+                attroff(A_BOLD | A_UNDERLINE);
+        } else {
+            attron(A_BOLD);
+            mvaddnstr(y, x, items[i].key, 11);
+            attroff(A_BOLD);
+            if (tui_colors_enabled)
+                attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+            if (x + 12 < x + colw)
+                mvaddnstr(y, x + 12, items[i].desc, colw - 12);
+            if (tui_colors_enabled)
+                attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        }
+    }
+}
+
 static void tui_render_help(void) {
     int rows = 0;
     int cols = 0;
     getmaxyx(stdscr, rows, cols);
 
-    const char *lines[] = {
-        "Dispatch TUI Help",
-        "",
-        "q        back from inspectors",
-        "Ctrl+C   quit",
-        "?        toggle help",
-        "u        reload board",
-        "r/s/f/v  ready/start/finish/review selected task",
-        "n/+      create task/group",
-        ">/<      add/remove dependency in task inspector",
-        "d        open selected task commit diff",
-        "e        edit selected agent prompt",
-        "y        copy/show selected agent run command",
-        "Enter/i  inspect selected task",
-        "Esc/q    close inspector",
-        "Tab/a    switch to agents",
-        "w        switch to workspaces",
-        "l/L      logs / selected task or agent logs",
-        ":        command palette",
-        ":q       quit",
-        "/        search tasks",
-        "Esc      clear search",
-        "arrows   move selection",
-        "j/k      move selection",
-        "1-7/R    filter presets",
-        "G/A      cycle group/actor filters",
-        "c        clear search/group/actor filters",
-        "",
-        "This foundation screen validates terminal setup, refresh, resize, and",
-        "clean shutdown. Board and agent views are implemented in follow-up tasks.",
-        NULL,
+    static const HelpItem left_items[] = {
+        {NULL, "Navigation"},
+        {"j / k", "move selection"},
+        {"Enter / i", "inspect row"},
+        {"q / Esc", "back / close"},
+        {"Tab", "board / agents"},
+        {NULL, "Views"},
+        {"b a w l", "board agents ws logs"},
+        {":", "command palette"},
+        {NULL, "Tasks"},
+        {"r s f v", "lifecycle actions"},
+        {"n  +", "new task / group"},
+        {"> / <", "add / remove dep"},
+        {"d  L", "diff / logs"},
     };
+    static const HelpItem right_items[] = {
+        {NULL, "Agents"},
+        {"y  e", "run / edit prompt"},
+        {"S  x", "set / clear session"},
+        {"z", "archive / restore"},
+        {NULL, "Filter & search"},
+        {"1-7 R", "filter presets"},
+        {"G  A", "group / actor"},
+        {"/  c", "search / clear"},
+        {NULL, "General"},
+        {"u", "reload board"},
+        {"?", "toggle help"},
+        {"Ctrl+C :q", "quit"},
+    };
+    int left_n = (int)(sizeof(left_items) / sizeof(left_items[0]));
+    int right_n = (int)(sizeof(right_items) / sizeof(right_items[0]));
+    int content = left_n > right_n ? left_n : right_n;
 
-    int width = cols > 72 ? 72 : cols - 4;
-    if (width < 20)
+    int width = 72;
+    if (width > cols - 2)
+        width = cols - 2;
+    if (width < 24)
         width = cols;
-    int height = 13;
+    int height = content + 6;
+    if (height > rows - 2)
+        height = rows - 2;
     int top = rows > height ? (rows - height) / 2 : 0;
     int left = cols > width ? (cols - width) / 2 : 0;
 
-    attron(A_REVERSE);
-    for (int y = 0; y < height && top + y < rows; y++)
-        mvhline(top + y, left, ' ', width);
-    attroff(A_REVERSE);
+    for (int yy = 0; yy < height && top + yy < rows; yy++)
+        mvhline(top + yy, left, ' ', width);
 
-    for (int i = 0; lines[i] && top + i + 1 < rows; i++) {
-        attron(A_REVERSE);
-        draw_truncated(top + i + 1, left + 2, width - 4, lines[i]);
-        attroff(A_REVERSE);
+    int border = (tui_colors_enabled ? COLOR_PAIR(TUI_COLOR_ACCENT) : 0) | A_BOLD;
+    attron(border);
+    mvaddch(top, left, ACS_ULCORNER);
+    mvhline(top, left + 1, ACS_HLINE, width - 2);
+    mvaddch(top, left + width - 1, ACS_URCORNER);
+    for (int yy = 1; yy < height - 1; yy++) {
+        mvaddch(top + yy, left, ACS_VLINE);
+        mvaddch(top + yy, left + width - 1, ACS_VLINE);
     }
+    mvaddch(top + height - 1, left, ACS_LLCORNER);
+    mvhline(top + height - 1, left + 1, ACS_HLINE, width - 2);
+    mvaddch(top + height - 1, left + width - 1, ACS_LRCORNER);
+    attroff(border);
+
+    const char *title = "Dispatch  Keyboard Shortcuts";
+    attron(A_BOLD);
+    mvaddnstr(top + 1, left + (width - (int)strlen(title)) / 2, title,
+              width - 2);
+    attroff(A_BOLD);
+
+    int colw = width / 2 - 4;
+    int max_y = top + height - 2;
+    help_draw_column(top + 3, left + 3, colw, left_items, left_n, max_y);
+    help_draw_column(top + 3, left + width / 2 + 1, colw, right_items, right_n,
+                     max_y);
+
+    const char *hint = "press ? or Esc to close";
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    mvaddnstr(top + height - 2, left + (width - (int)strlen(hint)) / 2, hint,
+              width - 2);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
 }
 
 /* Column header for the list views: accent, bold, drawn over a full-width row
