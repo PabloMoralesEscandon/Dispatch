@@ -3108,8 +3108,8 @@ static int draw_string_list(int y, int rows, int cols, const char *label,
 /* Inspector title: an accent ID, the title, and (optionally) a colored state
  * badge on the right, with a dim rule underneath. Returns the next free row. */
 static int draw_inspector_header(int y, int rows, int cols, const char *id,
-                                 const char *title, int has_state,
-                                 DispatchState state) {
+                                 const char *title, const char *badge,
+                                 int badge_color) {
     if (y >= rows - 1)
         return y;
     if (tui_colors_enabled)
@@ -3128,11 +3128,10 @@ static int draw_inspector_header(int y, int rows, int cols, const char *id,
         mvaddnstr(y, x, title, cols - x);
         attroff(A_BOLD);
     }
-    if (has_state) {
-        const char *sn = dispatch_state_name(state);
-        int bx = cols - (int)strlen(sn) - 3;
+    if (badge && badge[0]) {
+        int bx = cols - (int)strlen(badge) - 3;
         if (bx > x + (int)strlen(title ? title : "") + 1)
-            draw_tag(y, bx, cols, sn, tui_state_color(state), 1);
+            draw_tag(y, bx, cols, badge, badge_color, 1);
     }
     if (y + 1 < rows - 1) {
         if (tui_colors_enabled)
@@ -3229,7 +3228,9 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
 
     char buf[1024];
     DispatchState state = dispatch_task_effective_state(&tui->board, task);
-    int y = draw_inspector_header(2, rows, cols, task->id, task->title, 1, state);
+    int y = draw_inspector_header(2, rows, cols, task->id, task->title,
+                                  dispatch_state_name(state),
+                                  tui_state_color(state));
     y++;
 
     y = draw_field(y, rows, cols, "Description",
@@ -3291,43 +3292,46 @@ static void draw_agent_inspector(DispatchTui *tui, int rows, int cols) {
     }
 
     char line[1024];
-    int y = 2;
-    snprintf(line, sizeof(line), "%s  %s", agent->name, agent->runner);
-    attron(A_BOLD);
-    y = draw_line(y, rows, cols, "", line);
-    attroff(A_BOLD);
+    const char *status = agent->archived ? "archived" : "enabled";
+    int status_color = agent->archived ? TUI_COLOR_MUTED : TUI_COLOR_STATE_READY;
+    int y = draw_inspector_header(2, rows, cols, agent->name, agent->runner,
+                                  status, status_color);
+    y++;
 
-    y = draw_line(y + 1, rows, cols, "Status:",
-                  agent->archived ? "archived" : "enabled");
-    y = draw_line(y, rows, cols, "Model:", agent->model ? agent->model : "-");
-    y = draw_line(y, rows, cols, "Prompt:", agent->prompt_path);
-    y = draw_line(y, rows, cols, "Run script:",
-                  agent->run_script_path ? agent->run_script_path : "-");
-    y = draw_line(y, rows, cols, "Session ID:",
-                  agent->session_id ? agent->session_id : "-");
-    y = draw_line(y, rows, cols, "Current task:",
-                  agent->current_task ? agent->current_task : "-");
-    y = draw_line(y, rows, cols, "Last workspace:",
-                  agent->last_workspace ? agent->last_workspace : "-");
-    if (strcmp(agent->runner, "codex") == 0) {
-        y = draw_line(y, rows, cols, "Codex session:",
-                      "manual metadata; use dispatch agent session");
-    }
+    y = draw_section(y, rows, cols, "Runner");
+    y = draw_field(y, rows, cols, "Model", agent->model);
+    y = draw_field(y, rows, cols, "Prompt", agent->prompt_path);
+    y = draw_field(y, rows, cols, "Run script", agent->run_script_path);
+    y++;
 
-    y = draw_line(y + 1, rows, cols, "Recent completed tasks:", "");
+    y = draw_section(y, rows, cols, "Session");
+    y = draw_field(y, rows, cols, "Session ID", agent->session_id);
+    y = draw_field(y, rows, cols, "Current task", agent->current_task);
+    y = draw_field(y, rows, cols, "Last workspace", agent->last_workspace);
+    if (strcmp(agent->runner, "codex") == 0)
+        y = draw_field(y, rows, cols, "Codex", "manual; use dispatch agent session");
+    y++;
+
+    y = draw_section(y, rows, cols, "Recent completed tasks");
     int shown = 0;
     for (size_t i = tui->board.tasks.count; i > 0 && y < rows - 1; i--) {
         DispatchTask *task = &tui->board.tasks.items[i - 1];
         if (!task->completed_by || strcmp(task->completed_by, agent->name) != 0)
             continue;
-        snprintf(line, sizeof(line), "  %s %s", task->id, task->title);
-        y = draw_line(y, rows, cols, "", line);
+        snprintf(line, sizeof(line), "%s  %s", task->id, task->title);
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        mvaddnstr(y, 2, "-", cols - 2);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        draw_truncated(y, 4, cols - 4, line);
+        y++;
         shown++;
         if (shown == 5)
             break;
     }
     if (shown == 0)
-        draw_line(y, rows, cols, "  -", "");
+        draw_field(y, rows, cols, "", "-");
 }
 
 static void draw_workspace_inspector(DispatchTui *tui, int rows, int cols) {
