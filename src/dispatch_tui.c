@@ -3241,6 +3241,84 @@ static void draw_workspace_inspector(DispatchTui *tui, int rows, int cols) {
                   workspace->review_gate ? workspace->review_gate : "-");
 }
 
+static int group_visible_task_count(DispatchTui *tui,
+                                    const DispatchGroup *group) {
+    int n = 0;
+    for (size_t i = 0; i < tui->board.tasks.count; i++) {
+        DispatchTask *task = &tui->board.tasks.items[i];
+        if (strcmp(task->group, group->id) == 0 && tui_task_is_visible(tui, task))
+            n++;
+    }
+    return n;
+}
+
+/* Group divider: a reverse prefix chip, the group name in accent, and a dim
+ * count of how many tasks are visible under it. */
+static void draw_group_header(DispatchTui *tui, int y, int cols,
+                              const DispatchGroup *group) {
+    mvhline(y, 0, ' ', cols);
+    int x = draw_tag(y, 2, cols, group->prefix, TUI_COLOR_ACCENT, 1);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_HEADER) | A_BOLD);
+    else
+        attron(A_BOLD);
+    mvaddnstr(y, x, group->name, cols - x);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_HEADER) | A_BOLD);
+    else
+        attroff(A_BOLD);
+    int cx = x + (int)strlen(group->name) + 2;
+    char count[32];
+    snprintf(count, sizeof(count), "%d", group_visible_task_count(tui, group));
+    if (cx < cols) {
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        mvaddnstr(y, cx, count, cols - cx);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    }
+}
+
+static void draw_task_row(DispatchTui *tui, int y, int cols,
+                          const DispatchTask *task, int visible_index) {
+    DispatchState state = dispatch_task_effective_state(&tui->board, task);
+    int selected = visible_index == tui->selected_task;
+
+    char left[1024];
+    snprintf(left, sizeof(left), "%s %-7s %-8s %s", selected ? " >" : "  ",
+             task->id, dispatch_state_name(state), task->title);
+
+    tui_style_row_on(visible_index, selected);
+    draw_padded(y, 0, cols, left);
+
+    char tags[256] = {0};
+    size_t tl = 0;
+    if (task->requires_review && tl < sizeof(tags))
+        tl += (size_t)snprintf(tags + tl, sizeof(tags) - tl, "review  ");
+    if (task->commits.count > 0 && tl < sizeof(tags))
+        tl += (size_t)snprintf(tags + tl, sizeof(tags) - tl, "%zu commit  ",
+                               task->commits.count);
+    if (task->assigned_to && task->assigned_to[0] && tl < sizeof(tags))
+        tl += (size_t)snprintf(tags + tl, sizeof(tags) - tl, "@%s",
+                               task->assigned_to);
+    else if (task->completed_by && task->completed_by[0] && tl < sizeof(tags))
+        tl += (size_t)snprintf(tags + tl, sizeof(tags) - tl, "by %s",
+                               task->completed_by);
+    if (tags[0]) {
+        int tx = cols - (int)strlen(tags) - 1;
+        if (tx > (int)strlen(left) + 2)
+            mvaddnstr(y, tx, tags, cols - tx);
+    }
+    tui_style_row_off(visible_index, selected);
+
+    /* Colored state badge sits at column 11 (after marker + id). */
+    if (!selected && tui_colors_enabled) {
+        attron(COLOR_PAIR(tui_state_color(state)) | A_BOLD);
+        mvaddnstr(y, 11, dispatch_state_name(state), 8);
+        attroff(COLOR_PAIR(tui_state_color(state)) | A_BOLD);
+    }
+}
+
 static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     int visible_index = 0;
@@ -3262,34 +3340,13 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
                 continue;
             }
             if (!group_header_drawn) {
-                char heading[256];
-                snprintf(heading, sizeof(heading), "[%s] %s", group->prefix,
-                         group->name);
-                tui_style_header_on();
-                draw_padded(y++, 0, cols, heading);
-                tui_style_header_off();
+                draw_group_header(tui, y++, cols, group);
                 group_header_drawn = 1;
                 if (y >= rows - 1)
                     break;
             }
 
-            DispatchState state = dispatch_task_effective_state(&tui->board, task);
-            char meta[256] = {0};
-            if (task->assigned_to) {
-                snprintf(meta, sizeof(meta), " actor:%s", task->assigned_to);
-            } else if (task->completed_by) {
-                snprintf(meta, sizeof(meta), " by:%s", task->completed_by);
-            }
-            char line[1024];
-            snprintf(line, sizeof(line), "  %-8s %-8s %s%s%s%s",
-                     task->id, dispatch_state_name(state), task->title,
-                     task->requires_review ? " review:yes" : "",
-                     task->commits.count > 0 ? " commits" : "", meta);
-
-            int selected = visible_index == tui->selected_task;
-            tui_style_row_on(visible_index, selected);
-            draw_padded(y++, 0, cols, line);
-            tui_style_row_off(visible_index, selected);
+            draw_task_row(tui, y++, cols, task, visible_index);
             visible_index++;
             any_visible = 1;
         }
