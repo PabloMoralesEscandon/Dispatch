@@ -135,14 +135,6 @@ static void tui_handle_sigint(int signal_number) {
     tui_quit_requested = 1;
 }
 
-static void tui_style_header_on(void) {
-    attron(A_BOLD | A_REVERSE);
-}
-
-static void tui_style_header_off(void) {
-    attroff(A_BOLD | A_REVERSE);
-}
-
 static void tui_style_title_on(void) {
     if (tui_colors_enabled)
         attron(COLOR_PAIR(TUI_COLOR_TITLE) | A_BOLD);
@@ -3037,6 +3029,26 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
     }
 }
 
+static int log_action_color(const char *action) {
+    if (!action || !action[0])
+        return TUI_COLOR_MUTED;
+    if (strstr(action, "ready"))
+        return TUI_COLOR_STATE_READY;
+    if (strstr(action, "start"))
+        return TUI_COLOR_STATE_DOING;
+    if (strstr(action, "finish") || strstr(action, "done") ||
+        strstr(action, "complete"))
+        return TUI_COLOR_STATE_DONE;
+    if (strstr(action, "review"))
+        return TUI_COLOR_STATE_REVIEW;
+    if (strstr(action, "creat") || strstr(action, "add"))
+        return TUI_COLOR_STATE_PROPOSED;
+    if (strstr(action, "remov") || strstr(action, "delet") ||
+        strstr(action, "archiv") || strstr(action, "block"))
+        return TUI_COLOR_STATE_BLOCKED;
+    return TUI_COLOR_MUTED;
+}
+
 static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     TuiLogRecords records;
@@ -3050,10 +3062,11 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     sync_log_scroll(tui, visible_rows);
     int visible_index = 0;
     int any_visible = 0;
-    tui_style_header_on();
-    draw_padded(y++, 0, cols,
-                "Time                 Actor        Command    Action             Target  Message");
-    tui_style_header_off();
+    char header[256];
+    snprintf(header, sizeof(header), "  %-20s %-14s %-10s %-12s %s", "Time",
+             "Actor", "Command", "Action", "Target / Message");
+    draw_list_header(y++, cols, header);
+
     for (size_t i = records.count; i > 0 && y < rows - 1; i--) {
         json_t *record = records.items[i - 1];
         if (visible_index < tui->log_top) {
@@ -3072,19 +3085,30 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
             json_nested_string_field(record, "targets", "workspace");
         char target[256] = "";
         if (task[0])
-            snprintf(target, sizeof(target), " task:%s", task);
+            snprintf(target, sizeof(target), "task:%s", task);
         else if (agent[0])
-            snprintf(target, sizeof(target), " agent:%s", agent);
+            snprintf(target, sizeof(target), "agent:%s", agent);
         else if (workspace[0])
-            snprintf(target, sizeof(target), " workspace:%s", workspace);
+            snprintf(target, sizeof(target), "workspace:%s", workspace);
 
-        char row[1400];
-        snprintf(row, sizeof(row), "%s %-12s %-10s %-18s%s  %s", time,
-                 actor, command, action, target, message);
+        char rest[1400];
+        snprintf(rest, sizeof(rest), "%s%s%s", target, target[0] ? "  " : "",
+                 message);
         int selected = visible_index == tui->selected_log;
+        char row[1600];
+        snprintf(row, sizeof(row), "%s%-20.20s %-14.14s %-10.10s %-12.12s %s",
+                 selected ? " >" : "  ", time, actor, command, action, rest);
         tui_style_row_on(visible_index, selected);
-        draw_padded(y++, 0, cols, row);
+        draw_padded(y, 0, cols, row);
         tui_style_row_off(visible_index, selected);
+
+        if (!selected && tui_colors_enabled) {
+            int color = log_action_color(action);
+            attron(COLOR_PAIR(color) | A_BOLD);
+            mvaddnstr(y, 49, action, 12);
+            attroff(COLOR_PAIR(color) | A_BOLD);
+        }
+        y++;
         visible_index++;
         any_visible = 1;
     }
@@ -3515,16 +3539,18 @@ static void tui_render(DispatchTui *tui) {
         draw_workspace_rows(tui, 4, rows, cols);
     } else if (tui->screen == TUI_SCREEN_LOGS) {
         char line[512];
-        snprintf(line, sizeof(line), "Logs: %d visible%s%s%s    F filter    C clear",
-                 visible_log_count(tui),
-                 tui->log_filter_field[0] ? "  " : "",
-                 tui->log_filter_field[0] ? tui->log_filter_field : "",
-                 tui->log_filter_field[0] ? "=" : "");
-        size_t used = strlen(line);
         if (tui->log_filter_field[0])
-            snprintf(line + used, sizeof(line) - used, "%s",
+            snprintf(line, sizeof(line), "%d entries   filter %s=%s",
+                     visible_log_count(tui), tui->log_filter_field,
                      tui->log_filter_value);
+        else
+            snprintf(line, sizeof(line), "%d entries   no filter",
+                     visible_log_count(tui));
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_truncated(2, 0, cols, line);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
         draw_log_rows(tui, 4, rows, cols);
     } else if (tui->screen == TUI_SCREEN_AGENTS) {
         char line[512];
