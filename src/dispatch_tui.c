@@ -1909,21 +1909,6 @@ static void task_form_move_cursor(const TuiTaskForm *form, int rows, int cols,
         move(cursor_y, cursor_x);
 }
 
-/* Footer hints tailored to the active field: the Group and Depends fields
- * advertise the Down-arrow option picker, while the review field advertises the
- * toggle. */
-static const char *task_form_field_hints(const TuiTaskForm *form) {
-    switch (form->active_field) {
-    case TUI_TASK_FORM_GROUP:
-    case TUI_TASK_FORM_DEPS:
-        return "Down options   Tab/Enter next   Up prev   Esc cancel";
-    case TUI_TASK_FORM_REVIEW:
-        return "Space toggle   Enter save   Tab move   Esc cancel";
-    default:
-        return "Tab/Enter next   Up/Down move   Esc cancel";
-    }
-}
-
 static void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
     int rows = 0;
     int cols = 0;
@@ -1970,7 +1955,7 @@ static void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
     draw_task_form_review_box(y, left, width, form);
 
     draw_footer(form->status[0] ? form->status : "New task",
-                task_form_field_hints(form));
+                tui_footer_hints(TUI_SCREEN_TASK_FORM));
 
     task_form_move_cursor(form, rows, cols, left, width, desc_height);
     refresh();
@@ -2190,11 +2175,7 @@ static void run_task_form(DispatchTui *tui) {
         int ch = getch();
         if (ch == KEY_RESIZE)
             continue;
-        if (ch == KEY_DOWN &&
-            (form.active_field == TUI_TASK_FORM_GROUP ||
-             form.active_field == TUI_TASK_FORM_DEPS)) {
-            /* Down opens the option picker on the choice fields, combobox
-             * style; Tab and Enter still advance between fields. */
+        if (ch == 15) { /* Ctrl-O: open the option picker for this field */
             task_form_open_picker(tui, &form);
             continue;
         }
@@ -3110,7 +3091,7 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
     case TUI_SCREEN_AGENTS:
         return "Enter/i inspect   y run   A all/enabled   z archive   Tab board";
     case TUI_SCREEN_TASK_FORM:
-        return "Enter next/save   Tab move   Space review   Esc cancel";
+        return "Enter next/save   Tab move   ^O options   Space review   Esc cancel";
     case TUI_SCREEN_GROUP_FORM:
         return "Enter next/save   Tab move   Esc cancel";
     case TUI_SCREEN_BOARD:
