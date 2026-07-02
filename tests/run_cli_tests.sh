@@ -1250,6 +1250,30 @@ assert_contains "Requires review: yes"
 expect_fail "$BIN" tui --create-task-smoke DE "DE-99 Bad title" - review -
 assert_contains "Task title should not include an ID"
 
+# Task form option pickers (TUI-46): group and dependency candidates.
+expect_ok "$BIN" tui --create-group-smoke Research RE
+assert_contains "Added group Research (RE)"
+expect_ok "$BIN" tui --task-form-options-smoke groups
+assert_contains "Options: 2"
+assert_contains "Development"
+assert_contains "Research"
+expect_ok "$BIN" tui --task-form-options-smoke deps -
+assert_contains "Options: 3"
+assert_contains "DE-02"
+expect_ok "$BIN" tui --task-form-options-smoke deps "DE-01, DE-02"
+assert_contains "Options: 1"
+assert_contains "DE-03"
+expect_ok "$BIN" tui --task-form-deps-add-smoke - DE-03
+assert_contains "Changed: yes"
+assert_contains "Deps: DE-03"
+expect_ok "$BIN" tui --task-form-deps-add-smoke DE-01 DE-01
+assert_contains "Changed: no"
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" start DE-01 --actor user
+expect_ok "$BIN" finish DE-01 --actor user
+expect_ok "$BIN" tui --task-form-options-smoke deps -
+assert_contains "Options: 2"
+
 case_dir="$(make_case_dir tui-dependencies)"
 cd "$case_dir"
 mkdir repo

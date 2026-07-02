@@ -1730,6 +1730,90 @@ static void task_form_buffer(TuiTaskForm *form, int field, char **buffer,
     }
 }
 
+/* A single selectable entry in a task-form option picker. `value` is written
+ * into the form field; `label` is what the picker shows. */
+typedef struct {
+    char value[64];
+    char label[160];
+} TuiTaskFormOption;
+
+/* Returns 1 when id already appears as a comma/whitespace separated token in
+ * deps_text. */
+static int task_form_deps_contains(const char *deps_text, const char *id) {
+    if (!deps_text || !id || !id[0])
+        return 0;
+    size_t id_len = strlen(id);
+    const char *p = deps_text;
+    while (*p) {
+        while (*p == ',' || *p == ' ' || *p == '\t')
+            p++;
+        const char *start = p;
+        while (*p && *p != ',' && *p != ' ' && *p != '\t')
+            p++;
+        size_t tok_len = (size_t)(p - start);
+        if (tok_len == id_len && strncmp(start, id, id_len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Appends id to deps_text as a comma-separated token when it is not already
+ * present. Treats "-" or empty as no existing dependencies. Returns 1 when the
+ * text changed. */
+static int task_form_deps_append(char *deps_text, size_t size, const char *id) {
+    if (!deps_text || size == 0 || !id || !id[0])
+        return 0;
+    if (deps_text[0] == '\0' || strcmp(deps_text, "-") == 0)
+        deps_text[0] = '\0';
+    if (task_form_deps_contains(deps_text, id))
+        return 0;
+    size_t len = strlen(deps_text);
+    const char *sep = len > 0 ? ", " : "";
+    if (len + strlen(sep) + strlen(id) + 1 > size)
+        return 0;
+    snprintf(deps_text + len, size - len, "%s%s", sep, id);
+    return 1;
+}
+
+/* Fills out[] with the existing groups as pickable options. Free-text entry for
+ * new groups is still supported by the form itself. Returns the option count. */
+static size_t task_form_group_options(const DispatchBoard *board,
+                                      TuiTaskFormOption *out, size_t max) {
+    size_t count = 0;
+    for (size_t i = 0; board && i < board->groups.count && count < max; i++) {
+        const DispatchGroup *group = &board->groups.items[i];
+        snprintf(out[count].value, sizeof(out[count].value), "%s",
+                 group->prefix ? group->prefix : "");
+        snprintf(out[count].label, sizeof(out[count].label), "%-4s %s",
+                 group->prefix ? group->prefix : "",
+                 group->name ? group->name : "");
+        count++;
+    }
+    return count;
+}
+
+/* Fills out[] with tasks that can be selected as dependencies: not-done tasks
+ * that are not already present in deps_text. Returns the option count. */
+static size_t task_form_dep_options(const DispatchBoard *board,
+                                    const char *deps_text, TuiTaskFormOption *out,
+                                    size_t max) {
+    size_t count = 0;
+    const char *deps = deps_text ? deps_text : "";
+    for (size_t i = 0; board && i < board->tasks.count && count < max; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        if (task->state == DISPATCH_STATE_DONE)
+            continue;
+        if (task_form_deps_contains(deps, task->id))
+            continue;
+        snprintf(out[count].value, sizeof(out[count].value), "%s", task->id);
+        snprintf(out[count].label, sizeof(out[count].label), "%-8s [%s] %s",
+                 task->id, dispatch_state_name(task->state),
+                 task->title ? task->title : "");
+        count++;
+    }
+    return count;
+}
+
 static void draw_task_form_box(int y, int x, int width, int height,
                                const char *label, const char *value,
                                int active) {
@@ -1946,6 +2030,135 @@ static int handle_task_form_key(TuiTaskForm *form, int ch, int *submit,
     return 1;
 }
 
+/* Modal option picker used by the task form. Renders a centered scrollable list
+ * and returns the selected index, or -1 when the user cancels. */
+static int run_task_form_picker(const char *title,
+                                const TuiTaskFormOption *options, size_t count) {
+    if (count == 0)
+        return -1;
+    int selected = 0;
+    int top = 0;
+    for (;;) {
+        int rows = 0;
+        int cols = 0;
+        getmaxyx(stdscr, rows, cols);
+
+        int width = cols - 8;
+        if (width > 64)
+            width = 64;
+        if (width < 16)
+            width = cols > 16 ? 16 : cols;
+        int max_visible = rows - 8;
+        if (max_visible < 1)
+            max_visible = 1;
+        int visible = (int)count < max_visible ? (int)count : max_visible;
+        int height = visible + 2;
+        int left = (cols - width) / 2;
+        if (left < 0)
+            left = 0;
+        int y = (rows - height) / 2;
+        if (y < 2)
+            y = 2;
+
+        if (selected < top)
+            top = selected;
+        if (selected >= top + visible)
+            top = selected - visible + 1;
+
+        erase();
+        int accent = tui_colors_enabled ? COLOR_PAIR(TUI_COLOR_ACCENT) : 0;
+        int muted = tui_colors_enabled ? COLOR_PAIR(TUI_COLOR_MUTED) : 0;
+
+        attron(accent | A_BOLD);
+        mvaddnstr(y - 1, left, title, width);
+        attroff(accent | A_BOLD);
+
+        attron(muted | A_DIM);
+        mvaddch(y, left, ACS_ULCORNER);
+        mvhline(y, left + 1, ACS_HLINE, width - 2);
+        mvaddch(y, left + width - 1, ACS_URCORNER);
+        for (int r = 1; r < height - 1; r++) {
+            mvaddch(y + r, left, ACS_VLINE);
+            mvaddch(y + r, left + width - 1, ACS_VLINE);
+        }
+        mvaddch(y + height - 1, left, ACS_LLCORNER);
+        mvhline(y + height - 1, left + 1, ACS_HLINE, width - 2);
+        mvaddch(y + height - 1, left + width - 1, ACS_LRCORNER);
+        attroff(muted | A_DIM);
+
+        for (int r = 0; r < visible; r++) {
+            size_t idx = (size_t)(top + r);
+            if (idx >= count)
+                break;
+            int row_y = y + 1 + r;
+            int is_selected = (int)idx == selected;
+            if (is_selected)
+                attron(accent | A_REVERSE);
+            mvhline(row_y, left + 1, ' ', width - 2);
+            char line[192];
+            snprintf(line, sizeof(line), " %s", options[idx].label);
+            mvaddnstr(row_y, left + 1, line, width - 2);
+            if (is_selected)
+                attroff(accent | A_REVERSE);
+        }
+
+        draw_footer("Select option", "Enter select   Up/Down move   Esc cancel");
+        refresh();
+
+        int ch = getch();
+        if (ch == KEY_RESIZE)
+            continue;
+        if (ch == 27 || ch == 'q')
+            return -1;
+        if (ch == KEY_UP || ch == 'k') {
+            if (selected > 0)
+                selected--;
+            continue;
+        }
+        if (ch == KEY_DOWN || ch == 'j') {
+            if (selected < (int)count - 1)
+                selected++;
+            continue;
+        }
+        if (ch == '\n' || ch == KEY_ENTER)
+            return selected;
+    }
+}
+
+/* Opens the option picker appropriate for the form's active field. Returns 1
+ * when the picker key was handled for this field. */
+static int task_form_open_picker(DispatchTui *tui, TuiTaskForm *form) {
+    if (form->active_field == TUI_TASK_FORM_GROUP) {
+        TuiTaskFormOption opts[64];
+        size_t n = task_form_group_options(&tui->board, opts, 64);
+        if (n == 0) {
+            snprintf(form->status, sizeof(form->status),
+                     "No existing groups yet; type a new group name");
+            return 1;
+        }
+        int sel = run_task_form_picker("Select group", opts, n);
+        if (sel >= 0)
+            snprintf(form->group, sizeof(form->group), "%s", opts[sel].value);
+        return 1;
+    }
+    if (form->active_field == TUI_TASK_FORM_DEPS) {
+        TuiTaskFormOption opts[256];
+        size_t n = task_form_dep_options(&tui->board, form->deps, opts, 256);
+        if (n == 0) {
+            snprintf(form->status, sizeof(form->status),
+                     "No selectable tasks to depend on");
+            return 1;
+        }
+        int sel = run_task_form_picker("Select dependency", opts, n);
+        if (sel >= 0)
+            task_form_deps_append(form->deps, sizeof(form->deps), opts[sel].value);
+        return 1;
+    }
+    snprintf(form->status, sizeof(form->status),
+             "Options available on the Group and Depends fields");
+    return 1;
+}
+
 static void run_task_form(DispatchTui *tui) {
     TuiTaskForm form;
     memset(&form, 0, sizeof(form));
@@ -1962,6 +2175,10 @@ static void run_task_form(DispatchTui *tui) {
         int ch = getch();
         if (ch == KEY_RESIZE)
             continue;
+        if (ch == 15) { /* Ctrl-O: open the option picker for this field */
+            task_form_open_picker(tui, &form);
+            continue;
+        }
         int submit = 0;
         int cancel = 0;
         handle_task_form_key(&form, ch, &submit, &cancel);
@@ -2874,7 +3091,7 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
     case TUI_SCREEN_AGENTS:
         return "Enter/i inspect   y run   A all/enabled   z archive   Tab board";
     case TUI_SCREEN_TASK_FORM:
-        return "Enter next/save   Tab move   Space review   Esc cancel";
+        return "Enter next/save   Tab move   ^O options   Space review   Esc cancel";
     case TUI_SCREEN_GROUP_FORM:
         return "Enter next/save   Tab move   Esc cancel";
     case TUI_SCREEN_BOARD:
@@ -4604,6 +4821,49 @@ static int tui_task_form_submit_smoke(const char *group, const char *title,
     return 0;
 }
 
+/* Prints the task-form option picker candidates for the current board so tests
+ * can verify group and dependency filtering. */
+static int tui_task_form_options_smoke(const char *kind, const char *deps_text) {
+    char error[256] = {0};
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error, sizeof(error))) {
+        fprintf(stderr, "%s\n", error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    static TuiTaskFormOption opts[256];
+    size_t n = 0;
+    if (strcmp(kind, "groups") == 0) {
+        n = task_form_group_options(&board, opts, 256);
+    } else if (strcmp(kind, "deps") == 0) {
+        const char *deps =
+            (!deps_text || strcmp(deps_text, "-") == 0) ? "" : deps_text;
+        n = task_form_dep_options(&board, deps, opts, 256);
+    } else {
+        fprintf(stderr, "Kind must be groups or deps\n");
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    printf("Options: %zu\n", n);
+    for (size_t i = 0; i < n; i++)
+        printf("%s\t%s\n", opts[i].value, opts[i].label);
+    dispatch_board_free(&board);
+    return 0;
+}
+
+/* Exercises dependency token append/dedupe used by the picker. */
+static int tui_task_form_deps_add_smoke(const char *deps_text, const char *id) {
+    char deps[256] = {0};
+    snprintf(deps, sizeof(deps), "%s", deps_text ? deps_text : "");
+    int changed = task_form_deps_append(deps, sizeof(deps), id);
+    printf("Changed: %s\n", changed ? "yes" : "no");
+    printf("Deps: %s\n", deps);
+    return 0;
+}
+
 static int tui_prompt_cancel_smoke(void) {
     char buffer[32] = "Group";
     int done = 0;
@@ -4973,6 +5233,8 @@ static void print_tui_help(void) {
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --task-form-submit-smoke <group> <title> <description|-> review|no-review <deps|->");
+    puts("  --task-form-options-smoke groups|deps [deps|-]");
+    puts("  --task-form-deps-add-smoke <deps|-> <task-id>");
     puts("  --prompt-cancel-smoke");
     puts("  --escdelay-smoke");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
@@ -5029,6 +5291,11 @@ int dispatch_tui_main(int argc, char **argv) {
     if (argc == 8 && strcmp(argv[2], "--task-form-submit-smoke") == 0)
         return tui_task_form_submit_smoke(argv[3], argv[4], argv[5], argv[6],
                                          argv[7]);
+    if ((argc == 4 || argc == 5) &&
+        strcmp(argv[2], "--task-form-options-smoke") == 0)
+        return tui_task_form_options_smoke(argv[3], argc == 5 ? argv[4] : "-");
+    if (argc == 5 && strcmp(argv[2], "--task-form-deps-add-smoke") == 0)
+        return tui_task_form_deps_add_smoke(argv[3], argv[4]);
     if (argc == 3 && strcmp(argv[2], "--prompt-cancel-smoke") == 0)
         return tui_prompt_cancel_smoke();
     if (argc == 3 && strcmp(argv[2], "--escdelay-smoke") == 0)
