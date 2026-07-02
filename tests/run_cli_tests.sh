@@ -1249,6 +1249,17 @@ assert_contains "Title: FormTask"
 assert_contains "Requires review: yes"
 expect_fail "$BIN" tui --create-task-smoke DE "DE-99 Bad title" - review -
 assert_contains "Task title should not include an ID"
+expect_ok "$BIN" tui --create-task-smoke Research Investigate "New group task" no-review -
+assert_contains "Added group Research (RE)"
+assert_contains "added task RE-01"
+expect_ok "$BIN" show RE-01
+assert_contains "Title: Investigate"
+assert_contains "Group: RE"
+expect_ok "$BIN" tui --task-form-submit-smoke Marketing Launch "Form new group" review -
+assert_contains "Added group Marketing (MA)"
+assert_contains "added task MA-01"
+expect_ok "$BIN" show MA-01
+assert_contains "Requires review: yes"
 
 case_dir="$(make_case_dir tui-dependencies)"
 cd "$case_dir"

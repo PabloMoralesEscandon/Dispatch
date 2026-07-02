@@ -1509,6 +1509,22 @@ static int create_task(const char *group, const char *title,
         return 0;
     }
 
+    int created_group = 0;
+    char created_group_prefix[16] = {0};
+    if (!dispatch_board_find_group(&board, group)) {
+        if (!dispatch_board_add_group(&board, group, NULL)) {
+            snprintf(message, message_size, "Could not create group %s", group);
+            dispatch_board_free(&board);
+            dispatch_store_lock_release(&lock);
+            return 0;
+        }
+        created_group = 1;
+        DispatchGroup *new_group = dispatch_board_find_group(&board, group);
+        if (new_group)
+            snprintf(created_group_prefix, sizeof(created_group_prefix), "%s",
+                     new_group->prefix);
+    }
+
     DispatchTask *task =
         dispatch_board_add_task_with_actor(&board, group, title,
                                            description ? description : "",
@@ -1540,7 +1556,11 @@ static int create_task(const char *group, const char *title,
         return 0;
     }
 
-    snprintf(message, message_size, "Added task %s", task_id);
+    if (created_group)
+        snprintf(message, message_size, "Added group %s (%s); added task %s",
+                 group, created_group_prefix, task_id);
+    else
+        snprintf(message, message_size, "Added task %s", task_id);
     dispatch_board_free(&board);
     dispatch_store_lock_release(&lock);
     return 1;
