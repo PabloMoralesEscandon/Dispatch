@@ -355,11 +355,12 @@ start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a
 full-screen task creation form with boxed fields, `+` creates a group, `>` adds
 a dependency to the inspected task, `<` removes a dependency, and `d` opens the
 selected task commit with `git show` when commit metadata exists.
-In the task creation form, `Ctrl-O` opens an option picker for the active
-field: on the Group field it lists existing groups (typing still creates a new
-group), and on the Depends field it lists not-done tasks, excluding done tasks
-and dependencies already selected. Inside the picker, `Up`/`Down` (or `j`/`k`)
-move, `Enter` selects, and `Esc` cancels; reopen it to add more dependencies.
+In the task creation form, pressing the Down arrow on the Group or Depends
+field opens a combobox-style option picker: the Group field lists existing
+groups (typing still creates a new group), and the Depends field lists not-done
+tasks, excluding done tasks and dependencies already selected. `Tab` and `Enter`
+still move between fields. Inside the picker, `Up`/`Down` (or `j`/`k`) move,
+`Enter` selects, and `Esc` cancels; reopen it to add more dependencies.
 Bottom-line prompt forms, including group creation, can be cancelled with `Esc`.
 Dispatch shortens ncurses' default Escape-key delay so cancellation should feel
 immediate while arrow keys remain usable.
