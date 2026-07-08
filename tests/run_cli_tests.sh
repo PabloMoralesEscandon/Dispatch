@@ -256,6 +256,38 @@ assert_contains "Updated 1 agent prompt"
 assert_file_contains .dispatch/agents/claude-run/run.sh "exec claude \"\$(cat '.dispatch/agents/claude-run/claude-run-PROMPT.md')\""
 assert_file_not_contains .dispatch/agents/claude-run/run.sh "--prompt-file"
 
+expect_ok "$BIN" tui --agent-form-submit-smoke tui-codex codex gpt-form run-script
+assert_contains "Created agent tui-codex (codex)"
+expect_ok "$BIN" agent show tui-codex
+assert_contains "Name: tui-codex"
+assert_contains "Runner: codex"
+assert_contains "Model: gpt-form"
+assert_contains "Run script: .dispatch/agents/tui-codex/run.sh"
+assert_file_contains .dispatch/agents/tui-codex/tui-codex-PROMPT.md "# Dispatch Agent: tui-codex"
+if [ ! -d .dispatch/agents/tui-codex/scratch ]; then
+    fail "TUI-created agent scratch directory was not created"
+fi
+if [ ! -d .dispatch/agents/tui-codex/decisions ]; then
+    fail "TUI-created agent decisions directory was not created"
+fi
+if [ ! -x .dispatch/agents/tui-codex/run.sh ]; then
+    fail "TUI-created agent run script was not created executable"
+fi
+expect_ok "$BIN" agent list
+assert_contains "tui-codex"
+
+expect_ok "$BIN" tui --agent-form-submit-smoke tui-claude claude - no-run-script
+assert_contains "Created agent tui-claude (claude)"
+expect_ok "$BIN" agent show tui-claude
+assert_contains "Name: tui-claude"
+assert_contains "Runner: claude"
+assert_contains "Model: -"
+assert_contains "Run script: -"
+assert_file_contains .dispatch/agents/tui-claude/tui-claude-PROMPT.md "# Dispatch Agent: tui-claude"
+if [ -e .dispatch/agents/tui-claude/run.sh ]; then
+    fail "TUI-created no-run-script agent unexpectedly has run.sh"
+fi
+
 expect_ok "$BIN" agent resume claude-a
 assert_contains "claude --session-id '"
 assert_contains "\"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
@@ -1262,18 +1294,21 @@ expect_ok "$BIN" show MA-01
 assert_contains "Requires review: yes"
 
 # Task form option pickers (TUI-46): group and dependency candidates.
-expect_ok "$BIN" tui --create-group-smoke Research RE
-assert_contains "Added group Research (RE)"
 expect_ok "$BIN" tui --task-form-options-smoke groups
-assert_contains "Options: 2"
+assert_contains "Options: 3"
 assert_contains "Development"
 assert_contains "Research"
+assert_contains "Marketing"
 expect_ok "$BIN" tui --task-form-options-smoke deps -
-assert_contains "Options: 3"
+assert_contains "Options: 5"
 assert_contains "DE-02"
+assert_contains "RE-01"
+assert_contains "MA-01"
 expect_ok "$BIN" tui --task-form-options-smoke deps "DE-01, DE-02"
-assert_contains "Options: 1"
+assert_contains "Options: 3"
 assert_contains "DE-03"
+assert_contains "RE-01"
+assert_contains "MA-01"
 expect_ok "$BIN" tui --task-form-deps-add-smoke - DE-03
 assert_contains "Changed: yes"
 assert_contains "Deps: DE-03"
@@ -1283,7 +1318,10 @@ expect_ok "$BIN" ready DE-01 --actor user --no-review
 expect_ok "$BIN" start DE-01 --actor user
 expect_ok "$BIN" finish DE-01 --actor user
 expect_ok "$BIN" tui --task-form-options-smoke deps -
-assert_contains "Options: 2"
+assert_contains "Options: 4"
+assert_contains "DE-02"
+assert_contains "RE-01"
+assert_contains "MA-01"
 
 case_dir="$(make_case_dir tui-dependencies)"
 cd "$case_dir"

@@ -2504,6 +2504,68 @@ static int handle_agent_form_key(TuiAgentForm *form, int ch, int *submit,
     return 1;
 }
 
+static int agent_form_submit(const TuiAgentForm *form, const char *actor,
+                             char *message, size_t message_size) {
+    DispatchAgentCreateOptions options = {
+        .name = form->name,
+        .runner = form->runner[0] ? form->runner : "codex",
+        .model = form->model,
+        .actor = actor && actor[0] ? actor : "user",
+        .no_run_script = form->no_run_script,
+    };
+    DispatchAgentCreateResult result = {0};
+    char error[256] = {0};
+    if (!dispatch_agent_create(&options, &result, error, sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "Could not create agent");
+        return 0;
+    }
+
+    snprintf(message, message_size, "Created agent %s (%s)", options.name,
+             options.runner);
+    dispatch_agent_create_result_free(&result);
+    return 1;
+}
+
+static void run_agent_form(DispatchTui *tui) {
+    TuiAgentForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.runner, sizeof(form.runner), "codex");
+    form.active_field = TUI_AGENT_FORM_NAME;
+    snprintf(form.status, sizeof(form.status), "Fill agent fields");
+
+    timeout(-1);
+    curs_set(1);
+    int running = 1;
+    while (running) {
+        render_agent_form_screen(tui, &form);
+        int ch = getch();
+        if (ch == KEY_RESIZE)
+            continue;
+        int submit = 0;
+        int cancel = 0;
+        handle_agent_form_key(&form, ch, &submit, &cancel);
+        if (cancel) {
+            tui_set_status(tui, "Agent creation cancelled");
+            break;
+        }
+        if (submit) {
+            char message[256] = {0};
+            if (agent_form_submit(&form, tui->actor, message,
+                                  sizeof(message))) {
+                tui_load_board(tui);
+                select_agent_by_name(tui, form.name);
+                tui_set_status(tui, message);
+                running = 0;
+            } else {
+                snprintf(form.status, sizeof(form.status), "%s", message);
+            }
+        }
+    }
+    curs_set(0);
+    timeout(1000);
+}
+
 /* New group form ----------------------------------------------------------- */
 
 typedef struct {
@@ -3393,7 +3455,7 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
     case TUI_SCREEN_LOGS:
         return "b board   F filter   C clear   j/k move";
     case TUI_SCREEN_AGENTS:
-        return "Enter/i inspect   y run   A all/enabled   z archive   Tab board";
+        return "Enter/i inspect   n create   y run   A all/enabled   z archive";
     case TUI_SCREEN_AGENT_FORM:
         return "Enter next/save   Tab move   Space toggle   Esc cancel";
     case TUI_SCREEN_TASK_FORM:
@@ -3589,6 +3651,7 @@ static const HelpItem help_agents_items[] = {
     {NULL, "Agents"},
     {"j / k", "move selection"},
     {"Enter / i", "inspect agent"},
+    {"n", "create agent"},
     {"y", "run command"},
     {"z", "archive / restore"},
     {"A", "all / enabled"},
@@ -4649,6 +4712,10 @@ static int tui_run(void) {
                 tui.screen = TUI_SCREEN_TASK_FORM;
                 run_task_form(&tui);
                 tui.screen = TUI_SCREEN_BOARD;
+            } else if (tui.screen == TUI_SCREEN_AGENTS) {
+                tui.screen = TUI_SCREEN_AGENT_FORM;
+                run_agent_form(&tui);
+                tui.screen = TUI_SCREEN_AGENTS;
             } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
                 run_workspace_create_form(&tui);
             }
@@ -5362,6 +5429,33 @@ static int tui_agent_form_keys_smoke(const char *keys) {
     return 0;
 }
 
+static int tui_agent_form_submit_smoke(const char *name, const char *runner,
+                                       const char *model,
+                                       const char *script_mode) {
+    TuiAgentForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.name, sizeof(form.name), "%s", name ? name : "");
+    snprintf(form.runner, sizeof(form.runner), "%s", runner ? runner : "");
+    snprintf(form.model, sizeof(form.model), "%s",
+             model && strcmp(model, "-") != 0 ? model : "");
+    if (strcmp(script_mode, "run-script") == 0) {
+        form.no_run_script = 0;
+    } else if (strcmp(script_mode, "no-run-script") == 0) {
+        form.no_run_script = 1;
+    } else {
+        fprintf(stderr, "Script mode must be run-script or no-run-script\n");
+        return 1;
+    }
+
+    char message[256] = {0};
+    if (!agent_form_submit(&form, "user", message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
 static int tui_prompt_cancel_smoke(void) {
     char buffer[32] = "Group";
     int done = 0;
@@ -5760,6 +5854,7 @@ static void print_tui_help(void) {
     puts("  --task-form-options-smoke groups|deps [deps|-]");
     puts("  --task-form-deps-add-smoke <deps|-> <task-id>");
     puts("  --agent-form-keys-smoke <keys>  exercise agent form key handling");
+    puts("  --agent-form-submit-smoke <name> codex|claude <model|-> run-script|no-run-script");
     puts("  --prompt-cancel-smoke");
     puts("  --escdelay-smoke");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");
@@ -5824,6 +5919,9 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_task_form_deps_add_smoke(argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[2], "--agent-form-keys-smoke") == 0)
         return tui_agent_form_keys_smoke(argv[3]);
+    if (argc == 7 && strcmp(argv[2], "--agent-form-submit-smoke") == 0)
+        return tui_agent_form_submit_smoke(argv[3], argv[4], argv[5],
+                                           argv[6]);
     if (argc == 3 && strcmp(argv[2], "--prompt-cancel-smoke") == 0)
         return tui_prompt_cancel_smoke();
     if (argc == 3 && strcmp(argv[2], "--escdelay-smoke") == 0)
