@@ -3446,45 +3446,38 @@ static void help_draw_column(int top_y, int x, int colw, const HelpItem *items,
     }
 }
 
-static void tui_render_help(void) {
+static void tui_render_help(DispatchTuiScreen screen) {
     int rows = 0;
     int cols = 0;
     getmaxyx(stdscr, rows, cols);
 
-    static const HelpItem left_items[] = {
-        {NULL, "Navigation"},
-        {"j / k", "move selection"},
-        {"Enter / i", "inspect row"},
-        {"q / Esc", "back / close"},
-        {"Tab", "board / agents"},
-        {NULL, "Views"},
-        {"b a w l", "board agents ws logs"},
-        {":", "command palette"},
-        {NULL, "Tasks"},
-        {"r s f v", "lifecycle actions"},
-        {"n  +", "new task / group"},
-        {"> / <", "add / remove dep"},
-        {"d  L", "diff / logs"},
-    };
-    static const HelpItem right_items[] = {
-        {NULL, "Agents"},
-        {"y  e", "run / edit prompt"},
-        {"S  x", "set / clear session"},
-        {"z", "archive / restore"},
-        {NULL, "Filter & search"},
-        {"1-7 R", "filter presets"},
-        {"G  A", "group / actor"},
-        {"/  c", "search / clear"},
-        {NULL, "General"},
-        {"u", "reload board"},
-        {"?", "toggle help"},
-        {"Ctrl+C :q", "quit"},
-    };
-    int left_n = (int)(sizeof(left_items) / sizeof(left_items[0]));
-    int right_n = (int)(sizeof(right_items) / sizeof(right_items[0]));
+    int count = 0;
+    const HelpItem *items = help_controls_for_screen(screen, &count);
+
+    /* Lay the current view's controls out in a single column, splitting long
+     * lists into two columns at a section heading near the midpoint so every
+     * control stays visible and whole sections stay together. */
+    int rows_for_list = rows - 8;
+    if (rows_for_list < 1)
+        rows_for_list = 1;
+    int split = count;
+    if (count > rows_for_list) {
+        split = (count + 1) / 2;
+        for (int i = split; i < count; i++) {
+            if (!items[i].key) {
+                split = i;
+                break;
+            }
+        }
+    }
+    const HelpItem *left_items = items;
+    int left_n = split;
+    const HelpItem *right_items = items + split;
+    int right_n = count - split;
+    int two_col = right_n > 0;
     int content = left_n > right_n ? left_n : right_n;
 
-    int width = 72;
+    int width = two_col ? 72 : 44;
     if (width > cols - 2)
         width = cols - 2;
     if (width < 24)
@@ -3518,13 +3511,18 @@ static void tui_render_help(void) {
               width - 2);
     attroff(A_BOLD);
 
-    int colw = width / 2 - 4;
     int max_y = top + height - 2;
-    help_draw_column(top + 3, left + 3, colw, left_items, left_n, max_y);
-    help_draw_column(top + 3, left + width / 2 + 1, colw, right_items, right_n,
-                     max_y);
+    if (two_col) {
+        int colw = width / 2 - 4;
+        help_draw_column(top + 3, left + 3, colw, left_items, left_n, max_y);
+        help_draw_column(top + 3, left + width / 2 + 1, colw, right_items,
+                         right_n, max_y);
+    } else {
+        help_draw_column(top + 3, left + 3, width - 6, left_items, left_n,
+                         max_y);
+    }
 
-    const char *hint = "press ? or Esc to close";
+    const char *hint = "press h, ?, or Esc to close";
     if (tui_colors_enabled)
         attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
     mvaddnstr(top + height - 2, left + (width - (int)strlen(hint)) / 2, hint,
@@ -4223,7 +4221,7 @@ static void tui_render(DispatchTui *tui) {
         draw_footer(tui->status, tui_footer_hints(tui->screen));
 
     if (tui->show_help)
-        tui_render_help();
+        tui_render_help(tui->screen);
 
     refresh();
 }
