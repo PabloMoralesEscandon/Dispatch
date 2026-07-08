@@ -384,7 +384,7 @@ static int create_agent_dirs(const char *agent_dir, char **scratch_dir,
     return 1;
 }
 
-static int agent_name_is_valid(const char *name) {
+int dispatch_agent_name_is_valid(const char *name) {
     if (!name || name[0] == '\0')
         return 0;
     for (size_t i = 0; name[i] != '\0'; i++) {
@@ -395,7 +395,7 @@ static int agent_name_is_valid(const char *name) {
     return 1;
 }
 
-static int agent_runner_is_valid(const char *runner) {
+int dispatch_agent_runner_is_valid(const char *runner) {
     return runner &&
            (strcmp(runner, "codex") == 0 || strcmp(runner, "claude") == 0);
 }
@@ -637,6 +637,125 @@ static DispatchAgent *append_agent_record(DispatchBoard *board,
     return agent;
 }
 
+void dispatch_agent_create_result_free(DispatchAgentCreateResult *result) {
+    if (!result)
+        return;
+    free(result->agent_dir);
+    free(result->prompt_path);
+    free(result->scratch_dir);
+    free(result->decisions_dir);
+    free(result->run_script_path);
+    free(result->command);
+    memset(result, 0, sizeof(*result));
+}
+
+int dispatch_agent_create(const DispatchAgentCreateOptions *options,
+                          DispatchAgentCreateResult *result, char *error,
+                          size_t error_size) {
+    if (result)
+        memset(result, 0, sizeof(*result));
+    if (error && error_size > 0)
+        error[0] = '\0';
+
+    const char *name = options ? options->name : NULL;
+    const char *runner = options ? options->runner : NULL;
+    const char *model = options ? options->model : NULL;
+    const char *actor =
+        options && options->actor && options->actor[0] ? options->actor : "user";
+    int no_run_script = options ? options->no_run_script : 0;
+
+    if (!dispatch_agent_name_is_valid(name)) {
+        if (error && error_size > 0) {
+            snprintf(error, error_size,
+                     "Agent name must contain only letters, digits, '-' or '_'");
+        }
+        return 0;
+    }
+    if (!dispatch_agent_runner_is_valid(runner)) {
+        if (error && error_size > 0)
+            snprintf(error, error_size, "Agent runner must be codex or claude");
+        return 0;
+    }
+
+    char *agent_dir_base = join_path2(".dispatch/agents", name);
+    char *prompt_path = agent_prompt_path_for(agent_dir_base, name);
+    char *run_script_path =
+        no_run_script ? NULL : join_path2(agent_dir_base, "run.sh");
+    char *scratch_dir = NULL;
+    char *decisions_dir = NULL;
+    char *command = agent_command_for(runner, model, prompt_path);
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked)) {
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(command);
+        return 0;
+    }
+    if (dispatch_board_find_agent(&locked.board, name)) {
+        locked_board_close(&locked);
+        if (error && error_size > 0)
+            snprintf(error, error_size, "Agent %s already exists", name);
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(command);
+        return 0;
+    }
+
+    if (!create_agent_dirs(agent_dir_base, &scratch_dir, &decisions_dir) ||
+        !write_agent_prompt(prompt_path, name, runner, model, agent_dir_base,
+                            scratch_dir, decisions_dir) ||
+        (!no_run_script && !write_agent_run_script(run_script_path, command)) ||
+        !append_agent_record(&locked.board, name, runner, model, agent_dir_base,
+                             prompt_path, run_script_path) ||
+        !locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        if (error && error_size > 0 && error[0] == '\0')
+            snprintf(error, error_size, "Could not create agent %s", name);
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(scratch_dir);
+        free(decisions_dir);
+        free(command);
+        return 0;
+    }
+
+    DispatchLogField targets[] = {
+        {"agent", name},
+    };
+    DispatchLogField context[] = {
+        {"runner", runner},
+        {"model", model && model[0] ? model : ""},
+        {"agent_dir", agent_dir_base},
+        {"run_script", bool_string(!no_run_script)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Created agent %s", name);
+    append_dispatch_log(actor, "agent", "create", targets, 1, context, 4,
+                        message);
+
+    locked_board_close(&locked);
+    if (result) {
+        result->agent_dir = agent_dir_base;
+        result->prompt_path = prompt_path;
+        result->scratch_dir = scratch_dir;
+        result->decisions_dir = decisions_dir;
+        result->run_script_path = run_script_path;
+        result->command = command;
+    } else {
+        free(agent_dir_base);
+        free(prompt_path);
+        free(run_script_path);
+        free(scratch_dir);
+        free(decisions_dir);
+        free(command);
+    }
+    return 1;
+}
+
 static int cmd_agent_create(int argc, char **argv) {
     const char *name = NULL;
     const char *runner = NULL;
@@ -662,88 +781,31 @@ static int cmd_agent_create(int argc, char **argv) {
         }
     }
 
-    if (!agent_name_is_valid(name)) {
-        fprintf(stderr,
-                "Agent name must contain only letters, digits, '-' or '_'\n");
-        return 1;
-    }
-    if (!agent_runner_is_valid(runner)) {
-        fprintf(stderr, "Agent runner must be codex or claude\n");
-        return 1;
-    }
-
-    char *agent_dir_base = join_path2(".dispatch/agents", name);
-    char *prompt_path = agent_prompt_path_for(agent_dir_base, name);
-    char *run_script_path = no_run_script ? NULL : join_path2(agent_dir_base, "run.sh");
-    char *scratch_dir = NULL;
-    char *decisions_dir = NULL;
-    char *command = agent_command_for(runner, model, prompt_path);
-
-    LockedBoard locked;
-    if (!locked_board_load_or_error(&locked)) {
-        free(agent_dir_base);
-        free(prompt_path);
-        free(run_script_path);
-        free(command);
-        return 1;
-    }
-    if (dispatch_board_find_agent(&locked.board, name)) {
-        locked_board_close(&locked);
-        fprintf(stderr, "Agent %s already exists\n", name);
-        free(agent_dir_base);
-        free(prompt_path);
-        free(run_script_path);
-        free(command);
-        return 1;
-    }
-
-    if (!create_agent_dirs(agent_dir_base, &scratch_dir, &decisions_dir) ||
-        !write_agent_prompt(prompt_path, name, runner, model, agent_dir_base,
-                            scratch_dir, decisions_dir) ||
-        (!no_run_script && !write_agent_run_script(run_script_path, command)) ||
-        !append_agent_record(&locked.board, name, runner, model, agent_dir_base,
-                             prompt_path, run_script_path) ||
-        !locked_board_save_or_error(&locked)) {
-        locked_board_close(&locked);
-        free(agent_dir_base);
-        free(prompt_path);
-        free(run_script_path);
-        free(scratch_dir);
-        free(decisions_dir);
-        free(command);
+    DispatchAgentCreateOptions options = {
+        .name = name,
+        .runner = runner,
+        .model = model,
+        .actor = "user",
+        .no_run_script = no_run_script,
+    };
+    DispatchAgentCreateResult result = {0};
+    char error[256] = {0};
+    if (!dispatch_agent_create(&options, &result, error, sizeof(error))) {
+        if (error[0] != '\0')
+            fprintf(stderr, "%s\n", error);
         return 1;
     }
 
     printf("Created agent %s (%s)\n", name, runner);
-    printf("  prompt: %s\n", prompt_path);
-    printf("  scratch: %s\n", scratch_dir);
-    printf("  decisions: %s\n", decisions_dir);
-    if (run_script_path)
-        printf("  run script: %s\n", run_script_path);
+    printf("  prompt: %s\n", result.prompt_path);
+    printf("  scratch: %s\n", result.scratch_dir);
+    printf("  decisions: %s\n", result.decisions_dir);
+    if (result.run_script_path)
+        printf("  run script: %s\n", result.run_script_path);
     if (print_command)
-        printf("  command: %s\n", command);
+        printf("  command: %s\n", result.command);
 
-    DispatchLogField targets[] = {
-        {"agent", name},
-    };
-    DispatchLogField context[] = {
-        {"runner", runner},
-        {"model", model && model[0] ? model : ""},
-        {"agent_dir", agent_dir_base},
-        {"run_script", bool_string(!no_run_script)},
-    };
-    char message[256];
-    snprintf(message, sizeof(message), "Created agent %s", name);
-    append_dispatch_log("user", "agent", "create", targets, 1, context, 4,
-                        message);
-
-    locked_board_close(&locked);
-    free(agent_dir_base);
-    free(prompt_path);
-    free(run_script_path);
-    free(scratch_dir);
-    free(decisions_dir);
-    free(command);
+    dispatch_agent_create_result_free(&result);
     return 0;
 }
 
