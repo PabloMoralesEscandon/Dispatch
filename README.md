@@ -26,6 +26,9 @@ repository, while `work_dir` can have its own Git history for workflow state.
 - A C compiler such as `clang` or `gcc`
 - `jansson`
 - A POSIX-like shell for the test runner
+- `git` and a pager for the TUI diff view (`d`). The pager is taken from
+  `$PAGER`, falling back to `less` then `more`; whichever one you rely on must be
+  installed, or the diff runs without paging.
 
 ## Build
 
@@ -354,7 +357,10 @@ Task actions are available from the board and task inspector: `r` ready, `s`
 start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a
 full-screen task creation form with boxed fields, `+` creates a group, `>` adds
 a dependency to the inspected task, `<` removes a dependency, and `d` opens the
-selected task commit with `git show` when commit metadata exists.
+diff for the selected task when commit metadata exists. The diff covers all of
+the task's recorded commits, is rendered with forced color, and is shown through
+a pager (`$PAGER`, else `less` or `more`) so it stays on screen until you quit
+the pager. When no pager is installed the diff is shown without paging.
 In the task creation form, `Ctrl-O` opens an option picker for the active
 field: on the Group field it lists existing groups (typing still creates a new
 group), and on the Depends field it lists not-done tasks, excluding done tasks

@@ -1089,16 +1089,53 @@ static int workspace_is_dirty(const DispatchWorkspace *workspace) {
     return ch != EOF || status != 0;
 }
 
+static int command_available(const char *command);
+
+/* Pick a pager that keeps the diff on screen until dismissed. Honor $PAGER when
+ * set, otherwise prefer less (raw color) then more. NULL when none is found. */
+static const char *diff_pager(void) {
+    const char *env = getenv("PAGER");
+    if (env && env[0])
+        return env;
+    if (command_available("less"))
+        return "less -R";
+    if (command_available("more"))
+        return "more";
+    return NULL;
+}
+
 static void run_selected_task_diff(DispatchTui *tui) {
     DispatchTask *task = selected_visible_task(tui);
     if (!task) {
         tui_set_status(tui, "No selected task");
         return;
     }
-    char *command = diff_command_for_task(&tui->board, task);
-    if (!command) {
+    if (!command_available("git")) {
+        tui_set_status(tui, "git is not available to show the diff");
+        return;
+    }
+    char *diff = diff_command_for_task(&tui->board, task);
+    if (!diff) {
         tui_set_status(tui, "No commit metadata for selected task");
         return;
+    }
+
+    /* Force color and route git's output, including any error message, through
+     * a pager so the diff stays on screen until the user quits it. Without a
+     * pager, fall back to running the diff directly. */
+    const char *pager = diff_pager();
+    char *command;
+    if (pager) {
+        size_t size = strlen(diff) + strlen(" --color=always 2>&1 | ") +
+                      strlen(pager) + 1;
+        command = malloc(size);
+        if (!command) {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
+        snprintf(command, size, "%s --color=always 2>&1 | %s", diff, pager);
+    } else {
+        command = diff;
     }
 
     def_prog_mode();
@@ -1107,10 +1144,22 @@ static void run_selected_task_diff(DispatchTui *tui) {
     reset_prog_mode();
     refresh();
 
+    if (command != diff)
+        free(command);
+
     char message[256];
-    snprintf(message, sizeof(message), "Diff exited with status %d", result);
+    if (result == -1)
+        snprintf(message, sizeof(message), "Could not run the diff command");
+    else if (result != 0)
+        snprintf(message, sizeof(message),
+                 "Diff viewer exited with status %d", result);
+    else if (!pager)
+        snprintf(message, sizeof(message),
+                 "Showed diff without a pager; set $PAGER to keep it on screen");
+    else
+        snprintf(message, sizeof(message), "Closed diff");
     tui_set_status(tui, message);
-    free(command);
+    free(diff);
 }
 
 static int command_available(const char *command) {
