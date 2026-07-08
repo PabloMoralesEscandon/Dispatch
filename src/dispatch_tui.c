@@ -4136,6 +4136,10 @@ static int tui_run(void) {
         }
         if (ch == ERR)
             continue;
+        if (tui.show_help && (ch == 27 || ch == 'q')) {
+            tui.show_help = 0;
+            continue;
+        }
         if (handle_search_key(&tui, ch))
             continue;
         switch (ch) {
