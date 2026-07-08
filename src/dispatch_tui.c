@@ -21,6 +21,7 @@ typedef enum {
     TUI_SCREEN_TASK_INSPECTOR,
     TUI_SCREEN_AGENTS,
     TUI_SCREEN_AGENT_INSPECTOR,
+    TUI_SCREEN_AGENT_FORM,
     TUI_SCREEN_TASK_FORM,
     TUI_SCREEN_GROUP_FORM,
     TUI_SCREEN_WORKSPACES,
@@ -91,6 +92,23 @@ enum {
     TUI_TASK_FORM_DEPS = 3,
     TUI_TASK_FORM_REVIEW = 4,
     TUI_TASK_FORM_FIELD_COUNT = 5,
+};
+
+typedef struct {
+    char name[128];
+    char runner[16];
+    char model[128];
+    int no_run_script;
+    int active_field;
+    char status[256];
+} TuiAgentForm;
+
+enum {
+    TUI_AGENT_FORM_NAME = 0,
+    TUI_AGENT_FORM_RUNNER = 1,
+    TUI_AGENT_FORM_MODEL = 2,
+    TUI_AGENT_FORM_NO_RUN_SCRIPT = 3,
+    TUI_AGENT_FORM_FIELD_COUNT = 4,
 };
 
 static DispatchTask *selected_visible_task(DispatchTui *tui);
@@ -3019,6 +3037,8 @@ static const char *tui_view_name(DispatchTuiScreen screen) {
         return "Agents";
     case TUI_SCREEN_AGENT_INSPECTOR:
         return "Agent";
+    case TUI_SCREEN_AGENT_FORM:
+        return "New Agent";
     case TUI_SCREEN_TASK_FORM:
         return "New Task";
     case TUI_SCREEN_GROUP_FORM:
@@ -3126,6 +3146,8 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
         return "b board   F filter   C clear   j/k move";
     case TUI_SCREEN_AGENTS:
         return "Enter/i inspect   y run   A all/enabled   z archive   Tab board";
+    case TUI_SCREEN_AGENT_FORM:
+        return "Enter next/save   Tab move   Space toggle   Esc cancel";
     case TUI_SCREEN_TASK_FORM:
         return "Enter next/save   Tab move   ^O options   Space review   Esc cancel";
     case TUI_SCREEN_GROUP_FORM:
@@ -3383,6 +3405,14 @@ static const HelpItem help_group_form_items[] = {
     {"Esc", "cancel"},
 };
 
+static const HelpItem help_agent_form_items[] = {
+    {NULL, "New agent"},
+    {"Enter", "next / save"},
+    {"Tab", "move field"},
+    {"Space", "toggle no-run-script"},
+    {"Esc", "cancel"},
+};
+
 /* Return the control list for a screen, writing its length to *count. */
 static const HelpItem *help_controls_for_screen(DispatchTuiScreen screen,
                                                 int *count) {
@@ -3399,6 +3429,8 @@ static const HelpItem *help_controls_for_screen(DispatchTuiScreen screen,
         HELP_VIEW(help_agents_items);
     case TUI_SCREEN_AGENT_INSPECTOR:
         HELP_VIEW(help_agent_inspector_items);
+    case TUI_SCREEN_AGENT_FORM:
+        HELP_VIEW(help_agent_form_items);
     case TUI_SCREEN_TASK_FORM:
         HELP_VIEW(help_task_form_items);
     case TUI_SCREEN_GROUP_FORM:
@@ -5284,6 +5316,8 @@ static const char *screen_name(DispatchTuiScreen screen) {
         return "agents";
     case TUI_SCREEN_AGENT_INSPECTOR:
         return "agent";
+    case TUI_SCREEN_AGENT_FORM:
+        return "agent-form";
     case TUI_SCREEN_TASK_FORM:
         return "task-form";
     case TUI_SCREEN_GROUP_FORM:
@@ -5359,6 +5393,7 @@ static int tui_help_controls_smoke(void) {
     static const DispatchTuiScreen screens[] = {
         TUI_SCREEN_BOARD,      TUI_SCREEN_TASK_INSPECTOR,
         TUI_SCREEN_AGENTS,     TUI_SCREEN_AGENT_INSPECTOR,
+        TUI_SCREEN_AGENT_FORM,
         TUI_SCREEN_WORKSPACES, TUI_SCREEN_WORKSPACE_INSPECTOR,
         TUI_SCREEN_LOGS,       TUI_SCREEN_TASK_FORM,
         TUI_SCREEN_GROUP_FORM,
