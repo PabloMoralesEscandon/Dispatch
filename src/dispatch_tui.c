@@ -3455,7 +3455,7 @@ static const char *tui_footer_hints(DispatchTuiScreen screen) {
     case TUI_SCREEN_LOGS:
         return "b board   F filter   C clear   j/k move";
     case TUI_SCREEN_AGENTS:
-        return "Enter/i inspect   y run   A all/enabled   z archive   Tab board";
+        return "Enter/i inspect   n create   y run   A all/enabled   z archive";
     case TUI_SCREEN_AGENT_FORM:
         return "Enter next/save   Tab move   Space toggle   Esc cancel";
     case TUI_SCREEN_TASK_FORM:
@@ -3651,6 +3651,7 @@ static const HelpItem help_agents_items[] = {
     {NULL, "Agents"},
     {"j / k", "move selection"},
     {"Enter / i", "inspect agent"},
+    {"n", "create agent"},
     {"y", "run command"},
     {"z", "archive / restore"},
     {"A", "all / enabled"},
