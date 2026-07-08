@@ -127,6 +127,23 @@ typedef struct {
     DispatchWorkspaces workspaces;
 } DispatchBoard;
 
+typedef struct {
+    const char *name;
+    const char *runner;
+    const char *model;
+    const char *actor;
+    int no_run_script;
+} DispatchAgentCreateOptions;
+
+typedef struct {
+    char *agent_dir;
+    char *prompt_path;
+    char *scratch_dir;
+    char *decisions_dir;
+    char *run_script_path;
+    char *command;
+} DispatchAgentCreateResult;
+
 void dispatch_board_init(DispatchBoard *board, const char *name);
 void dispatch_board_set_repo_path(DispatchBoard *board, const char *repo_path);
 void dispatch_board_free(DispatchBoard *board);
@@ -191,6 +208,12 @@ int dispatch_board_has_dependency_path(const DispatchBoard *board,
 void dispatch_board_normalize_states(DispatchBoard *board);
 int dispatch_board_normalize_agent_sessions(DispatchBoard *board);
 
+int dispatch_agent_name_is_valid(const char *name);
+int dispatch_agent_runner_is_valid(const char *runner);
+int dispatch_agent_create(const DispatchAgentCreateOptions *options,
+                          DispatchAgentCreateResult *result, char *error,
+                          size_t error_size);
+void dispatch_agent_create_result_free(DispatchAgentCreateResult *result);
 char *codex_agent_resume_command_for(const DispatchAgent *agent,
                                      const DispatchWorkspace *workspace);
 char *claude_agent_resume_command_for(const DispatchAgent *agent,
