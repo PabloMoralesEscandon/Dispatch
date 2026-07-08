@@ -839,7 +839,8 @@ DispatchState dispatch_task_effective_state(const DispatchBoard *board,
         return DISPATCH_STATE_BLOCKED;
     if (task->state == DISPATCH_STATE_DONE ||
         task->state == DISPATCH_STATE_DOING ||
-        task->state == DISPATCH_STATE_REVIEW) {
+        task->state == DISPATCH_STATE_REVIEW ||
+        task->state == DISPATCH_STATE_PROPOSED) {
         return task->state;
     }
     if (dispatch_task_has_unmet_dependencies(board, task))
