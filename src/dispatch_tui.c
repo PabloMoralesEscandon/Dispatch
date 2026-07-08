@@ -1019,16 +1019,34 @@ static char *diff_command_for_task(const DispatchBoard *board,
         return NULL;
 
     char *repo_q = tui_shell_quote(board->repo_path ? board->repo_path : ".");
-    char *commit_q = tui_shell_quote(task->commits.items[0]);
-    size_t size = strlen("git -C  show ") + strlen(repo_q) + strlen(commit_q) + 1;
+
+    /* Quote every recorded commit so the diff covers the full task change set,
+     * not just the first commit. */
+    char **commit_q = calloc(task->commits.count, sizeof(char *));
+    if (!commit_q) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    size_t size = strlen("git -C  show") + strlen(repo_q) + 1;
+    for (size_t i = 0; i < task->commits.count; i++) {
+        commit_q[i] = tui_shell_quote(task->commits.items[i]);
+        size += strlen(" ") + strlen(commit_q[i]);
+    }
+
     char *command = malloc(size);
     if (!command) {
         fprintf(stderr, "Out of memory\n");
         exit(1);
     }
-    snprintf(command, size, "git -C %s show %s", repo_q, commit_q);
-    free(repo_q);
+    size_t out = 0;
+    out += snprintf(command + out, size - out, "git -C %s show", repo_q);
+    for (size_t i = 0; i < task->commits.count; i++)
+        out += snprintf(command + out, size - out, " %s", commit_q[i]);
+
+    for (size_t i = 0; i < task->commits.count; i++)
+        free(commit_q[i]);
     free(commit_q);
+    free(repo_q);
     return command;
 }
 
