@@ -3,3 +3,6 @@
 /dispatch
 /nob
 /nob.old
+
+# Local
+*.json
