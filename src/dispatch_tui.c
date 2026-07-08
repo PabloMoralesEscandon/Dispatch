@@ -4195,6 +4195,7 @@ static int tui_run(void) {
             }
             break;
         case '?':
+        case 'h':
             tui.show_help = !tui.show_help;
             break;
         case ':':
