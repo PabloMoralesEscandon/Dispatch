@@ -3279,6 +3279,144 @@ typedef struct {
     const char *desc;
 } HelpItem;
 
+/* Per-view control lists. A NULL key marks a section heading. HL-04 renders the
+ * help overlay from the list for the current screen so each view shows only and
+ * all of its own controls. */
+static const HelpItem help_board_items[] = {
+    {NULL, "Navigation"},
+    {"j / k", "move selection"},
+    {"Enter / i", "inspect task"},
+    {"Tab", "switch to agents"},
+    {NULL, "Views"},
+    {"b a w l", "board agents ws logs"},
+    {":", "command palette"},
+    {NULL, "Tasks"},
+    {"r s f v", "ready start finish review"},
+    {"n  +", "new task / group"},
+    {"d", "diff selected"},
+    {NULL, "Filter & search"},
+    {"1-7  R", "filter presets"},
+    {"G  A", "cycle group / actor"},
+    {"/  c", "search / clear refine"},
+    {NULL, "General"},
+    {"u", "reload board"},
+    {"h / ?", "toggle help"},
+    {"^C  :q", "quit"},
+};
+
+static const HelpItem help_task_inspector_items[] = {
+    {NULL, "Task inspector"},
+    {"q / Esc", "back to board"},
+    {"r s f v", "ready start finish review"},
+    {">", "add dependency"},
+    {"<", "remove dependency"},
+    {"d", "diff"},
+    {"L", "task logs"},
+    {"h / ?", "toggle help"},
+};
+
+static const HelpItem help_agents_items[] = {
+    {NULL, "Agents"},
+    {"j / k", "move selection"},
+    {"Enter / i", "inspect agent"},
+    {"y", "run command"},
+    {"z", "archive / restore"},
+    {"A", "all / enabled"},
+    {"Tab / b", "back to board"},
+    {"h / ?", "toggle help"},
+};
+
+static const HelpItem help_agent_inspector_items[] = {
+    {NULL, "Agent inspector"},
+    {"q / Esc", "back to agents"},
+    {"y", "run command"},
+    {"e", "edit prompt"},
+    {"S", "set session"},
+    {"x", "clear session"},
+    {"z", "archive / restore"},
+    {"L", "agent logs"},
+    {"h / ?", "toggle help"},
+};
+
+static const HelpItem help_workspaces_items[] = {
+    {NULL, "Workspaces"},
+    {"j / k", "move selection"},
+    {"Enter / i", "inspect workspace"},
+    {"n", "create workspace"},
+    {"x", "remove"},
+    {"X", "force remove"},
+    {"P", "prune"},
+    {"b  a", "board / agents"},
+    {"h / ?", "toggle help"},
+};
+
+static const HelpItem help_workspace_inspector_items[] = {
+    {NULL, "Workspace inspector"},
+    {"q / Esc", "back to workspaces"},
+    {"x", "remove"},
+    {"X", "force remove"},
+    {"h / ?", "toggle help"},
+};
+
+static const HelpItem help_logs_items[] = {
+    {NULL, "Logs"},
+    {"j / k", "move selection"},
+    {"F", "filter logs"},
+    {"C", "clear filter"},
+    {"b", "back to board"},
+    {"h / ?", "toggle help"},
+};
+
+static const HelpItem help_task_form_items[] = {
+    {NULL, "New task"},
+    {"Enter", "next / save"},
+    {"Tab", "move field"},
+    {"^O", "options"},
+    {"Space", "toggle review"},
+    {"Esc", "cancel"},
+};
+
+static const HelpItem help_group_form_items[] = {
+    {NULL, "New group"},
+    {"Enter", "next / save"},
+    {"Tab", "move field"},
+    {"Esc", "cancel"},
+};
+
+/* Return the control list for a screen, writing its length to *count. */
+static const HelpItem *help_controls_for_screen(DispatchTuiScreen screen,
+                                                int *count) {
+#define HELP_VIEW(items)                                                       \
+    do {                                                                       \
+        *count = (int)(sizeof(items) / sizeof((items)[0]));                    \
+        return (items);                                                        \
+    } while (0)
+
+    switch (screen) {
+    case TUI_SCREEN_TASK_INSPECTOR:
+        HELP_VIEW(help_task_inspector_items);
+    case TUI_SCREEN_AGENTS:
+        HELP_VIEW(help_agents_items);
+    case TUI_SCREEN_AGENT_INSPECTOR:
+        HELP_VIEW(help_agent_inspector_items);
+    case TUI_SCREEN_TASK_FORM:
+        HELP_VIEW(help_task_form_items);
+    case TUI_SCREEN_GROUP_FORM:
+        HELP_VIEW(help_group_form_items);
+    case TUI_SCREEN_WORKSPACES:
+        HELP_VIEW(help_workspaces_items);
+    case TUI_SCREEN_WORKSPACE_INSPECTOR:
+        HELP_VIEW(help_workspace_inspector_items);
+    case TUI_SCREEN_LOGS:
+        HELP_VIEW(help_logs_items);
+    case TUI_SCREEN_BOARD:
+    default:
+        HELP_VIEW(help_board_items);
+    }
+
+#undef HELP_VIEW
+}
+
 /* Draw one column of help items: NULL key means a section heading. */
 static void help_draw_column(int top_y, int x, int colw, const HelpItem *items,
                              int n, int max_y) {
@@ -5219,6 +5357,29 @@ static int tui_search_smoke(const char *keys) {
     return 0;
 }
 
+static int tui_help_controls_smoke(void) {
+    static const DispatchTuiScreen screens[] = {
+        TUI_SCREEN_BOARD,      TUI_SCREEN_TASK_INSPECTOR,
+        TUI_SCREEN_AGENTS,     TUI_SCREEN_AGENT_INSPECTOR,
+        TUI_SCREEN_WORKSPACES, TUI_SCREEN_WORKSPACE_INSPECTOR,
+        TUI_SCREEN_LOGS,       TUI_SCREEN_TASK_FORM,
+        TUI_SCREEN_GROUP_FORM,
+    };
+    int n = (int)(sizeof(screens) / sizeof(screens[0]));
+    for (int i = 0; i < n; i++) {
+        int count = 0;
+        const HelpItem *items = help_controls_for_screen(screens[i], &count);
+        printf("[%s] %d\n", screen_name(screens[i]), count);
+        for (int j = 0; j < count; j++) {
+            if (items[j].key)
+                printf("  %-10s %s\n", items[j].key, items[j].desc);
+            else
+                printf("# %s\n", items[j].desc);
+        }
+    }
+    return 0;
+}
+
 static int tui_refresh_smoke(void) {
     DispatchTui tui;
     tui_init(&tui);
@@ -5288,6 +5449,7 @@ static void print_tui_help(void) {
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
     puts("  --refresh-smoke");
+    puts("  --help-controls-smoke      print per-view control lists and exit");
 }
 
 int dispatch_tui_main(int argc, char **argv) {
@@ -5363,6 +5525,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_search_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--refresh-smoke") == 0)
         return tui_refresh_smoke();
+    if (argc == 3 && strcmp(argv[2], "--help-controls-smoke") == 0)
+        return tui_help_controls_smoke();
     if (argc != 2) {
         print_tui_help();
         return 1;
