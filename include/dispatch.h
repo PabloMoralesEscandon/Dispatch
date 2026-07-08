@@ -191,6 +191,12 @@ int dispatch_board_has_dependency_path(const DispatchBoard *board,
 void dispatch_board_normalize_states(DispatchBoard *board);
 int dispatch_board_normalize_agent_sessions(DispatchBoard *board);
 
+char *codex_agent_resume_command_for(const DispatchAgent *agent,
+                                     const DispatchWorkspace *workspace);
+char *claude_agent_resume_command_for(const DispatchAgent *agent,
+                                      const DispatchWorkspace *workspace,
+                                      int start_with_session_id);
+
 char *dispatch_next_task_id(const DispatchBoard *board, const char *group_id);
 
 int dispatch_actor_label_is_valid(const char *actor);

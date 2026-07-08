@@ -422,8 +422,8 @@ static char *agent_command_for(const char *runner, const char *model,
     return command;
 }
 
-static char *codex_agent_resume_command_for(const DispatchAgent *agent,
-                                            const DispatchWorkspace *workspace) {
+char *codex_agent_resume_command_for(const DispatchAgent *agent,
+                                     const DispatchWorkspace *workspace) {
     char *model_q = agent->model && agent->model[0] ? shell_quote(agent->model) : NULL;
     char *workspace_q = workspace && workspace->path && workspace->path[0]
                             ? shell_quote(workspace->path)
@@ -495,9 +495,9 @@ static char *generate_uuid_v4(void) {
     return uuid;
 }
 
-static char *claude_agent_resume_command_for(const DispatchAgent *agent,
-                                             const DispatchWorkspace *workspace,
-                                             int start_with_session_id) {
+char *claude_agent_resume_command_for(const DispatchAgent *agent,
+                                      const DispatchWorkspace *workspace,
+                                      int start_with_session_id) {
     char *model_q = agent->model && agent->model[0] ? shell_quote(agent->model) : NULL;
     char *workspace_q = workspace && workspace->path && workspace->path[0]
                             ? shell_quote(workspace->path)

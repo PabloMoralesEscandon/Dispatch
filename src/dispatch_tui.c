@@ -1163,9 +1163,25 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
     tui_load_board(tui);
 }
 
-static char *agent_run_command_text(const DispatchAgent *agent) {
+static char *agent_run_command_text(DispatchBoard *board,
+                                    const DispatchAgent *agent) {
     if (!agent)
         return NULL;
+
+    if (agent->session_id && agent->session_id[0]) {
+        const DispatchWorkspace *workspace = NULL;
+        if (board && agent->last_workspace) {
+            DispatchWorkspace *found =
+                dispatch_board_find_workspace(board, agent->last_workspace);
+            if (found && found->state != DISPATCH_WORKSPACE_REMOVED)
+                workspace = found;
+        }
+        if (strcmp(agent->runner, "codex") == 0)
+            return codex_agent_resume_command_for(agent, workspace);
+        if (strcmp(agent->runner, "claude") == 0)
+            return claude_agent_resume_command_for(agent, workspace, 0);
+    }
+
     if (agent->run_script_path && agent->run_script_path[0])
         return strdup(agent->run_script_path);
 
@@ -1244,7 +1260,7 @@ static void copy_selected_agent_run_command(DispatchTui *tui) {
         return;
     }
 
-    char *command = agent_run_command_text(agent);
+    char *command = agent_run_command_text(&tui->board, agent);
     if (!command) {
         tui_set_status(tui, "Could not build agent command");
         return;
@@ -4753,7 +4769,7 @@ static int tui_agent_run_command_smoke(const char *name) {
         return 1;
     }
 
-    char *command = agent_run_command_text(agent);
+    char *command = agent_run_command_text(&board, agent);
     if (!command) {
         fprintf(stderr, "Could not build agent command for %s\n", name);
         dispatch_board_free(&board);
