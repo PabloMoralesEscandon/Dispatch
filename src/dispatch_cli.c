@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "dispatch.h"
+#include "dispatch_exec.h"
 #include "dispatch_json.h"
 #include "dispatch_store.h"
 #include "dispatch_tui.h"
@@ -1642,105 +1643,60 @@ static char *shell_quote(const char *value) {
     return quoted;
 }
 
-static int run_shell_command_quiet(const char *command) {
-    int status = system(command);
-    return status == 0;
+static int run_command_quiet(const char *const argv[]) {
+    DispatchExecOptions options = {
+        .stdout_mode = DISPATCH_EXEC_DEV_NULL,
+        .stderr_mode = DISPATCH_EXEC_DEV_NULL,
+    };
+    DispatchExecResult result;
+    return dispatch_exec_run(argv, &options, &result) &&
+           dispatch_exec_result_success(&result);
 }
 
 static int git_branch_exists(const char *repo_path, const char *branch) {
-    char *repo_q = shell_quote(repo_path);
-    char *branch_q = shell_quote(branch);
-    size_t size = strlen("git -C  rev-parse --verify --quiet refs/heads/ >/dev/null 2>&1") +
-                  strlen(repo_q) + strlen(branch_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
+    size_t ref_size = strlen("refs/heads/") + strlen(branch) + 1;
+    char *ref = malloc(ref_size);
+    if (!ref) {
         fprintf(stderr, "Out of memory\n");
         exit(1);
     }
-    snprintf(command, size,
-             "git -C %s rev-parse --verify --quiet refs/heads/%s >/dev/null 2>&1",
-             repo_q, branch_q);
-    int exists = run_shell_command_quiet(command);
-    free(repo_q);
-    free(branch_q);
-    free(command);
+    snprintf(ref, ref_size, "refs/heads/%s", branch);
+    const char *argv[] = {"git",      "-C",      repo_path, "rev-parse",
+                          "--verify", "--quiet", ref,       NULL};
+    int exists = run_command_quiet(argv);
+    free(ref);
     return exists;
 }
 
 static int git_worktree_add(const char *repo_path, const char *workspace_path,
                             const char *branch, int branch_exists) {
-    char *repo_q = shell_quote(repo_path);
-    char *workspace_q = shell_quote(workspace_path);
-    char *branch_q = shell_quote(branch);
-    const char *format_existing =
-        "git -C %s worktree add %s %s >/dev/null 2>&1";
-    const char *format_new =
-        "git -C %s worktree add -b %s %s HEAD >/dev/null 2>&1";
-    const char *format = branch_exists ? format_existing : format_new;
-    size_t size = strlen(format) + strlen(repo_q) + strlen(workspace_q) +
-                  strlen(branch_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
+    const char *existing_argv[] = {"git", "-C", repo_path, "worktree", "add",
+                                   "--", workspace_path, branch, NULL};
+    const char *new_argv[] = {"git", "-C", repo_path, "worktree", "add",
+                              "-b", branch, "--", workspace_path, "HEAD",
+                              NULL};
     if (branch_exists) {
-        snprintf(command, size, format, repo_q, workspace_q, branch_q);
-    } else {
-        snprintf(command, size, format, repo_q, branch_q, workspace_q);
+        return run_command_quiet(existing_argv);
     }
-    int ok = run_shell_command_quiet(command);
-    free(repo_q);
-    free(workspace_q);
-    free(branch_q);
-    free(command);
-    return ok;
+    return run_command_quiet(new_argv);
 }
 
 static int git_worktree_remove_force(const char *repo_path,
                                      const char *workspace_path) {
-    char *repo_q = shell_quote(repo_path);
-    char *workspace_q = shell_quote(workspace_path);
-    size_t size = strlen("git -C  worktree remove --force  >/dev/null 2>&1") +
-                  strlen(repo_q) + strlen(workspace_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size,
-             "git -C %s worktree remove --force %s >/dev/null 2>&1", repo_q,
-             workspace_q);
-    int ok = run_shell_command_quiet(command);
-    free(repo_q);
-    free(workspace_q);
-    free(command);
-    return ok;
+    const char *argv[] = {"git", "-C", repo_path, "worktree", "remove",
+                          "--force", "--", workspace_path, NULL};
+    return run_command_quiet(argv);
 }
 
 static int git_worktree_remove(const char *repo_path,
                                const char *workspace_path) {
-    char *repo_q = shell_quote(repo_path);
-    char *workspace_q = shell_quote(workspace_path);
-    size_t size = strlen("git -C  worktree remove  >/dev/null 2>&1") +
-                  strlen(repo_q) + strlen(workspace_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "git -C %s worktree remove %s >/dev/null 2>&1",
-             repo_q, workspace_q);
-    int ok = run_shell_command_quiet(command);
-    free(repo_q);
-    free(workspace_q);
-    free(command);
-    return ok;
+    const char *argv[] = {"git", "-C", repo_path, "worktree", "remove", "--",
+                          workspace_path, NULL};
+    return run_command_quiet(argv);
 }
 
 static int git_worktree_is_registered(const char *repo_path,
                                       const char *workspace_path) {
-    char *repo_q = shell_quote(repo_path);
     size_t line_size = strlen("worktree ") + strlen(workspace_path) + 1;
     char *line = malloc(line_size);
     if (!line) {
@@ -1748,45 +1704,44 @@ static int git_worktree_is_registered(const char *repo_path,
         exit(1);
     }
     snprintf(line, line_size, "worktree %s", workspace_path);
-    char *line_q = shell_quote(line);
-    const char *format =
-        "git -C %s worktree list --porcelain | grep -Fx %s >/dev/null 2>&1";
-    size_t size = strlen(format) + strlen(repo_q) + strlen(line_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
+    const char *argv[] = {"git", "-C", repo_path, "worktree", "list",
+                          "--porcelain", NULL};
+    DispatchExecOptions options = {.stderr_mode = DISPATCH_EXEC_DEV_NULL};
+    DispatchExecResult result;
+    char *output = NULL;
+    int registered = 0;
+    if (dispatch_exec_capture(argv, &options, &output, NULL, &result) &&
+        dispatch_exec_result_success(&result)) {
+        const char *cursor = output;
+        while (*cursor) {
+            const char *end = strchr(cursor, '\n');
+            size_t length = end ? (size_t)(end - cursor) : strlen(cursor);
+            if (strlen(line) == length && strncmp(cursor, line, length) == 0) {
+                registered = 1;
+                break;
+            }
+            if (!end)
+                break;
+            cursor = end + 1;
+        }
     }
-    snprintf(command, size, format, repo_q, line_q);
-    int registered = run_shell_command_quiet(command);
-    free(repo_q);
+    free(output);
     free(line);
-    free(line_q);
-    free(command);
     return registered;
 }
 
 static int git_worktree_is_dirty(const char *workspace_path) {
-    char *workspace_q = shell_quote(workspace_path);
-    size_t size = strlen("git -C  status --porcelain 2>/dev/null") +
-                  strlen(workspace_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "git -C %s status --porcelain 2>/dev/null",
-             workspace_q);
-
-    FILE *pipe = popen(command, "r");
-    free(workspace_q);
-    free(command);
-    if (!pipe)
+    const char *argv[] = {"git", "-C", workspace_path, "status",
+                          "--porcelain", NULL};
+    DispatchExecOptions options = {.stderr_mode = DISPATCH_EXEC_DEV_NULL};
+    DispatchExecResult result;
+    char *output = NULL;
+    size_t output_size = 0;
+    if (!dispatch_exec_capture(argv, &options, &output, &output_size, &result))
         return 1;
-
-    int ch = fgetc(pipe);
-    int status = pclose(pipe);
-    return ch != EOF || status != 0;
+    int dirty = output_size > 0 || !dispatch_exec_result_success(&result);
+    free(output);
+    return dirty;
 }
 
 static int mark_workspace_active(const char *task_id) {

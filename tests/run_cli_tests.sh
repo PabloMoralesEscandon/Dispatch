@@ -133,6 +133,11 @@ cc $TEST_CFLAGS -Iinclude tests/workspace_naming_test.c src/dispatch.c \
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
 
+cc -Iinclude tests/exec_helper_test.c src/dispatch_exec.c \
+    -o "$TMP_ROOT/exec_helper_test"
+mkdir "$TMP_ROOT/exec helper cwd"
+"$TMP_ROOT/exec_helper_test" "$TMP_ROOT/exec helper cwd"
+
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
 mkdir repo
@@ -1408,8 +1413,12 @@ assert_contains "Commits: 1"
 assert_contains "Commit: abcdef1"
 
 expect_ok "$BIN" tui --diff-smoke DE-01
-assert_contains "git -C '"
-assert_contains "/repo' show 'abcdef1'"
+assert_line "argv[0]: git"
+assert_line "argv[1]: -C"
+assert_contains "argv[2]: "
+assert_contains "/repo"
+assert_line "argv[3]: show"
+assert_line "argv[4]: abcdef1"
 
 expect_fail "$BIN" tui --diff-smoke QA-01
 assert_contains "No commit metadata for QA-01"
