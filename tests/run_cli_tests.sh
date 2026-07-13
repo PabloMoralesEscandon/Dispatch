@@ -109,6 +109,11 @@ if [ ! -x ./nob ]; then
 fi
 ./nob $BUILD_MODE >/dev/null
 
+if grep -En '(^|[^[:alnum:]_])(system|popen|pclose)[[:space:]]*\(' \
+    src/*.c >/dev/null; then
+    fail "shell execution API remains in production source"
+fi
+
 # shellcheck disable=SC2086
 cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
     -ljansson -o "$TMP_ROOT/lock_primitive_test"
@@ -543,6 +548,72 @@ assert_contains "Could not delete DE-01"
 
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
+
+case_dir="$(make_case_dir "safe exec spaces")"
+cd "$case_dir"
+mkdir "repo with spaces"
+
+expect_ok "$BIN" init "repo with spaces"
+expect_ok git -C "repo with spaces" init
+printf 'safe exec marker\n' > "repo with spaces/marker.txt"
+expect_ok git -C "repo with spaces" add marker.txt
+expect_ok git -C "repo with spaces" -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit -m "safe exec marker"
+safe_exec_sha="$(git -C "repo with spaces" rev-parse HEAD)"
+
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Diff --no-review
+expect_ok "$BIN" task add DE Workspace --no-review
+expect_ok "$BIN" commit add DE-01 "$safe_exec_sha" --actor tester
+expect_ok "$BIN" ready DE-02 --actor user --no-review
+expect_ok "$BIN" agent create --name safe-agent --runner codex --no-run-script
+
+expect_ok "$BIN" tui --diff-exec-smoke DE-01
+assert_line "Diff status: 0"
+assert_contains "Diff bytes: "
+assert_line "Contains marker: yes"
+
+expect_ok "$BIN" workspace create DE-02 --actor safe-agent \
+    --dir "workspace with spaces" --branch agent/safe-agent/DE-02
+assert_contains "Created workspace DE-02 for safe-agent"
+if [ ! -e "workspace with spaces/.git" ]; then
+    fail "space-containing workspace was not created"
+fi
+expect_ok "$BIN" workspace show DE-02
+assert_contains "Path: $case_dir/workspace with spaces"
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "DE-02 ready active actor:safe-agent"
+assert_contains "dirty:no"
+
+printf 'untracked\n' > "workspace with spaces/untracked file.txt"
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "dirty:yes"
+expect_fail "$BIN" workspace remove DE-02
+assert_contains "Workspace has uncommitted changes"
+rm "workspace with spaces/untracked file.txt"
+expect_ok "$BIN" workspace remove DE-02
+assert_contains "Removed workspace DE-02"
+
+mkdir "fake tools"
+editor_capture="$case_dir/editor capture.txt"
+printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "%s" "$1" > "$EDITOR_CAPTURE"' > "fake tools/editor tool"
+chmod +x "fake tools/editor tool"
+EDITOR="'$case_dir/fake tools/editor tool'" \
+    EDITOR_CAPTURE="$editor_capture" \
+    expect_ok "$BIN" tui --prompt-edit-exec-smoke safe-agent
+assert_line "Editor status: 0"
+assert_file_contains "$editor_capture" \
+    ".dispatch/agents/safe-agent/safe-agent-PROMPT.md"
+
+tmux_capture="$case_dir/tmux capture.txt"
+printf '%s\n' '#!/usr/bin/env bash' \
+    'cat > "$TMUX_CAPTURE"' > "fake tools/tmux"
+chmod +x "fake tools/tmux"
+TMUX=1 TMUX_CAPTURE="$tmux_capture" PATH="$case_dir/fake tools:$PATH" \
+    expect_ok "$BIN" tui --tmux-copy-smoke 'literal ; $(not-run) with spaces'
+assert_line "Tmux copied: yes"
+assert_file_contains "$tmux_capture" 'literal ; $(not-run) with spaces'
 
 case_dir="$(make_case_dir json-output)"
 cd "$case_dir"

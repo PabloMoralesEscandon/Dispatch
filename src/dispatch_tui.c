@@ -5827,6 +5827,45 @@ static int tui_diff_smoke(const char *task_id) {
     return 0;
 }
 
+static int tui_diff_exec_smoke(const char *task_id) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui diff exec smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    DispatchExecArgv command = {0};
+    if (!task || !diff_argv_for_task(&board, task, 0, &command)) {
+        fprintf(stderr, "No commit metadata for %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    DispatchExecOptions options = {.merge_stderr_to_stdout = 1};
+    DispatchExecResult result;
+    char *output = NULL;
+    size_t output_size = 0;
+    int launched =
+        dispatch_exec_capture((const char *const *)command.items, &options,
+                              &output, &output_size, &result);
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    printf("Diff status: %d\n", status);
+    printf("Diff bytes: %zu\n", output_size);
+    printf("Contains marker: %s\n",
+           output && strstr(output, "safe exec marker") ? "yes" : "no");
+
+    free(output);
+    dispatch_exec_argv_free(&command);
+    dispatch_board_free(&board);
+    return launched && status == 0 && output_size > 0 ? 0 : 1;
+}
+
 static int tui_agents_smoke(void) {
     DispatchBoard board;
     char error[256] = {0};
@@ -5953,6 +5992,44 @@ static int tui_prompt_edit_smoke(const char *name) {
     dispatch_exec_argv_free(&command);
     dispatch_board_free(&board);
     return 0;
+}
+
+static int tui_prompt_edit_exec_smoke(const char *name) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui prompt edit exec smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    DispatchExecArgv command = {0};
+    if (!agent || !agent->prompt_path ||
+        !editor_argv_for_path(agent->prompt_path, &command, error,
+                              sizeof(error))) {
+        fprintf(stderr, "%s\n", error[0] ? error : "No matching agent prompt");
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    DispatchExecResult result;
+    int launched =
+        dispatch_exec_run((const char *const *)command.items, NULL, &result);
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    printf("Editor status: %d\n", status);
+    dispatch_exec_argv_free(&command);
+    dispatch_board_free(&board);
+    return launched && status == 0 ? 0 : 1;
+}
+
+static int tui_tmux_copy_smoke(const char *text) {
+    int copied = copy_command_to_tmux_buffer(text ? text : "");
+    printf("Tmux copied: %s\n", copied ? "yes" : "no");
+    return copied ? 0 : 1;
 }
 
 static int tui_agent_archive_smoke(const char *name, const char *action) {
@@ -6927,15 +7004,18 @@ static void print_tui_help(void) {
     puts("  --task-move-smoke <task-id> <group> [actor]");
     puts("  --task-move-options-smoke <current-group>");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
+    puts("  --diff-exec-smoke <task-id>  execute external diff and exit");
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
     puts("  --agent-set-session-smoke <name> <session|->");
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
+    puts("  --prompt-edit-exec-smoke <name>  execute prompt editor and exit");
     puts("  --agent-archive-smoke <name> archive|restore");
     puts("  --agent-selection-smoke enabled|all <selected-index>");
     puts("  --agent-run-command-smoke <name>");
     puts("  --osc52-smoke <text>        print OSC 52 payload metadata and exit");
+    puts("  --tmux-copy-smoke <text>    copy text through tmux stdin and exit");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --task-form-submit-smoke <group> <title> <description|-> review|no-review <deps|->");
@@ -6991,6 +7071,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_task_move_options_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--diff-smoke") == 0)
         return tui_diff_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--diff-exec-smoke") == 0)
+        return tui_diff_exec_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)
         return tui_agents_smoke();
     if (argc == 4 && strcmp(argv[2], "--agent-inspect-smoke") == 0)
@@ -7001,6 +7083,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_set_session_smoke(argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[2], "--prompt-edit-smoke") == 0)
         return tui_prompt_edit_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--prompt-edit-exec-smoke") == 0)
+        return tui_prompt_edit_exec_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--agent-archive-smoke") == 0)
         return tui_agent_archive_smoke(argv[3], argv[4]);
     if (argc == 5 && strcmp(argv[2], "--agent-selection-smoke") == 0)
@@ -7009,6 +7093,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_run_command_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--osc52-smoke") == 0)
         return tui_osc52_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--tmux-copy-smoke") == 0)
+        return tui_tmux_copy_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--create-group-smoke") == 0)
         return tui_create_group_smoke(argv[3], argv[4]);
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)
