@@ -1402,8 +1402,12 @@ assert_contains "Commits: 1"
 assert_contains "Commit: abcdef1"
 
 expect_ok "$BIN" tui --diff-smoke DE-01
-assert_contains "git -C '"
-assert_contains "/repo' show 'abcdef1'"
+assert_line "argv[0]: git"
+assert_line "argv[1]: -C"
+assert_contains "argv[2]: "
+assert_contains "/repo"
+assert_line "argv[3]: show"
+assert_line "argv[4]: abcdef1"
 
 expect_fail "$BIN" tui --diff-smoke QA-01
 assert_contains "No commit metadata for QA-01"

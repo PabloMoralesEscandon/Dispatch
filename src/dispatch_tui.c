@@ -14,6 +14,7 @@
 #include <jansson.h>
 
 #include "dispatch.h"
+#include "dispatch_exec.h"
 #include "dispatch_store.h"
 
 typedef enum {
@@ -1059,41 +1060,28 @@ static char *osc52_sequence_for_text(const char *text) {
     return sequence;
 }
 
-static char *diff_command_for_task(const DispatchBoard *board,
-                                   const DispatchTask *task) {
+static int diff_argv_for_task(const DispatchBoard *board,
+                              const DispatchTask *task, int force_color,
+                              DispatchExecArgv *argv) {
     if (!task || task->commits.count == 0)
-        return NULL;
-
-    char *repo_q = tui_shell_quote(board->repo_path ? board->repo_path : ".");
-
-    /* Quote every recorded commit so the diff covers the full task change set,
-     * not just the first commit. */
-    char **commit_q = calloc(task->commits.count, sizeof(char *));
-    if (!commit_q) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
+        return 0;
+    if (!dispatch_exec_argv_append(argv, "git") ||
+        !dispatch_exec_argv_append(argv, "-C") ||
+        !dispatch_exec_argv_append(
+            argv, board->repo_path ? board->repo_path : ".") ||
+        !dispatch_exec_argv_append(argv, "show") ||
+        (force_color &&
+         !dispatch_exec_argv_append(argv, "--color=always"))) {
+        dispatch_exec_argv_free(argv);
+        return 0;
     }
-    size_t size = strlen("git -C  show") + strlen(repo_q) + 1;
     for (size_t i = 0; i < task->commits.count; i++) {
-        commit_q[i] = tui_shell_quote(task->commits.items[i]);
-        size += strlen(" ") + strlen(commit_q[i]);
+        if (!dispatch_exec_argv_append(argv, task->commits.items[i])) {
+            dispatch_exec_argv_free(argv);
+            return 0;
+        }
     }
-
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    size_t out = 0;
-    out += snprintf(command + out, size - out, "git -C %s show", repo_q);
-    for (size_t i = 0; i < task->commits.count; i++)
-        out += snprintf(command + out, size - out, " %s", commit_q[i]);
-
-    for (size_t i = 0; i < task->commits.count; i++)
-        free(commit_q[i]);
-    free(commit_q);
-    free(repo_q);
-    return command;
+    return 1;
 }
 
 static int path_has_git_metadata(const char *path) {
@@ -1114,25 +1102,17 @@ static int workspace_is_dirty(const DispatchWorkspace *workspace) {
     if (!workspace || !workspace->path || !path_has_git_metadata(workspace->path))
         return 0;
 
-    char *path_q = tui_shell_quote(workspace->path);
-    size_t size = strlen("git -C  status --porcelain 2>/dev/null") +
-                  strlen(path_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "git -C %s status --porcelain 2>/dev/null",
-             path_q);
-    free(path_q);
-
-    FILE *pipe = popen(command, "r");
-    free(command);
-    if (!pipe)
+    const char *argv[] = {"git", "-C", workspace->path, "status",
+                          "--porcelain", NULL};
+    DispatchExecOptions options = {.stderr_mode = DISPATCH_EXEC_DEV_NULL};
+    DispatchExecResult result;
+    char *output = NULL;
+    size_t output_size = 0;
+    if (!dispatch_exec_capture(argv, &options, &output, &output_size, &result))
         return 1;
-    int ch = fgetc(pipe);
-    int status = pclose(pipe);
-    return ch != EOF || status != 0;
+    int dirty = output_size > 0 || !dispatch_exec_result_success(&result);
+    free(output);
+    return dirty;
 }
 
 static int command_available(const char *command);
@@ -1160,67 +1140,55 @@ static void run_selected_task_diff(DispatchTui *tui) {
         tui_set_status(tui, "git is not available to show the diff");
         return;
     }
-    char *diff = diff_command_for_task(&tui->board, task);
-    if (!diff) {
+    const char *pager = diff_pager();
+    DispatchExecArgv diff_argv = {0};
+    if (!diff_argv_for_task(&tui->board, task, pager != NULL, &diff_argv)) {
         tui_set_status(tui, "No commit metadata for selected task");
         return;
     }
 
-    /* Force color and route git's output, including any error message, through
-     * a pager so the diff stays on screen until the user quits it. Without a
-     * pager, fall back to running the diff directly. */
-    const char *pager = diff_pager();
-    char *command;
-    if (pager) {
-        size_t size = strlen(diff) + strlen(" --color=always 2>&1 | ") +
-                      strlen(pager) + 1;
-        command = malloc(size);
-        if (!command) {
-            fprintf(stderr, "Out of memory\n");
-            exit(1);
-        }
-        snprintf(command, size, "%s --color=always 2>&1 | %s", diff, pager);
-    } else {
-        command = diff;
+    DispatchExecArgv pager_argv = {0};
+    if (pager && !dispatch_exec_argv_parse(&pager_argv, pager)) {
+        dispatch_exec_argv_free(&diff_argv);
+        tui_set_status(tui, "Could not parse the pager command");
+        return;
     }
 
     def_prog_mode();
     endwin();
-    int result = system(command);
+    DispatchExecResult result;
+    int launched;
+    if (pager) {
+        DispatchExecOptions git_options = {.merge_stderr_to_stdout = 1};
+        launched = dispatch_exec_pipeline(
+            (const char *const *)diff_argv.items, &git_options,
+            (const char *const *)pager_argv.items, NULL, &result);
+    } else {
+        launched = dispatch_exec_run((const char *const *)diff_argv.items, NULL,
+                                     &result);
+    }
     reset_prog_mode();
     refresh();
 
-    if (command != diff)
-        free(command);
-
     char message[256];
-    if (result == -1)
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    if (!launched)
         snprintf(message, sizeof(message), "Could not run the diff command");
-    else if (result != 0)
+    else if (status != 0)
         snprintf(message, sizeof(message),
-                 "Diff viewer exited with status %d", result);
+                 "Diff viewer exited with status %d", status);
     else if (!pager)
         snprintf(message, sizeof(message),
                  "Showed diff without a pager; set $PAGER to keep it on screen");
     else
         snprintf(message, sizeof(message), "Closed diff");
     tui_set_status(tui, message);
-    free(diff);
+    dispatch_exec_argv_free(&pager_argv);
+    dispatch_exec_argv_free(&diff_argv);
 }
 
 static int command_available(const char *command) {
-    char *command_q = tui_shell_quote(command);
-    size_t size = strlen("command -v  >/dev/null 2>&1") + strlen(command_q) + 1;
-    char *check = malloc(size);
-    if (!check) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(check, size, "command -v %s >/dev/null 2>&1", command_q);
-    int ok = system(check) == 0;
-    free(command_q);
-    free(check);
-    return ok;
+    return dispatch_exec_command_available(command);
 }
 
 static const char *fallback_editor(void) {
@@ -5859,15 +5827,16 @@ static int tui_diff_smoke(const char *task_id) {
         return 1;
     }
 
-    char *command = diff_command_for_task(&board, task);
-    if (!command) {
+    DispatchExecArgv command = {0};
+    if (!diff_argv_for_task(&board, task, 0, &command)) {
         fprintf(stderr, "No commit metadata for %s\n", task_id);
         dispatch_board_free(&board);
         return 1;
     }
 
-    printf("%s\n", command);
-    free(command);
+    for (size_t i = 0; i < command.count; i++)
+        printf("argv[%zu]: %s\n", i, command.items[i]);
+    dispatch_exec_argv_free(&command);
     dispatch_board_free(&board);
     return 0;
 }
