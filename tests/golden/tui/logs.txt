@@ -1,0 +1,31 @@
+Frame: logs 100x30
+ DISPATCH   Logs                                                         actor:user  board:Dispatch
+
+10 entries   no filter
+
+  Time                 Actor          Command    Action       Target / Message
+ ><timestamp> golden         workspace  workspace_.. task:DE-01  Created workspace DE-01
+  <timestamp> user           agent      create       agent:codex-golden  Created agent code
+  <timestamp> user           ready      ready        task:QA-01  Readied QA-01
+  <timestamp> user           ready      ready        task:DE-01  Readied DE-01
+  <timestamp> user           dep        dependency.. Added dependency DE-01 -> QA-01
+  <timestamp> user           task       add          task:QA-01  Added task QA-01
+  <timestamp> user           task       add          task:DE-01  Added task DE-01
+  <timestamp> user           group      add          Added group Quality
+  <timestamp> user           group      add          Added group Development
+  <timestamp> user           init       init         Created dispatch.json
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Ready                                                      b board   F filter   C clear   j/k move

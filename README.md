@@ -409,6 +409,8 @@ Noninteractive acceptance hooks are available for tests and terminal smoke
 checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
 `--action-smoke`, `--diff-smoke`, `--agents-smoke`, `--workspaces-smoke`,
 `--logs-smoke`, `--palette-smoke`, and `--palette-complete-smoke`.
+`--render-smoke <screen> <cols> <rows> [keys]` renders through an ncurses
+virtual terminal and prints a normalized plain-text frame for headless tests.
 
 Tmux keymap validation:
 
@@ -760,10 +762,19 @@ Run the automated CLI tests:
 
 ```bash
 tests/run_cli_tests.sh
+tests/run_tui_golden_tests.sh
 ```
 
 The test runner builds Dispatch, creates temporary boards under `/tmp`, and
 checks command behavior through the CLI.
+
+The TUI golden runner creates a deterministic workflow fixture and compares
+normalized `100x30` frames for the main views, forms, and help overlay. Refresh
+the committed frames after an intentional rendering change with:
+
+```bash
+UPDATE_GOLDENS=1 tests/run_tui_golden_tests.sh
+```
 
 Current coverage includes initialization, groups, task creation, dependencies,
 blocked state, assignment lockout, finish/review lifecycle, ungated

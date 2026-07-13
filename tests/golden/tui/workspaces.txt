@@ -1,0 +1,31 @@
+Frame: workspaces 100x30
+ DISPATCH   Workspaces                                                   actor:user  board:Dispatch
+
+1 active workspaces
+
+  Task     State    WS        Actor                    Dirty Git     Branch / Path
+ >DE-01    ready    active    golden                   clean git     agent/golden/DE-01  <workspace>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Ready                                         b board   a agents   n create   x/X remove   P prune

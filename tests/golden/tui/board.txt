@@ -1,0 +1,31 @@
+Frame: board 100x30
+ DISPATCH   Board                                                        actor:user  board:Dispatch
+
+Tasks  1 ready   0 doing   0 review   1 blocked   0 done
+
+Repo <tmp>/workflow/repo    2 tasks (2 shown)    2 groups    1 agents    1
+View   not-done    1-7/R filter   G group   A actor   / search   c clear
+
+   DE  Development  1
+ >DE-01    ready    Render harness                                                         review
+   QA  Quality  1
+  QA-01    blocked  Golden assertions                                                      review
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Ready                          : palette   Tab/a agents   w workspaces   n task   + group   ? help
