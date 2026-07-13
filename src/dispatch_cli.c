@@ -2938,6 +2938,52 @@ static int cmd_task(int argc, char **argv) {
         return 0;
     }
 
+    if (argc >= 5 && strcmp(argv[2], "priority") == 0) {
+        const char *task_id = argv[3];
+        char *end = NULL;
+        long value = strtol(argv[4], &end, 10);
+        if (!end || *end != '\0' || value < -99 || value > 99) {
+            fprintf(stderr, "Priority must be an integer between -99 and 99\n");
+            return 1;
+        }
+        const char *actor = "user";
+        for (int i = 5; i < argc; i++) {
+            if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+                actor = argv[++i];
+            } else {
+                fprintf(stderr, "Unknown task priority option: %s\n", argv[i]);
+                return 1;
+            }
+        }
+
+        LockedBoard locked;
+        if (!locked_board_load_or_error(&locked))
+            return 1;
+        DispatchTask *task = dispatch_board_find_task(&locked.board, task_id);
+        if (!task || !dispatch_task_set_priority(task, (int)value, actor)) {
+            locked_board_close(&locked);
+            fprintf(stderr, "No task with id %s\n", task_id);
+            return 1;
+        }
+        if (!locked_board_save_or_error(&locked)) {
+            locked_board_close(&locked);
+            return 1;
+        }
+        printf("Set priority of %s to %d\n", task_id, (int)value);
+        DispatchLogField targets[] = {
+            {"task", task_id},
+        };
+        DispatchLogField context[] = {
+            {"priority", argv[4]},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Set priority of %s", task_id);
+        append_dispatch_log(actor, "task", "priority", targets, 1, context, 1,
+                            message);
+        locked_board_close(&locked);
+        return 0;
+    }
+
     if (argc < 5 || strcmp(argv[2], "add") != 0) {
         fprintf(stderr,
                 "Usage: dispatch task add <group> <title> [--description "
@@ -2947,6 +2993,8 @@ static int cmd_task(int argc, char **argv) {
         fprintf(stderr,
                 "       dispatch task move <id> <group> [--actor <name>]\n");
         fprintf(stderr, "       dispatch task delete <id> [--force]\n");
+        fprintf(stderr,
+                "       dispatch task priority <id> <value> [--actor <name>]\n");
         return 1;
     }
 
@@ -4110,6 +4158,8 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
     }
     if (task->commits.count > 0)
         printf("  %scommits:%zu%s", meta_color, task->commits.count, reset);
+    if (task->priority != 0)
+        printf("  %spriority:%d%s", meta_color, task->priority, reset);
     printf("\n");
 
     DispatchWorkspace *workspace = task_workspace(board, task->id, 1);
@@ -4119,16 +4169,37 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
     }
 }
 
+/* Order ready tasks by descending priority; ties keep board order so the
+ * listing stays stable for same-priority tasks. */
+static int ready_task_order_compare(const void *left, const void *right) {
+    const DispatchTask *a = *(const DispatchTask *const *)left;
+    const DispatchTask *b = *(const DispatchTask *const *)right;
+    if (a->priority != b->priority)
+        return b->priority - a->priority;
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+
 static int print_ready_tasks_from_board(const DispatchBoard *board,
                                         const char *indent) {
+    const DispatchTask **ready = NULL;
     int count = 0;
+    if (board->tasks.count > 0) {
+        ready = malloc(board->tasks.count * sizeof(*ready));
+        if (!ready) {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
+    }
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
         if (dispatch_task_effective_state(board, task) != DISPATCH_STATE_READY)
             continue;
-        print_task_line(board, task, indent);
-        count++;
+        ready[count++] = task;
     }
+    qsort(ready, (size_t)count, sizeof(*ready), ready_task_order_compare);
+    for (int i = 0; i < count; i++)
+        print_task_line(board, ready[i], indent);
+    free(ready);
     return count;
 }
 
@@ -4310,6 +4381,7 @@ static int cmd_show(int argc, char **argv) {
     printf("State: %s\n",
            dispatch_state_name(task_presentation_state(&board, task)));
     printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
+    printf("Priority: %d\n", task->priority);
     printf("Assigned to: %s\n", task->assigned_to ? task->assigned_to : "-");
     printf("Started by: %s\n", task->started_by ? task->started_by : "-");
     printf("Completed by: %s\n",

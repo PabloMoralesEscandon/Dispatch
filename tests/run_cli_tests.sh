@@ -1655,6 +1655,46 @@ assert_contains "Requires review: no"
 expect_ok "$BIN" show DE-05
 assert_contains "Requires review: no"
 
+# WX-02: task priority orders the ready listing (higher first, board order on
+# ties), persists, appears in show/list output, and validates its input.
+case_dir="$(make_case_dir task-priority)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Low
+expect_ok "$BIN" task add DE Urgent
+expect_ok "$BIN" task add DE Normal
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 --actor user
+expect_ok "$BIN" task priority DE-02 5 --actor user
+assert_contains "Set priority of DE-02 to 5"
+expect_ok "$BIN" task priority DE-01 -1 --actor user
+expect_ok "$BIN" show DE-02
+assert_contains "Priority: 5"
+assert_contains "priority by user: set to 5"
+expect_ok "$BIN" ready
+if ! printf '%s\n' "$RUN_OUTPUT" | sed -n '1p' | grep -q "DE-02"; then
+    fail "expected DE-02 (priority 5) first in ready listing"
+fi
+if ! printf '%s\n' "$RUN_OUTPUT" | sed -n '2p' | grep -q "DE-03"; then
+    fail "expected DE-03 (priority 0) second in ready listing"
+fi
+if ! printf '%s\n' "$RUN_OUTPUT" | sed -n '3p' | grep -q "DE-01"; then
+    fail "expected DE-01 (priority -1) last in ready listing"
+fi
+assert_contains "priority:5"
+expect_fail "$BIN" task priority DE-02 abc
+assert_contains "Priority must be an integer between -99 and 99"
+expect_fail "$BIN" task priority DE-02 100
+expect_fail "$BIN" task priority DE-99 5
+assert_contains "No task with id DE-99"
+# Priority survives a save/load round trip and shows in the JSON contract.
+expect_ok "$BIN" normalize
+expect_ok "$BIN" show DE-02
+assert_contains "Priority: 5"
+expect_ok "$BIN" ready --json
+assert_contains '"priority": 5'
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo

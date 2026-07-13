@@ -393,6 +393,7 @@ static json_t *task_to_json(const DispatchTask *task) {
 
     json_object_set_new(object, "requires_review",
                         json_boolean(task->requires_review));
+    json_object_set_new(object, "priority", json_integer(task->priority));
     json_object_set_new(object, "assigned_to",
                         task->assigned_to ? json_string(task->assigned_to)
                                           : json_null());
@@ -632,6 +633,9 @@ static int load_tasks(DispatchBoard *board, json_t *tasks, char *error,
         task.requires_review = json_is_boolean(requires_review)
                                    ? json_boolean_value(requires_review)
                                    : 1;
+        json_t *priority = json_object_get(value, "priority");
+        task.priority =
+            json_is_integer(priority) ? (int)json_integer_value(priority) : 0;
 
         const char *assigned_to = json_string_or(value, "assigned_to", NULL);
         const char *started_by = json_string_or(value, "started_by", NULL);
