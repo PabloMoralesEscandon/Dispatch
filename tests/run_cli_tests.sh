@@ -1453,6 +1453,61 @@ assert_contains "Action task: AA-02"
 assert_contains "Highlighted task: AA-02"
 assert_contains "Match: yes"
 
+# FX-06: view-specific keys only act on their own view. Filter presets,
+# lifecycle keys, and board refinements must be ignored on the agents,
+# workspaces, and logs screens; global navigation stays global.
+case_dir="$(make_case_dir tui-key-scope)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root
+expect_ok "$BIN" agent create --name codex-a --runner codex --no-run-script
+# Filter presets are board-only.
+expect_ok "$BIN" tui --key-smoke agents 3
+assert_contains "Screen: agents"
+assert_contains "Filter: not-done"
+expect_ok "$BIN" tui --key-smoke logs 2
+assert_contains "Filter: not-done"
+expect_ok "$BIN" tui --key-smoke workspaces R
+assert_contains "Filter: not-done"
+expect_ok "$BIN" tui --key-smoke board 3
+assert_contains "Filter: ready"
+# Search is board-only.
+expect_ok "$BIN" tui --key-smoke agents /
+assert_contains "Search active: no"
+expect_ok "$BIN" tui --key-smoke board /
+assert_contains "Search active: yes"
+# Board refinement keys are ignored off the board.
+expect_ok "$BIN" tui --key-smoke logs G
+assert_contains "Screen: logs"
+expect_ok "$BIN" tui --key-smoke workspaces c
+assert_contains "Screen: workspaces"
+# Lifecycle keys must not mutate tasks from non-task screens.
+expect_ok "$BIN" tui --key-smoke logs r
+assert_not_contains "Readied"
+expect_ok "$BIN" tui --key-smoke agents r
+assert_not_contains "Readied"
+expect_ok "$BIN" tui --key-smoke workspaces s
+assert_not_contains "Started"
+expect_ok "$BIN" show DE-01
+assert_contains "State: proposed"
+# The same keys still work on the board and in the task inspector.
+expect_ok "$BIN" tui --key-smoke board r
+assert_contains "Readied DE-01"
+expect_ok "$BIN" show DE-01
+assert_contains "State: ready"
+expect_ok "$BIN" tui --key-smoke board is
+assert_contains "Screen: task"
+assert_contains "Started DE-01"
+expect_ok "$BIN" show DE-01
+assert_contains "State: doing"
+# Global navigation works from any screen.
+expect_ok "$BIN" tui --key-smoke logs b
+assert_contains "Screen: board"
+expect_ok "$BIN" tui --key-smoke workspaces a
+assert_contains "Screen: agents"
+
 # FX-03: init resolves repo_path to an absolute path, rejects missing paths,
 # and `dispatch repo set` repairs the stored path without recreating the board.
 case_dir="$(make_case_dir repo-path)"

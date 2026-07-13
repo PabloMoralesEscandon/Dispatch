@@ -4594,6 +4594,309 @@ static void tui_render(DispatchTui *tui) {
     refresh();
 }
 
+/* Handle one top-level key press. View-specific controls only take
+ * effect on their own screen; global keys (quit, help, palette, view
+ * navigation) work everywhere. Extracted from the input loop so key
+ * scoping can be exercised headlessly by --key-smoke. */
+static void tui_handle_key(DispatchTui *tui, int ch) {
+    switch (ch) {
+    case 'q':
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
+            tui->inspected_task_id[0] = '\0';
+            tui->screen = TUI_SCREEN_BOARD;
+        } else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            tui->screen = TUI_SCREEN_AGENTS;
+        else if (tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
+            tui->screen = TUI_SCREEN_WORKSPACES;
+        else
+            tui_set_status(tui, "Use :q or Ctrl+C to quit");
+        break;
+    case '\t':
+        tui->screen = tui->screen == TUI_SCREEN_AGENTS ? TUI_SCREEN_BOARD
+                                                     : TUI_SCREEN_AGENTS;
+        break;
+    case 'a':
+        tui->screen = TUI_SCREEN_AGENTS;
+        break;
+    case 'b':
+        tui->screen = TUI_SCREEN_BOARD;
+        break;
+    case 'w':
+        tui->screen = TUI_SCREEN_WORKSPACES;
+        break;
+    case 'l':
+        tui->screen = TUI_SCREEN_LOGS;
+        break;
+    case 'L':
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            show_selected_task_logs(tui);
+        else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            show_selected_agent_logs(tui);
+        else
+            tui->screen = TUI_SCREEN_LOGS;
+        break;
+    case '\n':
+    case KEY_ENTER:
+    case 'i':
+        if (tui->screen == TUI_SCREEN_BOARD && selected_visible_task(tui)) {
+            tui->inspected_task_id[0] = '\0';
+            tui->screen = TUI_SCREEN_TASK_INSPECTOR;
+            tui_set_status(tui, "Inspecting task");
+        } else if (tui->screen == TUI_SCREEN_AGENTS && selected_agent(tui)) {
+            tui->screen = TUI_SCREEN_AGENT_INSPECTOR;
+            tui_set_status(tui, "Inspecting agent");
+        } else if (tui->screen == TUI_SCREEN_WORKSPACES &&
+                   selected_visible_workspace(tui)) {
+            tui->screen = TUI_SCREEN_WORKSPACE_INSPECTOR;
+            tui_set_status(tui, "Inspecting workspace");
+        }
+        break;
+    case '?':
+    case 'h':
+        tui->show_help = !tui->show_help;
+        break;
+    case ':':
+        run_command_palette(tui);
+        break;
+    case '1':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_NOT_DONE);
+        break;
+    case '2':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_ALL);
+        break;
+    case '3':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_READY);
+        break;
+    case '4':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_BLOCKED);
+        break;
+    case '5':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_REVIEW);
+        break;
+    case '6':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_DOING);
+        break;
+    case '7':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_DONE);
+        break;
+    case 'R':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            set_filter(tui, TUI_FILTER_ATTENTION);
+        break;
+    case 'r':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_action(tui, TUI_ACTION_READY);
+        break;
+    case 'n':
+        if (tui->screen == TUI_SCREEN_BOARD) {
+            tui->screen = TUI_SCREEN_TASK_FORM;
+            run_task_form(tui);
+            tui->screen = TUI_SCREEN_BOARD;
+        } else if (tui->screen == TUI_SCREEN_AGENTS) {
+            tui->screen = TUI_SCREEN_AGENT_FORM;
+            run_agent_form(tui);
+            tui->screen = TUI_SCREEN_AGENTS;
+        } else if (tui->screen == TUI_SCREEN_WORKSPACES) {
+            run_workspace_create_form(tui);
+        }
+        break;
+    case '+':
+        if (tui->screen == TUI_SCREEN_BOARD) {
+            tui->screen = TUI_SCREEN_GROUP_FORM;
+            run_group_form(tui);
+            tui->screen = TUI_SCREEN_BOARD;
+        }
+        break;
+    case '>':
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_dependency_prompt(tui, 1);
+        break;
+    case '<':
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_dependency_prompt(tui, 0);
+        break;
+    case 's':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_action(tui, TUI_ACTION_START);
+        break;
+    case 'S':
+        if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            set_selected_agent_session(tui);
+        break;
+    case 'f':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_action(tui, TUI_ACTION_FINISH);
+        break;
+    case 'v':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_action(tui, TUI_ACTION_REVIEW);
+        break;
+    case 'd':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_diff(tui);
+        break;
+    case 'x':
+        if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            clear_selected_agent_session(tui);
+        else if (tui->screen == TUI_SCREEN_WORKSPACES ||
+                 tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
+            run_workspace_remove_form(tui, 0);
+        break;
+    case 'X':
+        if (tui->screen == TUI_SCREEN_WORKSPACES ||
+            tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
+            run_workspace_remove_form(tui, 1);
+        break;
+    case 'P':
+        if (tui->screen == TUI_SCREEN_WORKSPACES)
+            run_workspace_prune_form(tui);
+        break;
+    case 'e':
+        if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            edit_selected_agent_prompt(tui);
+        break;
+    case 'z':
+        if (tui->screen == TUI_SCREEN_AGENTS ||
+            tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            toggle_selected_agent_archived(tui);
+        break;
+    case 'y':
+        if (tui->screen == TUI_SCREEN_AGENTS ||
+            tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+            copy_selected_agent_run_command(tui);
+        break;
+    case 'G':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            cycle_group_filter(tui);
+        break;
+    case 'F':
+        if (tui->screen == TUI_SCREEN_LOGS)
+            run_log_filter_form(tui);
+        break;
+    case 'A':
+        if (tui->screen == TUI_SCREEN_AGENTS) {
+            tui->show_archived_agents = !tui->show_archived_agents;
+            tui->agent_top = 0;
+            clamp_agent_selection(tui);
+            tui_set_status(tui, tui->show_archived_agents
+                                    ? "Showing all agents"
+                                    : "Showing enabled agents");
+        } else if (tui->screen == TUI_SCREEN_BOARD) {
+            cycle_actor_filter(tui);
+        }
+        break;
+    case 'c':
+        if (tui->screen == TUI_SCREEN_BOARD)
+            clear_secondary_filters(tui);
+        break;
+    case 'C':
+        if (tui->screen == TUI_SCREEN_LOGS)
+            set_log_filter(tui, "", "");
+        break;
+    case '/':
+        if (tui->screen == TUI_SCREEN_BOARD) {
+            tui->search_active = 1;
+            tui_set_status(tui, "Search");
+        }
+        break;
+    case 27:
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
+            tui->inspected_task_id[0] = '\0';
+            tui->screen = TUI_SCREEN_BOARD;
+            tui_set_status(tui, "Board");
+        } else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR) {
+            tui->screen = TUI_SCREEN_AGENTS;
+            tui_set_status(tui, "Agents");
+        } else if (tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR) {
+            tui->screen = TUI_SCREEN_WORKSPACES;
+            tui_set_status(tui, "Workspaces");
+        } else {
+            tui->search_active = 0;
+            tui->search[0] = '\0';
+            tui->selected_task = 0;
+            tui->task_top = 0;
+            tui_set_status(tui, "Search cleared");
+        }
+        break;
+    case KEY_UP:
+    case 'k':
+        if (tui->screen == TUI_SCREEN_AGENTS) {
+            tui->selected_agent--;
+            clamp_agent_selection(tui);
+        } else if (tui->screen == TUI_SCREEN_WORKSPACES) {
+            tui->selected_workspace--;
+            clamp_workspace_selection(tui);
+        } else if (tui->screen == TUI_SCREEN_LOGS) {
+            tui->selected_log--;
+            clamp_log_selection(tui);
+        } else {
+            tui->selected_task--;
+            clamp_selection(tui);
+        }
+        break;
+    case KEY_DOWN:
+    case 'j':
+        if (tui->screen == TUI_SCREEN_AGENTS) {
+            tui->selected_agent++;
+            clamp_agent_selection(tui);
+        } else if (tui->screen == TUI_SCREEN_WORKSPACES) {
+            tui->selected_workspace++;
+            clamp_workspace_selection(tui);
+        } else if (tui->screen == TUI_SCREEN_LOGS) {
+            tui->selected_log++;
+            clamp_log_selection(tui);
+        } else {
+            tui->selected_task++;
+            clamp_selection(tui);
+        }
+        break;
+    case 'u':
+        tui_load_board(tui);
+        clamp_selection(tui);
+        clamp_agent_selection(tui);
+        clamp_workspace_selection(tui);
+        clamp_log_selection(tui);
+        break;
+    case KEY_RESIZE:
+        tui_set_status(tui, "Resized");
+        break;
+    case KEY_BACKSPACE:
+    case 127:
+    case '\b':
+        if (tui->search_active && strlen(tui->search) > 0) {
+            tui->search[strlen(tui->search) - 1] = '\0';
+            tui->selected_task = 0;
+            tui->task_top = 0;
+        }
+        break;
+    default:
+        if (tui->search_active && ch >= 0 && ch < 256 &&
+            isprint((unsigned char)ch)) {
+            size_t len = strlen(tui->search);
+            if (len + 1 < sizeof(tui->search)) {
+                tui->search[len] = (char)ch;
+                tui->search[len + 1] = '\0';
+                tui->selected_task = 0;
+                tui->task_top = 0;
+            }
+        }
+        break;
+    }
+
+}
+
 static int tui_run(void) {
     DispatchTui tui;
     tui_init(&tui);
@@ -4646,279 +4949,7 @@ static int tui_run(void) {
         }
         if (handle_search_key(&tui, ch))
             continue;
-        switch (ch) {
-        case 'q':
-            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
-                tui.inspected_task_id[0] = '\0';
-                tui.screen = TUI_SCREEN_BOARD;
-            } else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                tui.screen = TUI_SCREEN_AGENTS;
-            else if (tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
-                tui.screen = TUI_SCREEN_WORKSPACES;
-            else
-                tui_set_status(&tui, "Use :q or Ctrl+C to quit");
-            break;
-        case '\t':
-            tui.screen = tui.screen == TUI_SCREEN_AGENTS ? TUI_SCREEN_BOARD
-                                                         : TUI_SCREEN_AGENTS;
-            break;
-        case 'a':
-            tui.screen = TUI_SCREEN_AGENTS;
-            break;
-        case 'b':
-            tui.screen = TUI_SCREEN_BOARD;
-            break;
-        case 'w':
-            tui.screen = TUI_SCREEN_WORKSPACES;
-            break;
-        case 'l':
-            tui.screen = TUI_SCREEN_LOGS;
-            break;
-        case 'L':
-            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
-                show_selected_task_logs(&tui);
-            else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                show_selected_agent_logs(&tui);
-            else
-                tui.screen = TUI_SCREEN_LOGS;
-            break;
-        case '\n':
-        case KEY_ENTER:
-        case 'i':
-            if (tui.screen == TUI_SCREEN_BOARD && selected_visible_task(&tui)) {
-                tui.inspected_task_id[0] = '\0';
-                tui.screen = TUI_SCREEN_TASK_INSPECTOR;
-                tui_set_status(&tui, "Inspecting task");
-            } else if (tui.screen == TUI_SCREEN_AGENTS && selected_agent(&tui)) {
-                tui.screen = TUI_SCREEN_AGENT_INSPECTOR;
-                tui_set_status(&tui, "Inspecting agent");
-            } else if (tui.screen == TUI_SCREEN_WORKSPACES &&
-                       selected_visible_workspace(&tui)) {
-                tui.screen = TUI_SCREEN_WORKSPACE_INSPECTOR;
-                tui_set_status(&tui, "Inspecting workspace");
-            }
-            break;
-        case '?':
-        case 'h':
-            tui.show_help = !tui.show_help;
-            break;
-        case ':':
-            run_command_palette(&tui);
-            break;
-        case '1':
-            set_filter(&tui, TUI_FILTER_NOT_DONE);
-            break;
-        case '2':
-            set_filter(&tui, TUI_FILTER_ALL);
-            break;
-        case '3':
-            set_filter(&tui, TUI_FILTER_READY);
-            break;
-        case '4':
-            set_filter(&tui, TUI_FILTER_BLOCKED);
-            break;
-        case '5':
-            set_filter(&tui, TUI_FILTER_REVIEW);
-            break;
-        case '6':
-            set_filter(&tui, TUI_FILTER_DOING);
-            break;
-        case '7':
-            set_filter(&tui, TUI_FILTER_DONE);
-            break;
-        case 'R':
-            set_filter(&tui, TUI_FILTER_ATTENTION);
-            break;
-        case 'r':
-            run_selected_task_action(&tui, TUI_ACTION_READY);
-            break;
-        case 'n':
-            if (tui.screen == TUI_SCREEN_BOARD) {
-                tui.screen = TUI_SCREEN_TASK_FORM;
-                run_task_form(&tui);
-                tui.screen = TUI_SCREEN_BOARD;
-            } else if (tui.screen == TUI_SCREEN_AGENTS) {
-                tui.screen = TUI_SCREEN_AGENT_FORM;
-                run_agent_form(&tui);
-                tui.screen = TUI_SCREEN_AGENTS;
-            } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
-                run_workspace_create_form(&tui);
-            }
-            break;
-        case '+':
-            if (tui.screen == TUI_SCREEN_BOARD) {
-                tui.screen = TUI_SCREEN_GROUP_FORM;
-                run_group_form(&tui);
-                tui.screen = TUI_SCREEN_BOARD;
-            }
-            break;
-        case '>':
-            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
-                run_dependency_prompt(&tui, 1);
-            break;
-        case '<':
-            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR)
-                run_dependency_prompt(&tui, 0);
-            break;
-        case 's':
-            run_selected_task_action(&tui, TUI_ACTION_START);
-            break;
-        case 'S':
-            if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                set_selected_agent_session(&tui);
-            break;
-        case 'f':
-            run_selected_task_action(&tui, TUI_ACTION_FINISH);
-            break;
-        case 'v':
-            run_selected_task_action(&tui, TUI_ACTION_REVIEW);
-            break;
-        case 'd':
-            run_selected_task_diff(&tui);
-            break;
-        case 'x':
-            if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                clear_selected_agent_session(&tui);
-            else if (tui.screen == TUI_SCREEN_WORKSPACES ||
-                     tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
-                run_workspace_remove_form(&tui, 0);
-            break;
-        case 'X':
-            if (tui.screen == TUI_SCREEN_WORKSPACES ||
-                tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
-                run_workspace_remove_form(&tui, 1);
-            break;
-        case 'P':
-            if (tui.screen == TUI_SCREEN_WORKSPACES)
-                run_workspace_prune_form(&tui);
-            break;
-        case 'e':
-            if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                edit_selected_agent_prompt(&tui);
-            break;
-        case 'z':
-            if (tui.screen == TUI_SCREEN_AGENTS ||
-                tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                toggle_selected_agent_archived(&tui);
-            break;
-        case 'y':
-            if (tui.screen == TUI_SCREEN_AGENTS ||
-                tui.screen == TUI_SCREEN_AGENT_INSPECTOR)
-                copy_selected_agent_run_command(&tui);
-            break;
-        case 'G':
-            cycle_group_filter(&tui);
-            break;
-        case 'F':
-            if (tui.screen == TUI_SCREEN_LOGS)
-                run_log_filter_form(&tui);
-            break;
-        case 'A':
-            if (tui.screen == TUI_SCREEN_AGENTS) {
-                tui.show_archived_agents = !tui.show_archived_agents;
-                tui.agent_top = 0;
-                clamp_agent_selection(&tui);
-                tui_set_status(&tui, tui.show_archived_agents
-                                        ? "Showing all agents"
-                                        : "Showing enabled agents");
-            } else {
-                cycle_actor_filter(&tui);
-            }
-            break;
-        case 'c':
-            clear_secondary_filters(&tui);
-            break;
-        case 'C':
-            if (tui.screen == TUI_SCREEN_LOGS)
-                set_log_filter(&tui, "", "");
-            break;
-        case '/':
-            tui.search_active = 1;
-            tui_set_status(&tui, "Search");
-            break;
-        case 27:
-            if (tui.screen == TUI_SCREEN_TASK_INSPECTOR) {
-                tui.inspected_task_id[0] = '\0';
-                tui.screen = TUI_SCREEN_BOARD;
-                tui_set_status(&tui, "Board");
-            } else if (tui.screen == TUI_SCREEN_AGENT_INSPECTOR) {
-                tui.screen = TUI_SCREEN_AGENTS;
-                tui_set_status(&tui, "Agents");
-            } else if (tui.screen == TUI_SCREEN_WORKSPACE_INSPECTOR) {
-                tui.screen = TUI_SCREEN_WORKSPACES;
-                tui_set_status(&tui, "Workspaces");
-            } else {
-                tui.search_active = 0;
-                tui.search[0] = '\0';
-                tui.selected_task = 0;
-                tui.task_top = 0;
-                tui_set_status(&tui, "Search cleared");
-            }
-            break;
-        case KEY_UP:
-        case 'k':
-            if (tui.screen == TUI_SCREEN_AGENTS) {
-                tui.selected_agent--;
-                clamp_agent_selection(&tui);
-            } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
-                tui.selected_workspace--;
-                clamp_workspace_selection(&tui);
-            } else if (tui.screen == TUI_SCREEN_LOGS) {
-                tui.selected_log--;
-                clamp_log_selection(&tui);
-            } else {
-                tui.selected_task--;
-                clamp_selection(&tui);
-            }
-            break;
-        case KEY_DOWN:
-        case 'j':
-            if (tui.screen == TUI_SCREEN_AGENTS) {
-                tui.selected_agent++;
-                clamp_agent_selection(&tui);
-            } else if (tui.screen == TUI_SCREEN_WORKSPACES) {
-                tui.selected_workspace++;
-                clamp_workspace_selection(&tui);
-            } else if (tui.screen == TUI_SCREEN_LOGS) {
-                tui.selected_log++;
-                clamp_log_selection(&tui);
-            } else {
-                tui.selected_task++;
-                clamp_selection(&tui);
-            }
-            break;
-        case 'u':
-            tui_load_board(&tui);
-            clamp_selection(&tui);
-            clamp_agent_selection(&tui);
-            clamp_workspace_selection(&tui);
-            clamp_log_selection(&tui);
-            break;
-        case KEY_RESIZE:
-            tui_set_status(&tui, "Resized");
-            break;
-        case KEY_BACKSPACE:
-        case 127:
-        case '\b':
-            if (tui.search_active && strlen(tui.search) > 0) {
-                tui.search[strlen(tui.search) - 1] = '\0';
-                tui.selected_task = 0;
-                tui.task_top = 0;
-            }
-            break;
-        default:
-            if (tui.search_active && ch >= 0 && ch < 256 &&
-                isprint((unsigned char)ch)) {
-                size_t len = strlen(tui.search);
-                if (len + 1 < sizeof(tui.search)) {
-                    tui.search[len] = (char)ch;
-                    tui.search[len + 1] = '\0';
-                    tui.selected_task = 0;
-                    tui.task_top = 0;
-                }
-            }
-            break;
-        }
+        tui_handle_key(&tui, ch);
     }
 
     endwin();
@@ -5787,6 +5818,55 @@ static const char *screen_name(DispatchTuiScreen screen) {
     return "board";
 }
 
+static int parse_screen_name(const char *name, DispatchTuiScreen *screen) {
+    if (strcmp(name, "board") == 0) {
+        *screen = TUI_SCREEN_BOARD;
+    } else if (strcmp(name, "task") == 0) {
+        *screen = TUI_SCREEN_TASK_INSPECTOR;
+    } else if (strcmp(name, "agents") == 0) {
+        *screen = TUI_SCREEN_AGENTS;
+    } else if (strcmp(name, "agent") == 0) {
+        *screen = TUI_SCREEN_AGENT_INSPECTOR;
+    } else if (strcmp(name, "workspaces") == 0) {
+        *screen = TUI_SCREEN_WORKSPACES;
+    } else if (strcmp(name, "workspace") == 0) {
+        *screen = TUI_SCREEN_WORKSPACE_INSPECTOR;
+    } else if (strcmp(name, "logs") == 0) {
+        *screen = TUI_SCREEN_LOGS;
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+/* Feed keys through the real top-level key handler starting on a given
+ * screen, then report the state a render would use. Exercises per-view key
+ * scoping without ncurses. */
+static int tui_key_smoke(const char *screen_arg, const char *keys) {
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!parse_screen_name(screen_arg, &tui.screen)) {
+        fprintf(stderr, "Unknown TUI screen %s\n", screen_arg);
+        return 1;
+    }
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+
+    for (size_t i = 0; keys && keys[i] != '\0'; i++)
+        tui_handle_key(&tui, (unsigned char)keys[i]);
+
+    printf("Screen: %s\n", screen_name(tui.screen));
+    printf("Filter: %s\n", filter_name(tui.filter));
+    printf("Search active: %s\n", tui.search_active ? "yes" : "no");
+    printf("Status: %s\n", tui.status);
+    DispatchTask *task = selected_visible_task(&tui);
+    printf("Selected task: %s\n", task ? task->id : "-");
+    tui_free_board(&tui);
+    return 0;
+}
+
 static int tui_palette_smoke(const char *command) {
     DispatchTui tui;
     tui_init(&tui);
@@ -5936,6 +6016,7 @@ static void print_tui_help(void) {
     puts("  --logs-window-smoke <visible-rows> <selected-index> [field value]");
     puts("  --scroll-smoke board|agents|workspaces|logs <visible-rows> <selected-index>");
     puts("  --selection-smoke <filter> <selected-index>  verify highlight and action task match");
+    puts("  --key-smoke <screen> <keys>  feed keys to the input handler on a screen");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
@@ -6015,6 +6096,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_scroll_smoke(argv[3], atoi(argv[4]), atoi(argv[5]));
     if (argc == 5 && strcmp(argv[2], "--selection-smoke") == 0)
         return tui_selection_smoke(argv[3], atoi(argv[4]));
+    if (argc == 5 && strcmp(argv[2], "--key-smoke") == 0)
+        return tui_key_smoke(argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)
