@@ -88,6 +88,13 @@ typedef struct {
     char status[256];
 } TuiTaskForm;
 
+typedef struct {
+    char title[256];
+    char description[512];
+    int active_field;
+    char status[256];
+} TuiTaskEditForm;
+
 enum {
     TUI_TASK_FORM_GROUP = 0,
     TUI_TASK_FORM_TITLE = 1,
@@ -95,6 +102,12 @@ enum {
     TUI_TASK_FORM_DEPS = 3,
     TUI_TASK_FORM_REVIEW = 4,
     TUI_TASK_FORM_FIELD_COUNT = 5,
+};
+
+enum {
+    TUI_TASK_EDIT_TITLE = 0,
+    TUI_TASK_EDIT_DESCRIPTION = 1,
+    TUI_TASK_EDIT_FIELD_COUNT = 2,
 };
 
 typedef struct {
@@ -1538,6 +1551,122 @@ static int mutate_task(const char *task_id, const char *actor,
     return 1;
 }
 
+static int mutate_task_content(const char *task_id, const char *title,
+                               const char *description, const char *actor,
+                               char *message, size_t message_size) {
+    if (!title || !title[0]) {
+        snprintf(message, message_size, "Task title is required");
+        return 0;
+    }
+    if (title_starts_with_dispatch_id_like(title)) {
+        snprintf(message, message_size, "Task title should not include an ID");
+        return 0;
+    }
+
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        snprintf(message, message_size, "No task with id %s", task_id);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    if (!dispatch_task_set_title(task, title) ||
+        !dispatch_task_set_description(task, description) ||
+        !dispatch_task_append_history(task, actor, "edited",
+                                      "title and description") ||
+        !dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not edit task");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "Edited task %s", task_id);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
+static int mutate_task_group(const char *task_id, const char *group_id,
+                             const char *actor, char *message,
+                             size_t message_size) {
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    DispatchGroup *group = dispatch_board_find_group(&board, group_id);
+    if (!task || !group) {
+        snprintf(message, message_size, "%s",
+                 !task ? "Task not found" : "Group not found");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+    if (strcmp(task->group, group->id) == 0) {
+        snprintf(message, message_size, "Task %s already belongs to group %s",
+                 task_id, group->prefix);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    char from_group[32];
+    snprintf(from_group, sizeof(from_group), "%s", task->group);
+    if (!dispatch_task_move_to_group(&board, task, group->id, actor) ||
+        !dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not move task");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "Moved task %s from %s to %s", task_id,
+             from_group, group->id);
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
 static int create_group(const char *name, const char *prefix, char *message,
                         size_t message_size) {
     if (!name || !name[0]) {
@@ -1944,6 +2073,24 @@ static size_t task_form_group_options(const DispatchBoard *board,
     size_t count = 0;
     for (size_t i = 0; board && i < board->groups.count && count < max; i++) {
         const DispatchGroup *group = &board->groups.items[i];
+        snprintf(out[count].value, sizeof(out[count].value), "%s",
+                 group->prefix ? group->prefix : "");
+        snprintf(out[count].label, sizeof(out[count].label), "%-4s %s",
+                 group->prefix ? group->prefix : "",
+                 group->name ? group->name : "");
+        count++;
+    }
+    return count;
+}
+
+static size_t task_move_group_options(const DispatchBoard *board,
+                                      const char *current_group,
+                                      TuiTaskFormOption *out, size_t max) {
+    size_t count = 0;
+    for (size_t i = 0; board && i < board->groups.count && count < max; i++) {
+        const DispatchGroup *group = &board->groups.items[i];
+        if (current_group && strcmp(group->id, current_group) == 0)
+            continue;
         snprintf(out[count].value, sizeof(out[count].value), "%s",
                  group->prefix ? group->prefix : "");
         snprintf(out[count].label, sizeof(out[count].label), "%-4s %s",
@@ -2362,6 +2509,197 @@ static void run_task_form(DispatchTui *tui) {
     }
     curs_set(0);
     timeout(1000);
+}
+
+static void task_edit_form_buffer(TuiTaskEditForm *form, char **buffer,
+                                  size_t *buffer_size) {
+    if (form->active_field == TUI_TASK_EDIT_TITLE) {
+        *buffer = form->title;
+        *buffer_size = sizeof(form->title);
+    } else {
+        *buffer = form->description;
+        *buffer_size = sizeof(form->description);
+    }
+}
+
+static void render_task_edit_form(DispatchTui *tui,
+                                  const TuiTaskEditForm *form,
+                                  const char *task_id) {
+    int rows = 0;
+    int cols = 0;
+    getmaxyx(stdscr, rows, cols);
+    erase();
+    draw_title_bar(tui, "Edit Task");
+
+    if (rows < 16 || cols < 50) {
+        draw_truncated(2, 0, cols, "Terminal too small for task editor.");
+        draw_truncated(3, 0, cols, "Resize to at least 50x16.");
+        refresh();
+        return;
+    }
+
+    int width = cols - 4;
+    if (width > 76)
+        width = 76;
+    int left = (cols - width) / 2;
+    int desc_height = rows >= 22 ? 7 : 5;
+
+    char heading[256];
+    snprintf(heading, sizeof(heading), "Editing %s as %s", task_id,
+             tui->actor);
+    if (tui_colors_enabled)
+        attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    draw_truncated(1, left, width, heading);
+    if (tui_colors_enabled)
+        attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+
+    draw_task_form_box(3, left, width, 3, "Title", form->title,
+                       form->active_field == TUI_TASK_EDIT_TITLE);
+    draw_task_form_box(7, left, width, desc_height, "Description",
+                       form->description,
+                       form->active_field == TUI_TASK_EDIT_DESCRIPTION);
+    draw_footer(form->status[0] ? form->status : "Edit task",
+                "Enter next/save   Tab move   Esc cancel");
+
+    const char *buffer = form->active_field == TUI_TASK_EDIT_TITLE
+                             ? form->title
+                             : form->description;
+    int height = form->active_field == TUI_TASK_EDIT_TITLE ? 3 : desc_height;
+    int y = form->active_field == TUI_TASK_EDIT_TITLE ? 3 : 7;
+    int inner_width = width - 4;
+    if (inner_width > 0) {
+        size_t len = strlen(buffer);
+        int max_pos = inner_width * (height - 2) - 1;
+        int pos = (int)(len > (size_t)max_pos ? (size_t)max_pos : len);
+        move(y + 2 + pos / inner_width, left + 2 + pos % inner_width);
+    }
+    refresh();
+}
+
+static void handle_task_edit_form_key(TuiTaskEditForm *form, int ch,
+                                      int *submit, int *cancel) {
+    *submit = 0;
+    *cancel = 0;
+    if (ch == 27) {
+        *cancel = 1;
+        return;
+    }
+    if (ch == '\t' || ch == KEY_DOWN || ch == KEY_UP) {
+        form->active_field =
+            (form->active_field + 1) % TUI_TASK_EDIT_FIELD_COUNT;
+        return;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        if (form->active_field == TUI_TASK_EDIT_DESCRIPTION)
+            *submit = 1;
+        else
+            form->active_field = TUI_TASK_EDIT_DESCRIPTION;
+        return;
+    }
+
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    task_edit_form_buffer(form, &buffer, &buffer_size);
+    size_t len = strlen(buffer);
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        if (len > 0)
+            buffer[len - 1] = '\0';
+    } else if (ch == 21) {
+        buffer[0] = '\0';
+    } else if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
+               len + 1 < buffer_size) {
+        buffer[len] = (char)ch;
+        buffer[len + 1] = '\0';
+    }
+}
+
+static int task_edit_form_submit(const char *task_id,
+                                 const TuiTaskEditForm *form,
+                                 const char *actor, char *message,
+                                 size_t message_size) {
+    return mutate_task_content(task_id, form->title, form->description, actor,
+                               message, message_size);
+}
+
+static void run_task_edit_form(DispatchTui *tui) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+
+    char task_id[64];
+    snprintf(task_id, sizeof(task_id), "%s", task->id);
+    TuiTaskEditForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.title, sizeof(form.title), "%s", task->title);
+    snprintf(form.description, sizeof(form.description), "%s",
+             task->description ? task->description : "");
+    snprintf(form.status, sizeof(form.status), "Update task fields");
+
+    timeout(-1);
+    curs_set(1);
+    for (;;) {
+        render_task_edit_form(tui, &form, task_id);
+        int ch = getch();
+        if (ch == KEY_RESIZE)
+            continue;
+        int submit = 0;
+        int cancel = 0;
+        handle_task_edit_form_key(&form, ch, &submit, &cancel);
+        if (cancel) {
+            tui_set_status(tui, "Task edit cancelled");
+            break;
+        }
+        if (submit) {
+            char message[256] = {0};
+            if (!task_edit_form_submit(task_id, &form, tui->actor, message,
+                                       sizeof(message))) {
+                snprintf(form.status, sizeof(form.status), "%s", message);
+                continue;
+            }
+            tui_load_board(tui);
+            select_task_by_id(tui, task_id);
+            tui_set_status(tui, message);
+            break;
+        }
+    }
+    curs_set(0);
+    timeout(1000);
+}
+
+static void run_task_move_picker(DispatchTui *tui) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+
+    char task_id[64];
+    char current_group[32];
+    snprintf(task_id, sizeof(task_id), "%s", task->id);
+    snprintf(current_group, sizeof(current_group), "%s", task->group);
+
+    TuiTaskFormOption options[64];
+    size_t count =
+        task_move_group_options(&tui->board, current_group, options, 64);
+    if (count == 0) {
+        tui_set_status(tui, "No other group to move this task to");
+        return;
+    }
+
+    int selected = run_task_form_picker("Move task to group", options, count);
+    if (selected < 0) {
+        tui_set_status(tui, "Task move cancelled");
+        return;
+    }
+
+    char message[256] = {0};
+    mutate_task_group(task_id, options[selected].value, tui->actor, message,
+                      sizeof(message));
+    tui_load_board(tui);
+    select_task_by_id(tui, task_id);
+    tui_set_status(tui, message);
 }
 
 /* New agent form ----------------------------------------------------------- */
@@ -3471,7 +3809,7 @@ static void draw_footer(const char *message, const char *hints) {
 static const char *tui_footer_hints(DispatchTuiScreen screen) {
     switch (screen) {
     case TUI_SCREEN_TASK_INSPECTOR:
-        return "q/Esc back   > add dep   < remove dep   d diff   L logs   PgUp/PgDn scroll";
+        return "q/Esc back   e edit   m move   >/< deps   d diff   L logs   PgUp/PgDn scroll";
     case TUI_SCREEN_AGENT_INSPECTOR:
         return "q/Esc back   y run   e prompt   S session   x clear   z archive";
     case TUI_SCREEN_WORKSPACE_INSPECTOR:
@@ -3650,6 +3988,7 @@ static const HelpItem help_board_items[] = {
     {":", "command palette"},
     {NULL, "Tasks"},
     {"r s f v", "ready start finish review"},
+    {"e  m", "edit / move selected"},
     {"R", "ready, skip review"},
     {"n  +", "new task / group"},
     {"d", "diff selected"},
@@ -3667,6 +4006,8 @@ static const HelpItem help_task_inspector_items[] = {
     {NULL, "Task inspector"},
     {"q / Esc", "back to board"},
     {"r s f v", "ready start finish review"},
+    {"e", "edit title and description"},
+    {"m", "move to another group"},
     {"R", "ready, skip review"},
     {">", "add dependency"},
     {"<", "remove dependency"},
@@ -4960,8 +5301,16 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
             run_workspace_prune_form(tui);
         break;
     case 'e':
-        if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_task_edit_form(tui);
+        else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
             edit_selected_agent_prompt(tui);
+        break;
+    case 'm':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_task_move_picker(tui);
         break;
     case 'z':
         if (tui->screen == TUI_SCREEN_AGENTS ||
@@ -5209,14 +5558,27 @@ static int tui_inspect_smoke(const char *task_id) {
 
     printf("Task: %s\n", task->id);
     printf("Title: %s\n", task->title);
+    printf("Description: %s\n", task->description);
+    printf("Group: %s\n", task->group);
     printf("State: %s\n",
            dispatch_state_name(dispatch_task_effective_state(&board, task)));
     printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
     printf("Depends on: %zu\n", task->depends_on.count);
+    char relationships[1024];
+    join_string_list(&task->depends_on, relationships, sizeof(relationships));
+    printf("Dependency IDs: %s\n", relationships);
+    blocks_text(&board, task->id, relationships, sizeof(relationships));
+    printf("Blocks: %s\n", relationships);
     printf("Commits: %zu\n", task->commits.count);
     for (size_t i = 0; i < task->commits.count; i++)
         printf("Commit: %s\n", task->commits.items[i]);
     printf("History: %zu\n", task->history.count);
+    for (size_t i = 0; i < task->history.count; i++) {
+        DispatchHistoryEntry *entry = &task->history.items[i];
+        printf("History entry: %s by %s%s%s\n", entry->action, entry->actor,
+               entry->note && entry->note[0] ? ": " : "",
+               entry->note && entry->note[0] ? entry->note : "");
+    }
     DispatchWorkspace *workspace = workspace_for_task(&board, task->id);
     printf("Workspace: %s\n", workspace ? workspace->id : "-");
 
@@ -5300,6 +5662,64 @@ static int tui_action_smoke(const char *action_name, const char *task_id,
     char message[256] = {0};
     if (!mutate_task(task_id, actor && actor[0] ? actor : "user", action,
                      message, sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
+static int tui_task_edit_smoke(const char *task_id, const char *title,
+                               const char *description, const char *actor) {
+    TuiTaskEditForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.title, sizeof(form.title), "%s", title);
+    snprintf(form.description, sizeof(form.description), "%s",
+             strcmp(description, "-") == 0 ? "" : description);
+    char message[256] = {0};
+    if (!task_edit_form_submit(task_id, &form, actor, message,
+                               sizeof(message))) {
+        fprintf(stderr, "%s\n", message);
+        return 1;
+    }
+    printf("%s\n", message);
+    return 0;
+}
+
+static int tui_task_move_options_smoke(const char *current_group) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui move options smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchGroup *group = dispatch_board_find_group(&board, current_group);
+    if (!group) {
+        fprintf(stderr, "No group with id, prefix, or name %s\n",
+                current_group);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    TuiTaskFormOption options[64];
+    size_t count = task_move_group_options(&board, group->id, options, 64);
+    printf("Options: %zu\n", count);
+    for (size_t i = 0; i < count; i++)
+        printf("%s\n", options[i].label);
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int tui_task_move_smoke(const char *task_id, const char *group_id,
+                               const char *actor) {
+    char message[256] = {0};
+    if (!mutate_task_group(task_id, group_id, actor, message,
+                           sizeof(message))) {
         fprintf(stderr, "%s\n", message);
         return 1;
     }
@@ -6279,6 +6699,9 @@ static void print_tui_help(void) {
     puts("  --inspect-smoke <task-id>  print task inspector data and exit");
     puts("  --filter-smoke <filter>    print visible row count and exit");
     puts("  --action-smoke <action> <task-id> [actor]  run lifecycle action and exit");
+    puts("  --task-edit-smoke <task-id> <title> <description|-> [actor]");
+    puts("  --task-move-smoke <task-id> <group> [actor]");
+    puts("  --task-move-options-smoke <current-group>");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
@@ -6330,6 +6753,16 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_filter_smoke(argv[3]);
     if ((argc == 5 || argc == 6) && strcmp(argv[2], "--action-smoke") == 0)
         return tui_action_smoke(argv[3], argv[4], argc == 6 ? argv[5] : "user");
+    if ((argc == 6 || argc == 7) &&
+        strcmp(argv[2], "--task-edit-smoke") == 0)
+        return tui_task_edit_smoke(argv[3], argv[4], argv[5],
+                                   argc == 7 ? argv[6] : "user");
+    if ((argc == 5 || argc == 6) &&
+        strcmp(argv[2], "--task-move-smoke") == 0)
+        return tui_task_move_smoke(argv[3], argv[4],
+                                   argc == 6 ? argv[5] : "user");
+    if (argc == 4 && strcmp(argv[2], "--task-move-options-smoke") == 0)
+        return tui_task_move_options_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--diff-smoke") == 0)
         return tui_diff_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)
