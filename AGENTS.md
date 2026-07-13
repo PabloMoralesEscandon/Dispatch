@@ -156,20 +156,22 @@ marks ready or blocked tasks that have not been started yet as no-review.
 For each task:
 
 1. Inspect it.
-2. Start it with your agent ID.
-3. Do the work.
-4. Run relevant checks.
-5. Finish the task through Dispatch.
-6. Commit the task result with the task name.
-7. Check whether another task in the sequence is ready.
+2. Create a workspace for it (one workspace per task or task sequence).
+3. Start it with your agent ID.
+4. Do the work in the workspace worktree.
+5. Run relevant checks.
+6. Finish the task through Dispatch.
+7. Commit the task result with the task name.
+8. Check whether another task in the sequence is ready.
 
 Example:
 
 ```bash
 dispatch show DE-12
+dispatch workspace create DE-12 --actor codex
 dispatch start DE-12 --actor codex
 
-# Do the code or documentation work.
+# Do the code or documentation work in the workspace worktree.
 # Run relevant verification.
 
 dispatch finish DE-12 --actor codex
@@ -178,6 +180,11 @@ git add <files changed for this task>
 git commit -m "Implement review-gate behavior"
 dispatch ready
 ```
+
+Working directly in the main repository checkout is the exception, not the
+default: do it only when the user explicitly says to work in place. For a
+linear chain of dependent tasks that should share one branch, create the
+workspace with `--sequence`; see Running A Task Sequence In One Workspace.
 
 If `finish` reports that review is required, stop that sequence. Do not continue
 past a review gate until the user accepts the task.
@@ -203,18 +210,21 @@ editor state, generated build artifacts, session files, or another agent's work.
 If the worktree already has unrelated changes, leave them alone. Work around
 them without reverting them unless the user explicitly asks.
 
-## Parallel Agent Safety
+## Workspaces And Parallel Agent Safety
 
-Agents working in parallel must not share the same Git working tree.
-
-Use one Dispatch workspace, Git worktree, and branch per task or task sequence:
+Every task gets its own Dispatch workspace, Git worktree, and branch by
+default, whether or not other agents are active:
 
 ```bash
 dispatch workspace create DE-12 --actor codex
 ```
 
 Dispatch controls task ownership. Git worktrees control file and commit
-isolation.
+isolation. Working in a workspace keeps each task's commits on their own
+branch and means more agents can join at any time without stepping on each
+other.
+
+Agents working in parallel must never share the same Git working tree.
 
 Recommended branch format:
 
@@ -287,6 +297,8 @@ dispatch workspace show DE-12
 Then run the agent from the workflow directory and edit only the recorded task
 workspace. `dispatch start` never creates a workspace as a side effect. If a
 workspace exists, the actor passed to `start` must match the workspace actor.
+Workspaces are the default for all task work, not just parallel work; skip one
+only when the user explicitly says to work in place.
 
 For multiple parallel agents, create one actor and one workspace per task or
 task sequence:
@@ -301,16 +313,49 @@ Each agent starts only its own task and edits only its own worktree. A human or
 designated integrator merges accepted branches back into the main repository one
 at a time.
 
-Use `--sequence` only for a direct linear dependency chain where intermediate
-tasks do not require review and the chain ends at the first review gate:
+For a direct linear chain of dependent tasks, one shared workspace can cover
+the whole chain; see Running A Task Sequence In One Workspace.
+
+## Running A Task Sequence In One Workspace
+
+Use `--sequence` when a direct linear chain of dependent tasks should share
+one workspace and branch: each task builds on the previous task's commit, and
+the same actor works the whole chain.
+
+The chain must be a straight line: each intermediate task has exactly one
+dependent, and that dependent depends only on it. The sequence terminates at
+the first review-required task, or, when every task in the chain is
+no-review, at the natural end of the chain (the final task with no
+dependents).
+
+Create the workspace on the first task of the chain:
 
 ```bash
 dispatch workspace create DE-01 --actor codex-server --sequence
+dispatch workspace show DE-01
 ```
 
-The same actor works through the sequence in one workspace and still makes one
-commit per completed Dispatch task. Stop when the review-required gate task
-reaches `review`.
+Then work the chain in dependency order inside that one worktree, still
+making one commit per completed Dispatch task:
+
+```bash
+dispatch start DE-01 --actor codex-server
+# Do the work for DE-01, run checks.
+dispatch finish DE-01 --actor codex-server
+git add <files for DE-01>
+git commit -m "First task title"
+
+dispatch start DE-02 --actor codex-server
+# DE-02 builds on DE-01's commit in the same worktree.
+dispatch finish DE-02 --actor codex-server
+git add <files for DE-02>
+git commit -m "Second task title"
+```
+
+Stop where the sequence terminates. If the final task requires review,
+`finish` moves it to `review` and the sequence waits there for the user. If
+the chain is all no-review tasks, `finish` on the last task completes the
+sequence.
 
 ## Executing A User-Named Task
 
@@ -324,9 +369,10 @@ Expected agent sequence:
 
 ```bash
 dispatch show DE-02
+dispatch workspace create DE-02 --actor codex
 dispatch start DE-02 --actor codex
 
-# Make the code changes.
+# Make the code changes in the workspace worktree.
 # Run tests or targeted checks.
 
 dispatch finish DE-02 --actor codex
