@@ -127,6 +127,8 @@ enum {
 
 static DispatchTask *selected_visible_task(DispatchTui *tui);
 static DispatchWorkspace *selected_visible_workspace(DispatchTui *tui);
+static void blocks_text(DispatchBoard *board, const char *task_id, char *buf,
+                        size_t size);
 static int parse_filter_name(const char *name, DispatchTuiFilter *filter);
 static int agent_is_visible(const DispatchTui *tui, const DispatchAgent *agent);
 static int prompt_line(const char *label, char *buffer, size_t buffer_size,
@@ -1667,6 +1669,67 @@ static int mutate_task_group(const char *task_id, const char *group_id,
     return 1;
 }
 
+/* Delete a task in place, mirroring the CLI
+ * `dispatch task delete <id> [--force]`: without force the delete is
+ * refused while other tasks depend on the task, and the failure message
+ * surfaces which tasks those are. */
+static int mutate_task_delete(const char *task_id, int force, char *message,
+                              size_t message_size) {
+    char error[256] = {0};
+    DispatchStoreLock lock = {0};
+    if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
+                                     sizeof(error))) {
+        snprintf(message, message_size, "%s", error);
+        return 0;
+    }
+
+    DispatchBoard board;
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not load board");
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        snprintf(message, message_size, "No task with id %s", task_id);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    if (!force && dispatch_task_dependent_count(&board, task_id) > 0) {
+        char blocks[256];
+        blocks_text(&board, task_id, blocks, sizeof(blocks));
+        snprintf(message, message_size,
+                 "Could not delete %s (blocks: %s; use X to force)", task_id,
+                 blocks);
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    if (!dispatch_board_delete_task(&board, task_id, force) ||
+        !dispatch_store_save(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        snprintf(message, message_size, "%s",
+                 error[0] ? error : "could not delete task");
+        dispatch_board_free(&board);
+        dispatch_store_lock_release(&lock);
+        return 0;
+    }
+
+    snprintf(message, message_size, "Deleted task %s%s", task_id,
+             force ? " (forced)" : "");
+    dispatch_board_free(&board);
+    dispatch_store_lock_release(&lock);
+    return 1;
+}
+
 static int create_group(const char *name, const char *prefix, char *message,
                         size_t message_size) {
     if (!name || !name[0]) {
@@ -3196,6 +3259,48 @@ static void run_workspace_remove_form(DispatchTui *tui, int force) {
     clamp_workspace_selection(tui);
 }
 
+/* Delete the selected task after a typed-id confirmation, mirroring
+ * run_workspace_remove_form. The force variant surfaces which dependents
+ * will lose the dependency before asking for confirmation. */
+static void run_task_delete_form(DispatchTui *tui, int force) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+
+    char task_id[64];
+    snprintf(task_id, sizeof(task_id), "%s", task->id);
+
+    char label[256];
+    char blocks[128];
+    blocks_text(&tui->board, task_id, blocks, sizeof(blocks));
+    if (force && strcmp(blocks, "-") != 0) {
+        snprintf(label, sizeof(label),
+                 "Type %s to force delete (unblocks: %s): ", task_id, blocks);
+    } else {
+        snprintf(label, sizeof(label), "Type %s to delete: ", task_id);
+    }
+
+    char confirm[64];
+    if (!prompt_line(label, confirm, sizeof(confirm), ""))
+        return;
+    if (strcmp(confirm, task_id) != 0) {
+        tui_set_status(tui, "Task delete cancelled");
+        return;
+    }
+
+    char message[256] = {0};
+    int deleted = mutate_task_delete(task_id, force, message, sizeof(message));
+    tui_load_board(tui);
+    if (deleted && tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
+        tui->inspected_task_id[0] = '\0';
+        tui->screen = TUI_SCREEN_BOARD;
+    }
+    clamp_selection(tui);
+    tui_set_status(tui, message);
+}
+
 static void run_workspace_prune_form(DispatchTui *tui) {
     char confirm[32];
     if (!prompt_line("Type prune to remove done clean workspaces: ", confirm,
@@ -3809,7 +3914,7 @@ static void draw_footer(const char *message, const char *hints) {
 static const char *tui_footer_hints(DispatchTuiScreen screen) {
     switch (screen) {
     case TUI_SCREEN_TASK_INSPECTOR:
-        return "q/Esc back   e edit   m move   >/< deps   d diff   L logs   PgUp/PgDn scroll";
+        return "q/Esc back   e edit   m move   >/< deps   d diff   x/X delete   L logs   PgUp/PgDn scroll";
     case TUI_SCREEN_AGENT_INSPECTOR:
         return "q/Esc back   y run   e prompt   S session   x clear   z archive";
     case TUI_SCREEN_WORKSPACE_INSPECTOR:
@@ -3992,6 +4097,7 @@ static const HelpItem help_board_items[] = {
     {"R", "ready, skip review"},
     {"n  +", "new task / group"},
     {"d", "diff selected"},
+    {"x  X", "delete / force delete"},
     {NULL, "Filter & search"},
     {"1-8", "filter presets"},
     {"G  A", "cycle group / actor"},
@@ -4012,6 +4118,7 @@ static const HelpItem help_task_inspector_items[] = {
     {">", "add dependency"},
     {"<", "remove dependency"},
     {"d", "diff"},
+    {"x  X", "delete / force delete"},
     {"L", "task logs"},
     {"PgUp/PgDn", "scroll description"},
     {"h / ?", "toggle help"},
@@ -5290,11 +5397,17 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
         else if (tui->screen == TUI_SCREEN_WORKSPACES ||
                  tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
             run_workspace_remove_form(tui, 0);
+        else if (tui->screen == TUI_SCREEN_BOARD ||
+                 tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_task_delete_form(tui, 0);
         break;
     case 'X':
         if (tui->screen == TUI_SCREEN_WORKSPACES ||
             tui->screen == TUI_SCREEN_WORKSPACE_INSPECTOR)
             run_workspace_remove_form(tui, 1);
+        else if (tui->screen == TUI_SCREEN_BOARD ||
+                 tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_task_delete_form(tui, 1);
         break;
     case 'P':
         if (tui->screen == TUI_SCREEN_WORKSPACES)
@@ -6534,6 +6647,23 @@ static int tui_desc_wrap_smoke(const char *task_id, int width, int region,
     return 0;
 }
 
+/* Run the TUI task-delete mutation headlessly, mirroring what the x/X
+ * confirmation form executes after the typed id matches. */
+static int tui_task_delete_smoke(const char *task_id, const char *mode) {
+    int force = 0;
+    if (strcmp(mode, "force") == 0) {
+        force = 1;
+    } else if (strcmp(mode, "no-force") != 0) {
+        fprintf(stderr, "Delete mode must be force or no-force\n");
+        return 1;
+    }
+
+    char message[256] = {0};
+    int ok = mutate_task_delete(task_id, force, message, sizeof(message));
+    printf("%s\n", message);
+    return ok ? 0 : 1;
+}
+
 /* Print a clamped column cell between brackets so tests can assert exact
  * padding and truncation. */
 static int tui_cell_smoke(int width, const char *text) {
@@ -6693,6 +6823,7 @@ static void print_tui_help(void) {
     puts("  Ctrl+C or :q quits");
     puts("  r/s/f/v ready/start/finish/review selected task");
     puts("  R ready selected task without a review gate");
+    puts("  x/X delete selected task (X force-deletes past dependents)");
     puts("  tmux: no control-prefix bindings; run alongside tmux panes");
     puts("");
     puts("  --smoke   load the board and exit without initializing ncurses");
@@ -6730,6 +6861,7 @@ static void print_tui_help(void) {
     puts("  --selection-smoke <filter> <selected-index>  verify highlight and action task match");
     puts("  --key-smoke <screen> <keys>  feed keys to the input handler on a screen");
     puts("  --cell-smoke <width> <text>  print a clamped table cell");
+    puts("  --task-delete-smoke <task-id> force|no-force  run the delete mutation and exit");
     puts("  --agent-row-smoke <name>     print the agents-table row for one agent");
     puts("  --desc-wrap-smoke <task-id> <width> <region> <top>  print the wrapped description window");
     puts("  --palette-smoke <command>");
@@ -6824,6 +6956,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_key_smoke(argv[3], argv[4]);
     if (argc == 5 && strcmp(argv[2], "--cell-smoke") == 0)
         return tui_cell_smoke(atoi(argv[3]), argv[4]);
+    if (argc == 5 && strcmp(argv[2], "--task-delete-smoke") == 0)
+        return tui_task_delete_smoke(argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[2], "--agent-row-smoke") == 0)
         return tui_agent_row_smoke(argv[3]);
     if (argc == 7 && strcmp(argv[2], "--desc-wrap-smoke") == 0)

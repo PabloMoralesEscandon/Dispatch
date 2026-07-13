@@ -1426,6 +1426,33 @@ assert_contains "Requires review: no"
 expect_ok "$BIN" tui --key-smoke board 8
 assert_contains "Filter: attention"
 
+# TX-03: the x/X delete control runs the same mutation as the CLI task
+# delete. Without force it refuses while dependents exist and names them;
+# force removes the task and drops the dependency references.
+case_dir="$(make_case_dir tui-task-delete)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root
+expect_ok "$BIN" task add DE Dependent
+expect_ok "$BIN" task add DE Loner
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_fail "$BIN" tui --task-delete-smoke DE-01 no-force
+assert_contains "Could not delete DE-01 (blocks: DE-02; use X to force)"
+expect_ok "$BIN" show DE-01
+assert_contains "Title: Root"
+expect_fail "$BIN" tui --task-delete-smoke DE-99 no-force
+assert_contains "No task with id DE-99"
+expect_ok "$BIN" tui --task-delete-smoke DE-03 no-force
+assert_contains "Deleted task DE-03"
+expect_fail "$BIN" show DE-03
+expect_ok "$BIN" tui --task-delete-smoke DE-01 force
+assert_contains "Deleted task DE-01 (forced)"
+expect_fail "$BIN" show DE-01
+expect_ok "$BIN" show DE-02
+assert_contains "Depends on: -"
+
 case_dir="$(make_case_dir tui-edit-move)"
 cd "$case_dir"
 mkdir repo
