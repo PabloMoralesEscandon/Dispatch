@@ -354,13 +354,15 @@ searches, and `c` clears secondary filters. Board, agents, workspaces, and logs
 scroll with the selected row.
 
 Task actions are available from the board and task inspector: `r` ready, `s`
-start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a
-full-screen task creation form with boxed fields, `+` creates a group, `>` adds
-a dependency to the inspected task, `<` removes a dependency, and `d` opens the
-diff for the selected task when commit metadata exists. The diff covers all of
-the task's recorded commits, is rendered with forced color, and is shown through
-a pager (`$PAGER`, else `less` or `more`) so it stays on screen until you quit
-the pager. When no pager is installed the diff is shown without paging.
+start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `e` edits
+the selected task's title and description, and `m` moves it to another existing
+group while preserving its ID. `n` opens a full-screen task creation form with
+boxed fields, `+` creates a group, `>` adds a dependency to the inspected task,
+`<` removes a dependency, and `d` opens the diff for the selected task when
+commit metadata exists. The diff covers all of the task's recorded commits, is
+rendered with forced color, and is shown through a pager (`$PAGER`, else `less`
+or `more`) so it stays on screen until you quit the pager. When no pager is
+installed the diff is shown without paging.
 In the task creation form, `Ctrl-O` opens an option picker for the active
 field: on the Group field it lists existing groups (typing still creates a new
 group), and on the Depends field it lists not-done tasks, excluding done tasks

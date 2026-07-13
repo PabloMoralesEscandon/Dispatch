@@ -1394,6 +1394,31 @@ assert_contains "Reviewed DE-01"
 expect_ok "$BIN" show DE-01
 assert_contains "State: done"
 
+case_dir="$(make_case_dir tui-edit-move)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" group add Quality --prefix QA
+expect_ok "$BIN" task add DE Root --description "Original"
+expect_ok "$BIN" tui --task-edit-smoke DE-01 "Revised task" "Revised description" editor
+assert_contains "Edited task DE-01"
+expect_ok "$BIN" show DE-01
+assert_contains "ID: DE-01"
+assert_contains "Title: Revised task"
+assert_contains "Description: Revised description"
+assert_contains "edited by editor: title and description"
+expect_fail "$BIN" tui --task-edit-smoke DE-01 "DE-99 Bad title" - editor
+assert_contains "Task title should not include an ID"
+expect_ok "$BIN" tui --task-move-smoke DE-01 QA mover
+assert_contains "Moved task DE-01 from DE to QA"
+expect_ok "$BIN" show DE-01
+assert_contains "ID: DE-01"
+assert_contains "Group: QA"
+assert_contains "moved by mover: from DE to QA"
+expect_fail "$BIN" tui --task-move-smoke DE-01 QA mover
+assert_contains "already belongs to group QA"
+
 case_dir="$(make_case_dir tui-create)"
 cd "$case_dir"
 mkdir repo
