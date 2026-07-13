@@ -257,7 +257,7 @@ assert_contains "Updated 1 agent prompt"
 assert_file_contains .dispatch/agents/claude-run/run.sh "exec claude \"\$(cat '.dispatch/agents/claude-run/claude-run-PROMPT.md')\""
 assert_file_not_contains .dispatch/agents/claude-run/run.sh "--prompt-file"
 
-expect_ok "$BIN" tui --agent-form-submit-smoke tui-codex codex gpt-form run-script
+expect_ok "$BIN" tui --agent-form-submit-smoke tui-codex codex gpt-form
 assert_contains "Created agent tui-codex (codex)"
 expect_ok "$BIN" agent show tui-codex
 assert_contains "Name: tui-codex"
@@ -277,17 +277,24 @@ fi
 expect_ok "$BIN" agent list
 assert_contains "tui-codex"
 
-expect_ok "$BIN" tui --agent-form-submit-smoke tui-claude claude - no-run-script
+# TX-02: the TUI agent form has no run-script opt-out; TUI-created agents
+# always get a run script (the CLI --no-run-script flag remains).
+expect_ok "$BIN" tui --agent-form-submit-smoke tui-claude claude -
 assert_contains "Created agent tui-claude (claude)"
 expect_ok "$BIN" agent show tui-claude
 assert_contains "Name: tui-claude"
 assert_contains "Runner: claude"
 assert_contains "Model: -"
-assert_contains "Run script: -"
+assert_contains "Run script: .dispatch/agents/tui-claude/run.sh"
 assert_file_contains .dispatch/agents/tui-claude/tui-claude-PROMPT.md "# Dispatch Agent: tui-claude"
-if [ -e .dispatch/agents/tui-claude/run.sh ]; then
-    fail "TUI-created no-run-script agent unexpectedly has run.sh"
+if [ ! -x .dispatch/agents/tui-claude/run.sh ]; then
+    fail "TUI-created agent run script was not created executable"
 fi
+# TX-02: the model field is now the last field; Enter there submits.
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\t\t\n'
+assert_contains "Name: bot"
+assert_contains "Field: 2"
+assert_contains "Submit: yes"
 
 expect_ok "$BIN" agent resume claude-a
 assert_contains "claude --session-id '"
