@@ -156,20 +156,22 @@ marks ready or blocked tasks that have not been started yet as no-review.
 For each task:
 
 1. Inspect it.
-2. Start it with your agent ID.
-3. Do the work.
-4. Run relevant checks.
-5. Finish the task through Dispatch.
-6. Commit the task result with the task name.
-7. Check whether another task in the sequence is ready.
+2. Create a workspace for it (one workspace per task or task sequence).
+3. Start it with your agent ID.
+4. Do the work in the workspace worktree.
+5. Run relevant checks.
+6. Finish the task through Dispatch.
+7. Commit the task result with the task name.
+8. Check whether another task in the sequence is ready.
 
 Example:
 
 ```bash
 dispatch show DE-12
+dispatch workspace create DE-12 --actor codex
 dispatch start DE-12 --actor codex
 
-# Do the code or documentation work.
+# Do the code or documentation work in the workspace worktree.
 # Run relevant verification.
 
 dispatch finish DE-12 --actor codex
@@ -178,6 +180,9 @@ git add <files changed for this task>
 git commit -m "Implement review-gate behavior"
 dispatch ready
 ```
+
+Working directly in the main repository checkout is the exception, not the
+default: do it only when the user explicitly says to work in place.
 
 If `finish` reports that review is required, stop that sequence. Do not continue
 past a review gate until the user accepts the task.
@@ -203,18 +208,21 @@ editor state, generated build artifacts, session files, or another agent's work.
 If the worktree already has unrelated changes, leave them alone. Work around
 them without reverting them unless the user explicitly asks.
 
-## Parallel Agent Safety
+## Workspaces And Parallel Agent Safety
 
-Agents working in parallel must not share the same Git working tree.
-
-Use one Dispatch workspace, Git worktree, and branch per task or task sequence:
+Every task gets its own Dispatch workspace, Git worktree, and branch by
+default, whether or not other agents are active:
 
 ```bash
 dispatch workspace create DE-12 --actor codex
 ```
 
 Dispatch controls task ownership. Git worktrees control file and commit
-isolation.
+isolation. Working in a workspace keeps each task's commits on their own
+branch and means more agents can join at any time without stepping on each
+other.
+
+Agents working in parallel must never share the same Git working tree.
 
 Recommended branch format:
 
@@ -287,6 +295,8 @@ dispatch workspace show DE-12
 Then run the agent from the workflow directory and edit only the recorded task
 workspace. `dispatch start` never creates a workspace as a side effect. If a
 workspace exists, the actor passed to `start` must match the workspace actor.
+Workspaces are the default for all task work, not just parallel work; skip one
+only when the user explicitly says to work in place.
 
 For multiple parallel agents, create one actor and one workspace per task or
 task sequence:
@@ -324,9 +334,10 @@ Expected agent sequence:
 
 ```bash
 dispatch show DE-02
+dispatch workspace create DE-02 --actor codex
 dispatch start DE-02 --actor codex
 
-# Make the code changes.
+# Make the code changes in the workspace worktree.
 # Run tests or targeted checks.
 
 dispatch finish DE-02 --actor codex
