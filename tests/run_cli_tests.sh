@@ -1694,6 +1694,132 @@ assert_contains "[DE] Development"
 assert_contains "  (done)"
 assert_not_contains "  DE-01    done       DirectFinish"
 
+# WX-01: ready and review accept multiple task IDs in one command. The batch
+# is atomic: one bad ID leaves the board untouched.
+case_dir="$(make_case_dir batch-ready-review)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE First
+expect_ok "$BIN" task add DE Second
+expect_ok "$BIN" task add DE Third
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 --actor user
+assert_contains "Readied DE-01"
+assert_contains "Readied DE-02"
+assert_contains "Readied DE-03"
+expect_ok "$BIN" show DE-02
+assert_contains "State: ready"
+expect_fail "$BIN" ready DE-01 DE-99 --actor user
+assert_contains "Could not mark DE-99 ready"
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+expect_ok "$BIN" start DE-02 --actor codex
+expect_ok "$BIN" finish DE-02 --actor codex
+expect_ok "$BIN" review DE-01 DE-02 --actor reviewer
+assert_contains "Reviewed DE-01"
+assert_contains "Reviewed DE-02"
+expect_ok "$BIN" show DE-01
+assert_contains "State: done"
+expect_ok "$BIN" show DE-02
+assert_contains "State: done"
+# A bad ID in a review batch changes nothing.
+expect_ok "$BIN" start DE-03 --actor codex
+expect_ok "$BIN" finish DE-03 --actor codex
+expect_fail "$BIN" review DE-03 DE-99 --actor reviewer
+assert_contains "Could not review DE-99"
+expect_ok "$BIN" show DE-03
+assert_contains "State: review"
+# Batch ready honors --no-review for every task in the batch.
+expect_ok "$BIN" task add DE Fourth
+expect_ok "$BIN" task add DE Fifth
+expect_ok "$BIN" ready DE-04 DE-05 --actor user --no-review
+expect_ok "$BIN" show DE-04
+assert_contains "Requires review: no"
+expect_ok "$BIN" show DE-05
+assert_contains "Requires review: no"
+
+# WX-02: task priority orders the ready listing (higher first, board order on
+# ties), persists, appears in show/list output, and validates its input.
+case_dir="$(make_case_dir task-priority)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Low
+expect_ok "$BIN" task add DE Urgent
+expect_ok "$BIN" task add DE Normal
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 --actor user
+expect_ok "$BIN" task priority DE-02 5 --actor user
+assert_contains "Set priority of DE-02 to 5"
+expect_ok "$BIN" task priority DE-01 -1 --actor user
+expect_ok "$BIN" show DE-02
+assert_contains "Priority: 5"
+assert_contains "priority by user: set to 5"
+expect_ok "$BIN" ready
+if ! printf '%s\n' "$RUN_OUTPUT" | sed -n '1p' | grep -q "DE-02"; then
+    fail "expected DE-02 (priority 5) first in ready listing"
+fi
+if ! printf '%s\n' "$RUN_OUTPUT" | sed -n '2p' | grep -q "DE-03"; then
+    fail "expected DE-03 (priority 0) second in ready listing"
+fi
+if ! printf '%s\n' "$RUN_OUTPUT" | sed -n '3p' | grep -q "DE-01"; then
+    fail "expected DE-01 (priority -1) last in ready listing"
+fi
+assert_contains "priority:5"
+expect_fail "$BIN" task priority DE-02 abc
+assert_contains "Priority must be an integer between -99 and 99"
+expect_fail "$BIN" task priority DE-02 100
+expect_fail "$BIN" task priority DE-99 5
+assert_contains "No task with id DE-99"
+# Priority survives a save/load round trip and shows in the JSON contract.
+expect_ok "$BIN" normalize
+expect_ok "$BIN" show DE-02
+assert_contains "Priority: 5"
+expect_ok "$BIN" ready --json
+assert_contains '"priority": 5'
+
+# WX-03: doctor flags orphaned workspaces, done tasks without commits, and
+# dependency anomalies (missing reference, self-dependency, duplicates), and
+# reports clean checks on a healthy board.
+case_dir="$(make_case_dir doctor-diagnostics)"
+cd "$case_dir"
+mkdir repo
+cp "$ROOT/tests/fixtures/doctor-anomaly-board.json" dispatch.json
+expect_ok "$BIN" doctor
+assert_contains "workspace DE-77 references missing task DE-77"
+assert_contains "done task DE-01 has no recorded commits"
+assert_contains "task DE-02 depends on missing task ZZ-99"
+assert_contains "task DE-02 depends on itself"
+assert_contains "task DE-02 lists dependency DE-01 more than once"
+# A healthy board reports the new checks as ok.
+rm dispatch.json
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Clean
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+expect_ok "$BIN" commit add DE-01 abc1234 --actor codex
+expect_ok "$BIN" doctor
+assert_contains "no orphaned workspaces"
+assert_contains "all done tasks have recorded commits"
+assert_contains "no dependency anomalies"
+# Deleting a task that has a workspace leaves the board loadable and the
+# orphaned record diagnosable (previously this made the board unreadable).
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" task add DE Doomed
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" workspace create DE-02 --actor codex
+expect_ok "$BIN" task delete DE-02 --force
+expect_ok "$BIN" list
+expect_ok "$BIN" doctor
+assert_contains "workspace DE-02 references missing task DE-02"
+expect_ok "$BIN" workspace remove DE-02 --force
+expect_ok "$BIN" doctor
+assert_contains "no orphaned workspaces"
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo

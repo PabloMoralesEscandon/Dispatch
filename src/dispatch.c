@@ -652,6 +652,20 @@ int dispatch_task_set_description(DispatchTask *task, const char *description) {
     return 1;
 }
 
+int dispatch_task_set_priority(DispatchTask *task, int priority,
+                               const char *actor) {
+    if (!task)
+        return 0;
+    if (task->priority == priority)
+        return 1;
+    char note[48];
+    snprintf(note, sizeof(note), "set to %d", priority);
+    task->priority = priority;
+    task->updated_at = time(NULL);
+    dispatch_task_append_history(task, actor, "priority", note);
+    return 1;
+}
+
 int dispatch_task_move_to_group(DispatchBoard *board, DispatchTask *task,
                                 const char *group_id, const char *actor) {
     DispatchGroup *group = dispatch_board_find_group(board, group_id);

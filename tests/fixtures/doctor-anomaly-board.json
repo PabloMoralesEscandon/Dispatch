@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "workspace": {
+    "repo_path": "repo"
+  },
+  "board": {
+    "name": "Dispatch",
+    "groups": [
+      {
+        "id": "DE",
+        "name": "Development",
+        "prefix": "DE"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "DE-01",
+        "title": "Done without commits",
+        "description": "",
+        "group": "DE",
+        "state": "done",
+        "depends_on": [],
+        "requires_review": false,
+        "assigned_to": null,
+        "started_by": "codex",
+        "completed_by": "codex",
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "DE-02",
+        "title": "Anomalous dependencies",
+        "description": "",
+        "group": "DE",
+        "state": "proposed",
+        "depends_on": ["ZZ-99", "DE-02", "DE-01", "DE-01"],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      }
+    ],
+    "agents": [],
+    "workspaces": [
+      {
+        "id": "DE-77",
+        "task_id": "DE-77",
+        "actor": "codex",
+        "path": "repo",
+        "branch": "agent/codex/DE-77",
+        "repo_path": "repo",
+        "state": "active",
+        "sequence_tasks": [],
+        "review_gate": null,
+        "created_at": 1,
+        "updated_at": 2
+      }
+    ]
+  }
+}

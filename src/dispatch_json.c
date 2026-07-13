@@ -130,6 +130,7 @@ static json_t *task_json(const DispatchBoard *board, const DispatchTask *task) {
                         json_string(dispatch_state_name(task->state)));
     json_object_set_new(object, "requires_review",
                         json_boolean(task->requires_review));
+    json_object_set_new(object, "priority", json_integer(task->priority));
     json_object_set_new(object, "assigned_to",
                         optional_string(task->assigned_to));
     json_object_set_new(object, "started_by",

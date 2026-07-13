@@ -54,6 +54,7 @@ typedef struct {
     DispatchStringList depends_on;
     DispatchStringList commits;
     int requires_review;
+    int priority; /* higher surfaces first among ready tasks */
     char *assigned_to;
     char *started_by;
     char *completed_by;
@@ -173,6 +174,8 @@ int dispatch_board_delete_task(DispatchBoard *board, const char *task_id,
                                int force);
 int dispatch_task_set_title(DispatchTask *task, const char *title);
 int dispatch_task_set_description(DispatchTask *task, const char *description);
+int dispatch_task_set_priority(DispatchTask *task, int priority,
+                               const char *actor);
 int dispatch_task_move_to_group(DispatchBoard *board, DispatchTask *task,
                                 const char *group_id, const char *actor);
 
