@@ -88,7 +88,7 @@ Every entry in `tasks` has the same shape:
   "description": "Add machine-readable output.",
   "group": "development",
   "state": "blocked",
-  "stored_state": "ready",
+  "stored_state": "blocked",
   "requires_review": true,
   "assigned_to": null,
   "started_by": null,
@@ -116,7 +116,7 @@ Every entry in `tasks` has the same shape:
 `state` is the presentation state shown by the CLI. A stored `proposed` task
 remains `proposed`; otherwise this is the effective state after dependencies
 are evaluated. `stored_state` is the persisted lifecycle state and can differ
-from `state`, most commonly when a ready task is effectively blocked.
+from `state` when derived state has not yet been normalized and persisted.
 
 `depends_on` contains all direct dependency IDs. `blocked_by` contains only
 dependencies that are not effectively done. `blocks` contains IDs of all tasks
