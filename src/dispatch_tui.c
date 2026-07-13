@@ -465,12 +465,49 @@ static int tui_task_is_visible(const DispatchTui *tui,
            task_matches_search(task, tui->search);
 }
 
-static int visible_task_count_for_tui(const DispatchTui *tui) {
-    int count = 0;
-    for (size_t i = 0; i < tui->board.tasks.count; i++) {
-        if (tui_task_is_visible(tui, &tui->board.tasks.items[i]))
-            count++;
+/* Canonical enumeration of visible tasks in grouped render order: the same
+ * order draw_board_rows paints them (outer loop over groups, inner loop over
+ * that group's tasks in storage order). Every selection index, visible count,
+ * and highlight computation must walk tasks through this iterator so the
+ * highlighted row and the acted-on task always refer to the same task, even
+ * when tasks of different groups are interleaved in board.tasks storage
+ * order. */
+typedef struct {
+    const DispatchTui *tui;
+    size_t group; /* group index of the task most recently returned */
+    size_t task;  /* next storage index to scan within the current group */
+} VisibleTaskIter;
+
+static void visible_task_iter_init(const DispatchTui *tui,
+                                   VisibleTaskIter *it) {
+    it->tui = tui;
+    it->group = 0;
+    it->task = 0;
+}
+
+static DispatchTask *visible_task_iter_next(VisibleTaskIter *it) {
+    const DispatchBoard *board = &it->tui->board;
+    while (it->group < board->groups.count) {
+        const DispatchGroup *group = &board->groups.items[it->group];
+        while (it->task < board->tasks.count) {
+            DispatchTask *task =
+                (DispatchTask *)&board->tasks.items[it->task++];
+            if (strcmp(task->group, group->id) == 0 &&
+                tui_task_is_visible(it->tui, task))
+                return task;
+        }
+        it->group++;
+        it->task = 0;
     }
+    return NULL;
+}
+
+static int visible_task_count_for_tui(const DispatchTui *tui) {
+    VisibleTaskIter it;
+    visible_task_iter_init(tui, &it);
+    int count = 0;
+    while (visible_task_iter_next(&it))
+        count++;
     return count;
 }
 
@@ -616,33 +653,25 @@ static void sync_log_scroll(DispatchTui *tui, int visible_rows) {
 
 static int board_selected_render_row_for_top(const DispatchTui *tui,
                                              int task_top) {
+    VisibleTaskIter it;
+    visible_task_iter_init(tui, &it);
     int visible_index = 0;
     int render_row = 0;
-    for (size_t g = 0; g < tui->board.groups.count; g++) {
-        DispatchGroup *group = &tui->board.groups.items[g];
-        int group_has_drawn_task = 0;
-        int group_header_row = render_row;
-        for (size_t i = 0; i < tui->board.tasks.count; i++) {
-            DispatchTask *task = &tui->board.tasks.items[i];
-            if (strcmp(task->group, group->id) != 0 ||
-                !tui_task_is_visible(tui, task)) {
-                continue;
-            }
-            if (visible_index < task_top) {
-                visible_index++;
-                continue;
-            }
-            if (!group_has_drawn_task) {
-                render_row++;
-                group_has_drawn_task = 1;
-            }
-            if (visible_index == tui->selected_task)
-                return render_row;
-            render_row++;
+    size_t header_group = (size_t)-1;
+    for (DispatchTask *task = visible_task_iter_next(&it); task;
+         task = visible_task_iter_next(&it)) {
+        if (visible_index < task_top) {
             visible_index++;
+            continue;
         }
-        if (!group_has_drawn_task)
-            render_row = group_header_row;
+        if (it.group != header_group) {
+            render_row++;
+            header_group = it.group;
+        }
+        if (visible_index == tui->selected_task)
+            return render_row;
+        render_row++;
+        visible_index++;
     }
     return -1;
 }
@@ -707,11 +736,11 @@ static int select_task_by_id(DispatchTui *tui, const char *task_id) {
 
     snprintf(tui->inspected_task_id, sizeof(tui->inspected_task_id), "%s",
              requested->id);
+    VisibleTaskIter it;
+    visible_task_iter_init(tui, &it);
     int visible_index = 0;
-    for (size_t i = 0; i < tui->board.tasks.count; i++) {
-        DispatchTask *task = &tui->board.tasks.items[i];
-        if (!tui_task_is_visible(tui, task))
-            continue;
+    for (DispatchTask *task = visible_task_iter_next(&it); task;
+         task = visible_task_iter_next(&it)) {
         if (strcmp(task->id, task_id) == 0) {
             tui->selected_task = visible_index;
             return 1;
@@ -759,11 +788,11 @@ static void restore_task_selection(DispatchTui *tui, const char *task_id) {
         return;
     }
 
+    VisibleTaskIter it;
+    visible_task_iter_init(tui, &it);
     int visible_index = 0;
-    for (size_t i = 0; i < tui->board.tasks.count; i++) {
-        DispatchTask *task = &tui->board.tasks.items[i];
-        if (!tui_task_is_visible(tui, task))
-            continue;
+    for (DispatchTask *task = visible_task_iter_next(&it); task;
+         task = visible_task_iter_next(&it)) {
         if (strcmp(task->id, task_id) == 0) {
             tui->selected_task = visible_index;
             return;
@@ -1379,11 +1408,11 @@ static DispatchTask *selected_visible_task(DispatchTui *tui) {
         return dispatch_board_find_task(&tui->board, tui->inspected_task_id);
     }
 
+    VisibleTaskIter it;
+    visible_task_iter_init(tui, &it);
     int visible_index = 0;
-    for (size_t i = 0; i < tui->board.tasks.count; i++) {
-        DispatchTask *task = &tui->board.tasks.items[i];
-        if (!tui_task_is_visible(tui, task))
-            continue;
+    for (DispatchTask *task = visible_task_iter_next(&it); task;
+         task = visible_task_iter_next(&it)) {
         if (visible_index == tui->selected_task)
             return task;
         visible_index++;
@@ -4447,30 +4476,26 @@ static void draw_board_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int visible_rows = rows - start_y - 1;
     sync_task_scroll(tui, visible_rows);
 
-    for (size_t g = 0; g < tui->board.groups.count && y < rows - 1; g++) {
-        DispatchGroup *group = &tui->board.groups.items[g];
-        int group_header_drawn = 0;
-        for (size_t i = 0; i < tui->board.tasks.count; i++) {
-            DispatchTask *task = &tui->board.tasks.items[i];
-            if (strcmp(task->group, group->id) != 0 ||
-                !tui_task_is_visible(tui, task)) {
-                continue;
-            }
-            if (visible_index < tui->task_top) {
-                visible_index++;
-                continue;
-            }
-            if (!group_header_drawn) {
-                draw_group_header(tui, y++, cols, group);
-                group_header_drawn = 1;
-                if (y >= rows - 1)
-                    break;
-            }
-
-            draw_task_row(tui, y++, cols, task, visible_index);
+    VisibleTaskIter it;
+    visible_task_iter_init(tui, &it);
+    size_t header_group = (size_t)-1;
+    for (DispatchTask *task = visible_task_iter_next(&it);
+         task && y < rows - 1; task = visible_task_iter_next(&it)) {
+        if (visible_index < tui->task_top) {
             visible_index++;
-            any_visible = 1;
+            continue;
         }
+        if (it.group != header_group) {
+            draw_group_header(tui, y++, cols,
+                              &tui->board.groups.items[it.group]);
+            header_group = it.group;
+            if (y >= rows - 1)
+                break;
+        }
+
+        draw_task_row(tui, y++, cols, task, visible_index);
+        visible_index++;
+        any_visible = 1;
     }
 
     if (!any_visible && y < rows - 1) {
@@ -5689,6 +5714,53 @@ static int tui_scroll_smoke(const char *screen, int visible_rows,
     return 0;
 }
 
+static int tui_selection_smoke(const char *filter_name_arg,
+                               int selected_index) {
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!parse_filter_name(filter_name_arg, &tui.filter)) {
+        fprintf(stderr, "Unknown TUI filter %s\n", filter_name_arg);
+        return 1;
+    }
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+
+    tui.selected_task = selected_index;
+    clamp_selection(&tui);
+
+    DispatchTask *action_task = selected_visible_task(&tui);
+
+    /* Recompute the highlighted task with an independent walk in grouped
+     * render order (the order draw_board_rows paints), so this fails if
+     * selection resolution ever falls back to flat storage order. */
+    DispatchTask *highlighted = NULL;
+    int visible_index = 0;
+    for (size_t g = 0; g < tui.board.groups.count && !highlighted; g++) {
+        DispatchGroup *group = &tui.board.groups.items[g];
+        for (size_t i = 0; i < tui.board.tasks.count; i++) {
+            DispatchTask *task = &tui.board.tasks.items[i];
+            if (strcmp(task->group, group->id) != 0 ||
+                !tui_task_is_visible(&tui, task))
+                continue;
+            if (visible_index == tui.selected_task) {
+                highlighted = task;
+                break;
+            }
+            visible_index++;
+        }
+    }
+
+    printf("Selected: %d\n", tui.selected_task);
+    printf("Action task: %s\n", action_task ? action_task->id : "-");
+    printf("Highlighted task: %s\n", highlighted ? highlighted->id : "-");
+    int match = action_task && highlighted && action_task == highlighted;
+    printf("Match: %s\n", match ? "yes" : "no");
+    tui_free_board(&tui);
+    return match ? 0 : 1;
+}
+
 static const char *screen_name(DispatchTuiScreen screen) {
     switch (screen) {
     case TUI_SCREEN_BOARD:
@@ -5863,6 +5935,7 @@ static void print_tui_help(void) {
     puts("  --logs-smoke [actor|command|action|task|agent|workspace <value>]");
     puts("  --logs-window-smoke <visible-rows> <selected-index> [field value]");
     puts("  --scroll-smoke board|agents|workspaces|logs <visible-rows> <selected-index>");
+    puts("  --selection-smoke <filter> <selected-index>  verify highlight and action task match");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
@@ -5940,6 +6013,8 @@ int dispatch_tui_main(int argc, char **argv) {
                                     argc == 7 ? argv[6] : "");
     if (argc == 6 && strcmp(argv[2], "--scroll-smoke") == 0)
         return tui_scroll_smoke(argv[3], atoi(argv[4]), atoi(argv[5]));
+    if (argc == 5 && strcmp(argv[2], "--selection-smoke") == 0)
+        return tui_selection_smoke(argv[3], atoi(argv[4]));
     if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)

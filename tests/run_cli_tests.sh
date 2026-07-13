@@ -1395,6 +1395,40 @@ assert_contains "Groups before: 0"
 assert_contains "Groups after: 1"
 assert_contains "Status: Board reloaded"
 
+# FX-07 regression: the board highlight and the acted-on task must resolve to
+# the same task when tasks of different groups are interleaved in storage
+# order and a filter spans multiple groups. Storage order below is
+# AA-01, BB-01, AA-02; grouped render order is AA-01, AA-02, BB-01, so a
+# flat-order selection would resolve index 1 to BB-01 while the board
+# highlights AA-02.
+case_dir="$(make_case_dir tui-selection-interleaved)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Alpha --prefix AA
+expect_ok "$BIN" group add Beta --prefix BB
+expect_ok "$BIN" task add AA First
+expect_ok "$BIN" task add BB Second
+expect_ok "$BIN" task add AA Third
+expect_ok "$BIN" tui --selection-smoke all 1
+assert_contains "Action task: AA-02"
+assert_contains "Highlighted task: AA-02"
+assert_contains "Match: yes"
+expect_ok "$BIN" tui --selection-smoke all 2
+assert_contains "Action task: BB-01"
+assert_contains "Highlighted task: BB-01"
+assert_contains "Match: yes"
+# Proposed-only filter across interleaved groups (the live failure mode):
+# readying via the TUI must hit the highlighted task, not another group's.
+expect_ok "$BIN" tui --selection-smoke attention 1
+assert_contains "Action task: AA-02"
+assert_contains "Match: yes"
+expect_ok "$BIN" ready AA-02 --actor user --no-review
+expect_ok "$BIN" tui --selection-smoke ready 0
+assert_contains "Action task: AA-02"
+assert_contains "Highlighted task: AA-02"
+assert_contains "Match: yes"
+
 case_dir="$(make_case_dir tui-palette-help)"
 cd "$case_dir"
 mkdir repo
