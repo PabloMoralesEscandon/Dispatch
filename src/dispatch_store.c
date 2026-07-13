@@ -771,8 +771,10 @@ static int load_workspaces(DispatchBoard *board, json_t *workspaces,
         const char *path = json_string_or(value, "path", NULL);
         const char *branch = json_string_or(value, "branch", NULL);
         const char *repo_path = json_string_or(value, "repo_path", NULL);
+        /* A record whose task no longer exists still loads: rejecting it
+         * would make the whole board unreadable (e.g. after a forced task
+         * delete). Doctor reports such orphaned workspaces instead. */
         if (!id || !task_id || !actor || !path || !branch || !repo_path ||
-            !dispatch_board_find_task(board, task_id) ||
             dispatch_board_find_workspace(board, id) ||
             dispatch_board_find_workspace(board, task_id)) {
             set_error(error, error_size, "invalid or duplicate workspace record");
@@ -813,21 +815,6 @@ static int load_workspaces(DispatchBoard *board, json_t *workspaces,
     return 1;
 }
 
-static int validate_dependencies(DispatchBoard *board, char *error,
-                                 size_t error_size) {
-    for (size_t i = 0; i < board->tasks.count; i++) {
-        DispatchTask *task = &board->tasks.items[i];
-        for (size_t dep = 0; dep < task->depends_on.count; dep++) {
-            if (!dispatch_board_find_task(board, task->depends_on.items[dep])) {
-                set_error(error, error_size,
-                          "task depends_on references a missing task");
-                return 0;
-            }
-        }
-    }
-    return 1;
-}
-
 int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
                         size_t error_size) {
     json_error_t json_error;
@@ -861,6 +848,9 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
             board, json_string_or(workspace, "repo_path", "."));
     }
 
+    /* Dependency references to missing tasks are tolerated at load time:
+     * the affected task presents as blocked and doctor reports the anomaly.
+     * Rejecting the whole board would make it unreadable. */
     if (!load_groups(board, json_object_get(json_board, "groups"), error,
                      error_size) ||
         !load_tasks(board, json_object_get(json_board, "tasks"), error,
@@ -868,8 +858,7 @@ int dispatch_store_load(DispatchBoard *board, const char *path, char *error,
         !load_agents(board, json_object_get(json_board, "agents"), error,
                      error_size) ||
         !load_workspaces(board, json_object_get(json_board, "workspaces"),
-                         error, error_size) ||
-        !validate_dependencies(board, error, error_size)) {
+                         error, error_size)) {
         dispatch_board_free(board);
         json_decref(root);
         return 0;

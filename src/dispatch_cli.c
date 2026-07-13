@@ -3941,6 +3941,81 @@ static int cmd_doctor(int argc, char **argv) {
                         "run dispatch workspace show <id> and prune stale records if needed");
     }
 
+    /* Orphaned workspaces: active records whose task no longer exists. */
+    size_t orphaned = 0;
+    for (size_t i = 0; i < board.workspaces.count; i++) {
+        DispatchWorkspace *workspace = &board.workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        if (!dispatch_board_find_task(&board, workspace->task_id)) {
+            char message[512];
+            snprintf(message, sizeof(message),
+                     "workspace %s references missing task %s", workspace->id,
+                     workspace->task_id);
+            doctor_warn(&warnings, message,
+                        "remove it with dispatch workspace remove <id> --force");
+            orphaned++;
+        }
+    }
+    if (orphaned == 0)
+        doctor_ok("no orphaned workspaces");
+
+    /* Done tasks should carry at least one commit reference. */
+    size_t done_without_commits = 0;
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        if (task->state != DISPATCH_STATE_DONE || task->commits.count > 0)
+            continue;
+        char message[512];
+        snprintf(message, sizeof(message),
+                 "done task %s has no recorded commits", task->id);
+        doctor_warn(&warnings, message,
+                    "record one with dispatch commit add <id> <sha>");
+        done_without_commits++;
+    }
+    if (done_without_commits == 0)
+        doctor_ok("all done tasks have recorded commits");
+
+    /* Dependency anomalies: missing references, self-dependencies, and
+     * duplicate entries. */
+    size_t dep_anomalies = 0;
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        for (size_t d = 0; d < task->depends_on.count; d++) {
+            const char *dep = task->depends_on.items[d];
+            char message[512];
+            if (strcmp(dep, task->id) == 0) {
+                snprintf(message, sizeof(message),
+                         "task %s depends on itself", task->id);
+                doctor_warn(&warnings, message,
+                            "remove it with dispatch dep remove");
+                dep_anomalies++;
+                continue;
+            }
+            if (!dispatch_board_find_task(&board, dep)) {
+                snprintf(message, sizeof(message),
+                         "task %s depends on missing task %s", task->id, dep);
+                doctor_warn(&warnings, message,
+                            "remove it with dispatch dep remove");
+                dep_anomalies++;
+                continue;
+            }
+            for (size_t j = 0; j < d; j++) {
+                if (strcmp(task->depends_on.items[j], dep) == 0) {
+                    snprintf(message, sizeof(message),
+                             "task %s lists dependency %s more than once",
+                             task->id, dep);
+                    doctor_warn(&warnings, message,
+                                "remove the duplicate with dispatch dep remove");
+                    dep_anomalies++;
+                    break;
+                }
+            }
+        }
+    }
+    if (dep_anomalies == 0)
+        doctor_ok("no dependency anomalies");
+
     printf("Summary: %zu warning%s\n", warnings, warnings == 1 ? "" : "s");
     dispatch_board_free(&board);
     return 0;

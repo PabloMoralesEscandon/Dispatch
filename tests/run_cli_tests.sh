@@ -1695,6 +1695,47 @@ assert_contains "Priority: 5"
 expect_ok "$BIN" ready --json
 assert_contains '"priority": 5'
 
+# WX-03: doctor flags orphaned workspaces, done tasks without commits, and
+# dependency anomalies (missing reference, self-dependency, duplicates), and
+# reports clean checks on a healthy board.
+case_dir="$(make_case_dir doctor-diagnostics)"
+cd "$case_dir"
+mkdir repo
+cp "$ROOT/tests/fixtures/doctor-anomaly-board.json" dispatch.json
+expect_ok "$BIN" doctor
+assert_contains "workspace DE-77 references missing task DE-77"
+assert_contains "done task DE-01 has no recorded commits"
+assert_contains "task DE-02 depends on missing task ZZ-99"
+assert_contains "task DE-02 depends on itself"
+assert_contains "task DE-02 lists dependency DE-01 more than once"
+# A healthy board reports the new checks as ok.
+rm dispatch.json
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Clean
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+expect_ok "$BIN" commit add DE-01 abc1234 --actor codex
+expect_ok "$BIN" doctor
+assert_contains "no orphaned workspaces"
+assert_contains "all done tasks have recorded commits"
+assert_contains "no dependency anomalies"
+# Deleting a task that has a workspace leaves the board loadable and the
+# orphaned record diagnosable (previously this made the board unreadable).
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" task add DE Doomed
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" workspace create DE-02 --actor codex
+expect_ok "$BIN" task delete DE-02 --force
+expect_ok "$BIN" list
+expect_ok "$BIN" doctor
+assert_contains "workspace DE-02 references missing task DE-02"
+expect_ok "$BIN" workspace remove DE-02 --force
+expect_ok "$BIN" doctor
+assert_contains "no orphaned workspaces"
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo
