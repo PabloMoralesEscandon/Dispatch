@@ -448,6 +448,7 @@ yet.
 
 ```bash
 dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review]
+dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
 dispatch show <id>
 dispatch list [all] [group]
@@ -459,6 +460,12 @@ its own column. By default, tasks require review after they are finished.
 `--actor` records who created the proposed task in task history and
 `dispatch.log`; it defaults to `user`. Use `--no-review` only when the task can
 safely complete and unblock the next task without human acceptance.
+
+`task move` changes the task's group while preserving its ID, workflow state,
+dependencies, commit references, workspace associations, agent session links,
+and history. The move is appended to task history using the supplied `--actor`,
+which defaults to `user`. Because IDs are stable, a moved task can keep an ID
+prefix from its original group, such as `DE-02` while listed in group `QA`.
 
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.
