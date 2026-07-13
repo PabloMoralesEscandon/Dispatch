@@ -182,7 +182,9 @@ dispatch ready
 ```
 
 Working directly in the main repository checkout is the exception, not the
-default: do it only when the user explicitly says to work in place.
+default: do it only when the user explicitly says to work in place. For a
+linear chain of dependent tasks that should share one branch, create the
+workspace with `--sequence`; see Running A Task Sequence In One Workspace.
 
 If `finish` reports that review is required, stop that sequence. Do not continue
 past a review gate until the user accepts the task.
@@ -311,16 +313,49 @@ Each agent starts only its own task and edits only its own worktree. A human or
 designated integrator merges accepted branches back into the main repository one
 at a time.
 
-Use `--sequence` only for a direct linear dependency chain where intermediate
-tasks do not require review and the chain ends at the first review gate:
+For a direct linear chain of dependent tasks, one shared workspace can cover
+the whole chain; see Running A Task Sequence In One Workspace.
+
+## Running A Task Sequence In One Workspace
+
+Use `--sequence` when a direct linear chain of dependent tasks should share
+one workspace and branch: each task builds on the previous task's commit, and
+the same actor works the whole chain.
+
+The chain must be a straight line: each intermediate task has exactly one
+dependent, and that dependent depends only on it. The sequence terminates at
+the first review-required task, or, when every task in the chain is
+no-review, at the natural end of the chain (the final task with no
+dependents).
+
+Create the workspace on the first task of the chain:
 
 ```bash
 dispatch workspace create DE-01 --actor codex-server --sequence
+dispatch workspace show DE-01
 ```
 
-The same actor works through the sequence in one workspace and still makes one
-commit per completed Dispatch task. Stop when the review-required gate task
-reaches `review`.
+Then work the chain in dependency order inside that one worktree, still
+making one commit per completed Dispatch task:
+
+```bash
+dispatch start DE-01 --actor codex-server
+# Do the work for DE-01, run checks.
+dispatch finish DE-01 --actor codex-server
+git add <files for DE-01>
+git commit -m "First task title"
+
+dispatch start DE-02 --actor codex-server
+# DE-02 builds on DE-01's commit in the same worktree.
+dispatch finish DE-02 --actor codex-server
+git add <files for DE-02>
+git commit -m "Second task title"
+```
+
+Stop where the sequence terminates. If the final task requires review,
+`finish` moves it to `review` and the sequence waits there for the user. If
+the chain is all no-review tasks, `finish` on the last task completes the
+sequence.
 
 ## Executing A User-Named Task
 
