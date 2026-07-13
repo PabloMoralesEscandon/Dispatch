@@ -354,13 +354,15 @@ searches, and `c` clears secondary filters. Board, agents, workspaces, and logs
 scroll with the selected row.
 
 Task actions are available from the board and task inspector: `r` ready, `s`
-start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `n` opens a
-full-screen task creation form with boxed fields, `+` creates a group, `>` adds
-a dependency to the inspected task, `<` removes a dependency, and `d` opens the
-diff for the selected task when commit metadata exists. The diff covers all of
-the task's recorded commits, is rendered with forced color, and is shown through
-a pager (`$PAGER`, else `less` or `more`) so it stays on screen until you quit
-the pager. When no pager is installed the diff is shown without paging.
+start, `f` finish, and `v` review using `DISPATCH_ACTOR` or `user`. `e` edits
+the selected task's title and description, and `m` moves it to another existing
+group while preserving its ID. `n` opens a full-screen task creation form with
+boxed fields, `+` creates a group, `>` adds a dependency to the inspected task,
+`<` removes a dependency, and `d` opens the diff for the selected task when
+commit metadata exists. The diff covers all of the task's recorded commits, is
+rendered with forced color, and is shown through a pager (`$PAGER`, else `less`
+or `more`) so it stays on screen until you quit the pager. When no pager is
+installed the diff is shown without paging.
 In the task creation form, `Ctrl-O` opens an option picker for the active
 field: on the Group field it lists existing groups (typing still creates a new
 group), and on the Depends field it lists not-done tasks, excluding done tasks
@@ -448,6 +450,8 @@ yet.
 
 ```bash
 dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review]
+dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]
+dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
 dispatch show <id>
 dispatch list [all] [group]
@@ -459,6 +463,17 @@ its own column. By default, tasks require review after they are finished.
 `--actor` records who created the proposed task in task history and
 `dispatch.log`; it defaults to `user`. Use `--no-review` only when the task can
 safely complete and unblock the next task without human acceptance.
+
+`task edit` changes a task's title, description, or both without changing its
+ID, group, workflow state, dependencies, commit references, or prior history.
+The edit is appended to task history using the supplied `--actor`, which
+defaults to `user`. Pass an empty description to clear it.
+
+`task move` changes the task's group while preserving its ID, workflow state,
+dependencies, commit references, workspace associations, agent session links,
+and history. The move is appended to task history using the supplied `--actor`,
+which defaults to `user`. Because IDs are stable, a moved task can keep an ID
+prefix from its original group, such as `DE-02` while listed in group `QA`.
 
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.

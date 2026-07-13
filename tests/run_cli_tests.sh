@@ -506,6 +506,125 @@ assert_contains "Could not delete DE-01"
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
 
+case_dir="$(make_case_dir task-edit)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --description "Root task" --no-review
+expect_ok "$BIN" task add DE Dependent --description "Original description"
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" commit add DE-02 abc1234 --actor codex
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" ready DE-02 --actor user
+
+expect_fail "$BIN" task edit DE-02
+assert_contains "Task edit requires --title, --description, or both"
+expect_fail "$BIN" task edit missing --title Updated
+assert_contains "No task with id missing"
+expect_fail "$BIN" task edit DE-02 --title ""
+assert_contains "Task title must not be empty"
+expect_fail "$BIN" task edit DE-02 --title "DE-99 Bad title"
+assert_contains "Task titles should not include Dispatch IDs"
+expect_fail "$BIN" task edit DE-02 --title Updated --actor bad/name
+assert_contains "Actor must start with an ASCII letter or digit"
+expect_fail "$BIN" task edit DE-02 --unknown value
+assert_contains "Unknown task edit option"
+
+expect_ok "$BIN" task edit DE-02 --title "Revised dependent" --description "Revised description" --actor editor
+assert_contains "Edited task DE-02"
+expect_ok "$BIN" show DE-02
+assert_contains "ID: DE-02"
+assert_contains "Title: Revised dependent"
+assert_contains "Description: Revised description"
+assert_contains "Group: DE"
+assert_contains "State: blocked"
+assert_contains "Depends on: DE-01"
+assert_contains "Commits: abc1234"
+assert_contains "created by user"
+assert_contains "commit by codex: abc1234"
+assert_contains "ready by user"
+assert_contains "edited by editor: title and description"
+
+expect_ok "$BIN" task edit DE-02 --title "Final dependent"
+expect_ok "$BIN" show DE-02
+assert_contains "Title: Final dependent"
+assert_contains "Description: Revised description"
+assert_contains "edited by user: title"
+
+expect_ok "$BIN" task edit DE-02 --description "" --actor editor
+expect_ok "$BIN" show DE-02
+assert_contains "Title: Final dependent"
+assert_line "Description: "
+assert_contains "edited by editor: description"
+assert_file_contains dispatch.log '"actor":"editor"'
+assert_file_contains dispatch.log '"command":"task"'
+assert_file_contains dispatch.log '"action":"edit"'
+assert_file_contains dispatch.log '"task":"DE-02"'
+
+case_dir="$(make_case_dir task-move)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" group add Quality --prefix QA
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE Dependent --description "Move me"
+expect_ok "$BIN" task add DE Follower
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" dep add DE-02 DE-03
+expect_ok "$BIN" commit add DE-02 abc1234 --actor codex
+expect_ok "$BIN" agent create --name mover --runner codex --no-run-script
+expect_ok "$BIN" agent session mover --current-task DE-02
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" ready DE-02 --actor user
+
+expect_fail "$BIN" task move missing QA
+assert_contains "No task with id missing"
+expect_fail "$BIN" task move DE-02 missing
+assert_contains "No group with id, prefix, or name missing"
+expect_fail "$BIN" task move DE-02 QA --actor bad/name
+assert_contains "Actor must start with an ASCII letter or digit"
+expect_fail "$BIN" task move DE-02 QA --unknown
+assert_contains "Unknown task move option"
+
+expect_ok "$BIN" task move DE-02 Quality --actor editor
+assert_contains "Moved task DE-02 from DE to QA (ID unchanged)"
+expect_ok "$BIN" show DE-02
+assert_contains "ID: DE-02"
+assert_contains "Title: Dependent"
+assert_contains "Description: Move me"
+assert_contains "Group: QA"
+assert_contains "State: blocked"
+assert_contains "Depends on: DE-01"
+assert_contains "Blocks: DE-03"
+assert_contains "Commits: abc1234"
+assert_contains "created by user"
+assert_contains "commit by codex: abc1234"
+assert_contains "ready by user"
+assert_contains "moved by editor: from DE to QA"
+
+expect_ok "$BIN" show DE-03
+assert_contains "Depends on: DE-02"
+expect_ok "$BIN" agent show mover
+assert_contains "Current task: DE-02"
+expect_ok "$BIN" list QA
+assert_contains "DE-02"
+assert_contains "Dependent"
+
+expect_ok "$BIN" task add QA "Native quality task"
+assert_contains "Added task QA-01"
+expect_fail "$BIN" task move DE-02 QA
+assert_contains "Task DE-02 already belongs to group QA"
+assert_file_contains dispatch.log '"actor":"editor"'
+assert_file_contains dispatch.log '"command":"task"'
+assert_file_contains dispatch.log '"action":"move"'
+assert_file_contains dispatch.log '"task":"DE-02"'
+assert_file_contains dispatch.log '"group":"QA"'
+assert_file_contains dispatch.log '"id_changed":"false"'
+
 case_dir="$(make_case_dir dispatch-log)"
 cd "$case_dir"
 mkdir repo
@@ -1274,6 +1393,31 @@ expect_ok "$BIN" tui --action-smoke review DE-01 reviewer
 assert_contains "Reviewed DE-01"
 expect_ok "$BIN" show DE-01
 assert_contains "State: done"
+
+case_dir="$(make_case_dir tui-edit-move)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" group add Quality --prefix QA
+expect_ok "$BIN" task add DE Root --description "Original"
+expect_ok "$BIN" tui --task-edit-smoke DE-01 "Revised task" "Revised description" editor
+assert_contains "Edited task DE-01"
+expect_ok "$BIN" show DE-01
+assert_contains "ID: DE-01"
+assert_contains "Title: Revised task"
+assert_contains "Description: Revised description"
+assert_contains "edited by editor: title and description"
+expect_fail "$BIN" tui --task-edit-smoke DE-01 "DE-99 Bad title" - editor
+assert_contains "Task title should not include an ID"
+expect_ok "$BIN" tui --task-move-smoke DE-01 QA mover
+assert_contains "Moved task DE-01 from DE to QA"
+expect_ok "$BIN" show DE-01
+assert_contains "ID: DE-01"
+assert_contains "Group: QA"
+assert_contains "moved by mover: from DE to QA"
+expect_fail "$BIN" tui --task-move-smoke DE-01 QA mover
+assert_contains "already belongs to group QA"
 
 case_dir="$(make_case_dir tui-create)"
 cd "$case_dir"
