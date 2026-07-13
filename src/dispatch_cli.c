@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "dispatch.h"
+#include "dispatch_json.h"
 #include "dispatch_store.h"
 #include "dispatch_tui.h"
 
@@ -4199,8 +4200,13 @@ static void print_list_for_group(const DispatchBoard *board,
 }
 
 static int cmd_list(int argc, char **argv) {
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
+        fprintf(stderr, "Usage: dispatch list [all] [group] [--json]\n");
+        return 1;
+    }
     if (argc != 2 && argc != 3 && argc != 4) {
-        fprintf(stderr, "Usage: dispatch list [all] [group]\n");
+        fprintf(stderr, "Usage: dispatch list [all] [group] [--json]\n");
         return 1;
     }
 
@@ -4211,7 +4217,7 @@ static int cmd_list(int argc, char **argv) {
         group_arg = 3;
     }
     if (argc == 4 && !include_done) {
-        fprintf(stderr, "Usage: dispatch list [all] [group]\n");
+        fprintf(stderr, "Usage: dispatch list [all] [group] [--json]\n");
         return 1;
     }
 
@@ -4228,9 +4234,29 @@ static int cmd_list(int argc, char **argv) {
                     argv[group_arg]);
             return 1;
         }
+        if (json_output) {
+            DispatchJsonRequest request = {
+                .command = "list",
+                .group = group->id,
+                .include_done = include_done,
+            };
+            int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+            dispatch_board_free(&board);
+            return result;
+        }
         print_list_for_group(&board, group, include_done);
         dispatch_board_free(&board);
         return 0;
+    }
+
+    if (json_output) {
+        DispatchJsonRequest request = {
+            .command = "list",
+            .include_done = include_done,
+        };
+        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        dispatch_board_free(&board);
+        return result;
     }
 
     if (board.groups.count == 0) {
@@ -4245,8 +4271,13 @@ static int cmd_list(int argc, char **argv) {
 }
 
 static int cmd_show(int argc, char **argv) {
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
+        fprintf(stderr, "Usage: dispatch show <id> [--json]\n");
+        return 1;
+    }
     if (argc != 3) {
-        fprintf(stderr, "Usage: dispatch show <id>\n");
+        fprintf(stderr, "Usage: dispatch show <id> [--json]\n");
         return 1;
     }
 
@@ -4259,6 +4290,17 @@ static int cmd_show(int argc, char **argv) {
         dispatch_board_free(&board);
         fprintf(stderr, "No task with id %s\n", argv[2]);
         return 1;
+    }
+
+    if (json_output) {
+        DispatchJsonRequest request = {
+            .command = "show",
+            .task_id = task->id,
+            .include_done = -1,
+        };
+        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        dispatch_board_free(&board);
+        return result;
     }
 
     printf("ID: %s\n", task->id);
@@ -4480,10 +4522,21 @@ static int cmd_commit(int argc, char **argv) {
     return 0;
 }
 
-static int cmd_ready_list(void) {
+static int cmd_ready_list(int json_output) {
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    if (json_output) {
+        DispatchJsonRequest request = {
+            .command = "ready",
+            .include_done = -1,
+            .state_mask = DISPATCH_JSON_STATE(DISPATCH_STATE_READY),
+        };
+        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        dispatch_board_free(&board);
+        return result;
+    }
 
     int count = print_ready_tasks_from_board(&board, "");
     if (count == 0) {
@@ -4511,15 +4564,30 @@ static int cmd_ready_list(void) {
 
 static int cmd_queue_list(int argc, char **argv, DispatchState state,
                           const char *label) {
-    (void)argv;
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
+        fprintf(stderr, "Usage: dispatch %s [--json]\n", label);
+        return 1;
+    }
     if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch %s\n", label);
+        fprintf(stderr, "Usage: dispatch %s [--json]\n", label);
         return 1;
     }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    if (json_output) {
+        DispatchJsonRequest request = {
+            .command = label,
+            .include_done = -1,
+            .state_mask = DISPATCH_JSON_STATE(state),
+        };
+        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        dispatch_board_free(&board);
+        return result;
+    }
 
     int count = print_tasks_by_presentation_state(&board, state, "");
     if (count == 0)
@@ -4530,15 +4598,30 @@ static int cmd_queue_list(int argc, char **argv, DispatchState state,
 }
 
 static int cmd_blocked(int argc, char **argv) {
-    (void)argv;
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
+        fprintf(stderr, "Usage: dispatch blocked [--json]\n");
+        return 1;
+    }
     if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch blocked\n");
+        fprintf(stderr, "Usage: dispatch blocked [--json]\n");
         return 1;
     }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    if (json_output) {
+        DispatchJsonRequest request = {
+            .command = "blocked",
+            .include_done = -1,
+            .state_mask = DISPATCH_JSON_STATE(DISPATCH_STATE_BLOCKED),
+        };
+        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        dispatch_board_free(&board);
+        return result;
+    }
 
     for (size_t i = 0; i < board.tasks.count; i++) {
         DispatchTask *task = &board.tasks.items[i];
@@ -4563,15 +4646,32 @@ static int cmd_blocked(int argc, char **argv) {
 }
 
 static int cmd_status(int argc, char **argv) {
-    (void)argv;
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
+        fprintf(stderr, "Usage: dispatch status [--json]\n");
+        return 1;
+    }
     if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch status\n");
+        fprintf(stderr, "Usage: dispatch status [--json]\n");
         return 1;
     }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    if (json_output) {
+        DispatchJsonRequest request = {
+            .command = "status",
+            .include_done = -1,
+            .state_mask = DISPATCH_JSON_STATE(DISPATCH_STATE_READY) |
+                          DISPATCH_JSON_STATE(DISPATCH_STATE_REVIEW),
+            .include_warnings = 1,
+        };
+        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        dispatch_board_free(&board);
+        return result;
+    }
 
     size_t state_counts[DISPATCH_STATE_PAUSED + 1] = {0};
     size_t enabled_agents = 0;
@@ -4671,8 +4771,18 @@ static int cmd_status(int argc, char **argv) {
 }
 
 static int cmd_ready(int argc, char **argv) {
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
+        fprintf(stderr, "Usage: dispatch ready [--json] | dispatch ready <id> "
+                        "[--actor <name>] [--no-review]\n");
+        return 1;
+    }
     if (argc == 2)
-        return cmd_ready_list();
+        return cmd_ready_list(json_output);
+    if (json_output) {
+        fprintf(stderr, "--json is only valid when listing ready tasks\n");
+        return 1;
+    }
     if (argc < 3) {
         fprintf(stderr,
                 "Usage: dispatch ready <id> [--actor <name>] [--no-review]\n");

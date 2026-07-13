@@ -8,6 +8,7 @@ const char *sources[] = {
     "src/main.c",
     "src/dispatch.c",
     "src/dispatch_cli.c",
+    "src/dispatch_json.c",
     "src/dispatch_store.c",
     "src/dispatch_tui.c",
     NULL,

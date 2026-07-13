@@ -57,6 +57,18 @@ assert_not_contains() {
     fi
 }
 
+assert_output_equals() {
+    if [ "$RUN_OUTPUT" != "$1" ]; then
+        fail "human-readable output changed after a JSON read"
+    fi
+}
+
+assert_json() {
+    if ! printf '%s\n' "$RUN_OUTPUT" | "$JSON_ASSERT" "$@"; then
+        fail "JSON assertion failed"
+    fi
+}
+
 assert_file_contains() {
     local file="$1"
     local text="$2"
@@ -106,6 +118,9 @@ cc -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c \
 cc -Iinclude tests/workspace_naming_test.c src/dispatch.c \
     -o "$TMP_ROOT/workspace_naming_test"
 "$TMP_ROOT/workspace_naming_test" "$TMP_ROOT/workspace-naming" >/dev/null
+
+JSON_ASSERT="$TMP_ROOT/json_assert"
+cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
 
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
@@ -512,6 +527,210 @@ assert_contains "Could not delete DE-01"
 
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
+
+case_dir="$(make_case_dir json-output)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" group add Empty --prefix EM
+expect_ok "$BIN" agent create --name json-agent --runner codex --no-run-script
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE Blocked
+expect_ok "$BIN" task add DE Proposed
+expect_ok "$BIN" task add DE Active --no-review
+expect_ok "$BIN" task add DE Review
+expect_ok "$BIN" task add DE Done --no-review
+expect_ok "$BIN" task add DE Ready
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" dep add DE-01 DE-03
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" ready DE-04 --actor user --no-review
+expect_ok "$BIN" ready DE-05 --actor user
+expect_ok "$BIN" ready DE-06 --actor user --no-review
+expect_ok "$BIN" ready DE-07 --actor user
+expect_ok "$BIN" start DE-04 --actor json-agent
+expect_ok "$BIN" start DE-05 --actor json-agent
+expect_ok "$BIN" finish DE-05 --actor json-agent
+expect_ok "$BIN" start DE-06 --actor json-agent
+expect_ok "$BIN" finish DE-06 --actor json-agent
+expect_ok "$BIN" workspace create DE-07 --actor json-agent
+expect_ok "$BIN" agent session json-agent --current-task DE-04 \
+    --last-workspace DE-07
+
+expect_ok "$BIN" list
+human_list="$RUN_OUTPUT"
+expect_ok "$BIN" show DE-02
+human_show="$RUN_OUTPUT"
+expect_ok "$BIN" ready
+human_ready="$RUN_OUTPUT"
+expect_ok "$BIN" blocked
+human_blocked="$RUN_OUTPUT"
+expect_ok "$BIN" reviews
+human_reviews="$RUN_OUTPUT"
+expect_ok "$BIN" proposed
+human_proposed="$RUN_OUTPUT"
+expect_ok "$BIN" status
+human_status="$RUN_OUTPUT"
+
+expect_ok "$BIN" list --json
+assert_json \
+    schema_version integer 1 \
+    command string list \
+    board.name string Dispatch \
+    board.groups array_length 2 \
+    query.task_id null - \
+    query.group null - \
+    query.include_done boolean false \
+    query.states array_length 0 \
+    summary.total integer 7 \
+    summary.returned integer 6 \
+    summary.states.proposed integer 1 \
+    summary.states.ready integer 2 \
+    summary.states.blocked integer 1 \
+    summary.states.doing integer 1 \
+    summary.states.review integer 1 \
+    summary.states.done integer 1 \
+    summary.states.paused integer 0 \
+    summary.agents.enabled integer 1 \
+    summary.agents.with_current_task integer 1 \
+    summary.workspaces.active integer 1 \
+    tasks array_length 6 \
+    warnings array_length 0
+
+expect_ok "$BIN" list --json all Development
+assert_json \
+    command string list \
+    query.group string DE \
+    query.include_done boolean true \
+    summary.total integer 7 \
+    summary.returned integer 7 \
+    tasks.5.id string DE-06
+
+expect_ok "$BIN" list Empty --json
+assert_json \
+    query.group string EM \
+    query.include_done boolean false \
+    summary.returned integer 0 \
+    tasks array_length 0
+
+expect_ok "$BIN" show --json DE-02
+assert_json \
+    command string show \
+    query.task_id string DE-02 \
+    query.include_done null - \
+    summary.returned integer 1 \
+    tasks array_length 1 \
+    tasks.0.id string DE-02 \
+    tasks.0.title string Blocked \
+    tasks.0.description string "" \
+    tasks.0.group string DE \
+    tasks.0.state string blocked \
+    tasks.0.stored_state string blocked \
+    tasks.0.requires_review boolean true \
+    tasks.0.assigned_to null - \
+    tasks.0.started_by null - \
+    tasks.0.completed_by null - \
+    tasks.0.depends_on.0 string DE-01 \
+    tasks.0.blocked_by.0 string DE-01 \
+    tasks.0.blocks array_length 0 \
+    tasks.0.commits array_length 0 \
+    tasks.0.workspace null - \
+    tasks.0.created_at integer "*" \
+    tasks.0.started_at null - \
+    tasks.0.completed_at null - \
+    tasks.0.updated_at integer "*" \
+    tasks.0.history.0.actor string user \
+    tasks.0.history.0.action string created \
+    tasks.0.history.0.note string ""
+
+expect_ok "$BIN" show DE-07 --json
+assert_json \
+    tasks.0.state string ready \
+    tasks.0.workspace object - \
+    tasks.0.workspace.id string DE-07 \
+    tasks.0.workspace.actor string json-agent \
+    tasks.0.workspace.branch string agent/json-agent/DE-07 \
+    tasks.0.workspace.state string active
+
+expect_ok "$BIN" ready --json
+assert_json \
+    command string ready \
+    query.states.0 string ready \
+    summary.returned integer 2 \
+    tasks.0.id string DE-01 \
+    tasks.1.id string DE-07
+
+expect_ok "$BIN" blocked --json
+assert_json \
+    command string blocked \
+    query.states.0 string blocked \
+    summary.returned integer 1 \
+    tasks.0.id string DE-02 \
+    tasks.0.blocked_by.0 string DE-01
+
+expect_ok "$BIN" reviews --json
+assert_json \
+    command string reviews \
+    query.states.0 string review \
+    summary.returned integer 1 \
+    tasks.0.id string DE-05
+
+expect_ok "$BIN" proposed --json
+assert_json \
+    command string proposed \
+    query.states.0 string proposed \
+    summary.returned integer 1 \
+    tasks.0.id string DE-03 \
+    tasks.0.state string proposed \
+    tasks.0.stored_state string proposed \
+    tasks.0.blocked_by.0 string DE-01
+
+expect_ok "$BIN" status --json
+assert_json \
+    command string status \
+    query.states.0 string ready \
+    query.states.1 string review \
+    summary.returned integer 3 \
+    tasks.0.id string DE-01 \
+    tasks.1.id string DE-05 \
+    tasks.2.id string DE-07 \
+    warnings.0.code string missing_commits \
+    warnings.0.task_id string DE-05 \
+    warnings.0.agent null - \
+    warnings.1.code string missing_commits \
+    warnings.1.task_id string DE-06 \
+    warnings array_length 2
+
+expect_fail "$BIN" ready DE-07 --json
+assert_contains "--json is only valid when listing ready tasks"
+assert_not_contains '"schema_version"'
+expect_fail "$BIN" status --json --json
+assert_contains "Usage: dispatch status [--json]"
+assert_not_contains '"schema_version"'
+expect_fail "$BIN" show Missing --json
+assert_contains "No task with id Missing"
+assert_not_contains '"schema_version"'
+
+expect_ok "$BIN" list
+assert_output_equals "$human_list"
+expect_ok "$BIN" show DE-02
+assert_output_equals "$human_show"
+expect_ok "$BIN" ready
+assert_output_equals "$human_ready"
+expect_ok "$BIN" blocked
+assert_output_equals "$human_blocked"
+expect_ok "$BIN" reviews
+assert_output_equals "$human_reviews"
+expect_ok "$BIN" proposed
+assert_output_equals "$human_proposed"
+expect_ok "$BIN" status
+assert_output_equals "$human_status"
 
 case_dir="$(make_case_dir task-edit)"
 cd "$case_dir"
