@@ -92,6 +92,10 @@ int main(int argc, char **argv) {
              * behavior while the test suite runs. */
             nob_cmd_append(&cmd, "-g", "-O1", "-fsanitize=address,undefined",
                            "-fno-omit-frame-pointer");
+        } else if (!strcmp(argv[1], "werror")) {
+            /* Warnings-as-errors build for CI: regressions in warning
+             * cleanliness fail the build. */
+            nob_cmd_append(&cmd, "-g", "-O0", "-Werror");
         } else
             nob_cmd_append(&cmd, "-g", "-O0");
     } else {
