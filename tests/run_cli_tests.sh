@@ -1401,6 +1401,31 @@ assert_contains "Reviewed DE-01"
 expect_ok "$BIN" show DE-01
 assert_contains "State: done"
 
+# TX-01: R readies the selected task AND clears its review gate in one step,
+# mirroring `dispatch ready <id> --no-review`; r keeps the gate.
+expect_ok "$BIN" task add DE Gated
+expect_ok "$BIN" tui --action-smoke ready-no-review DE-02 tester
+assert_contains "Readied DE-02 (no review)"
+expect_ok "$BIN" show DE-02
+assert_contains "State: ready"
+assert_contains "Requires review: no"
+expect_ok "$BIN" tui --action-smoke start DE-02 tester
+expect_ok "$BIN" tui --action-smoke finish DE-02 tester
+assert_contains "Finished DE-02 (done)"
+# The R key runs the no-review ready and is scoped to the task views.
+expect_ok "$BIN" task add DE KeyGated
+expect_ok "$BIN" tui --key-smoke logs R
+assert_not_contains "Readied"
+expect_ok "$BIN" show DE-03
+assert_contains "State: proposed"
+expect_ok "$BIN" tui --key-smoke board R
+assert_contains "Readied DE-03 (no review)"
+expect_ok "$BIN" show DE-03
+assert_contains "Requires review: no"
+# The attention filter preset moved to 8.
+expect_ok "$BIN" tui --key-smoke board 8
+assert_contains "Filter: attention"
+
 case_dir="$(make_case_dir tui-edit-move)"
 cd "$case_dir"
 mkdir repo
@@ -1455,31 +1480,6 @@ expect_ok "$BIN" show DE-03
 assert_contains "Depends on: DE-02"
 expect_fail "$BIN" tui --task-move-smoke DE-02 QA mover
 assert_contains "already belongs to group QA"
-
-# TX-01: R readies the selected task AND clears its review gate in one step,
-# mirroring `dispatch ready <id> --no-review`; r keeps the gate.
-expect_ok "$BIN" task add DE Gated
-expect_ok "$BIN" tui --action-smoke ready-no-review DE-02 tester
-assert_contains "Readied DE-02 (no review)"
-expect_ok "$BIN" show DE-02
-assert_contains "State: ready"
-assert_contains "Requires review: no"
-expect_ok "$BIN" tui --action-smoke start DE-02 tester
-expect_ok "$BIN" tui --action-smoke finish DE-02 tester
-assert_contains "Finished DE-02 (done)"
-# The R key runs the no-review ready and is scoped to the task views.
-expect_ok "$BIN" task add DE KeyGated
-expect_ok "$BIN" tui --key-smoke logs R
-assert_not_contains "Readied"
-expect_ok "$BIN" show DE-03
-assert_contains "State: proposed"
-expect_ok "$BIN" tui --key-smoke board R
-assert_contains "Readied DE-03 (no review)"
-expect_ok "$BIN" show DE-03
-assert_contains "Requires review: no"
-# The attention filter preset moved to 8.
-expect_ok "$BIN" tui --key-smoke board 8
-assert_contains "Filter: attention"
 
 case_dir="$(make_case_dir tui-create)"
 cd "$case_dir"
