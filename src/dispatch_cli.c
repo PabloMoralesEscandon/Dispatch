@@ -1554,6 +1554,11 @@ static int build_workspace_sequence(const DispatchBoard *board,
         size_t dependent_count = 0;
         DispatchTask *next =
             single_dependent_task(board, current->id, &dependent_count);
+        if (dependent_count == 0) {
+            /* Natural end of a no-review chain: the sequence terminates
+             * cleanly without a review gate. */
+            return 1;
+        }
         if (!next) {
             fprintf(stderr,
                     "Sequence task %s must have exactly one dependent\n",

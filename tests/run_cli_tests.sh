@@ -1192,6 +1192,27 @@ expect_ok "$BIN" ready DE-07 --actor user
 expect_fail "$BIN" workspace create DE-07 --actor seq --sequence
 assert_contains "Sequence task DE-09 must depend only on DE-07"
 
+# FX-05: a --sequence chain of all no-review tasks terminates cleanly at the
+# task with zero dependents instead of erroring about a missing review gate.
+expect_ok "$BIN" task add DE ChainStart --no-review
+expect_ok "$BIN" task add DE ChainEnd --no-review
+expect_ok "$BIN" dep add DE-10 DE-11
+expect_ok "$BIN" ready DE-10 --actor user
+expect_ok "$BIN" ready DE-11 --actor user
+expect_ok "$BIN" workspace create DE-10 --actor seq2 --sequence
+assert_contains "tasks: DE-10,DE-11"
+assert_contains "review gate: -"
+expect_ok "$BIN" workspace show DE-11
+assert_contains "Sequence tasks: DE-10,DE-11"
+assert_contains "Review gate: -"
+
+# FX-05: a single no-review task with zero dependents also forms a sequence.
+expect_ok "$BIN" task add DE Solo --no-review
+expect_ok "$BIN" ready DE-12 --actor user
+expect_ok "$BIN" workspace create DE-12 --actor seq3 --sequence
+assert_contains "tasks: DE-12"
+assert_contains "review gate: -"
+
 case_dir="$(make_case_dir ready-no-review)"
 cd "$case_dir"
 mkdir repo
