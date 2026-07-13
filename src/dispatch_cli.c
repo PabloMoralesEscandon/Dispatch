@@ -4774,7 +4774,7 @@ static int cmd_ready(int argc, char **argv) {
     int json_output = 0;
     if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
         fprintf(stderr, "Usage: dispatch ready [--json] | dispatch ready <id> "
-                        "[--actor <name>] [--no-review]\n");
+                        "[<id> ...] [--actor <name>] [--no-review]\n");
         return 1;
     }
     if (argc == 2)
@@ -4784,16 +4784,24 @@ static int cmd_ready(int argc, char **argv) {
         return 1;
     }
     if (argc < 3) {
-        fprintf(stderr,
-                "Usage: dispatch ready <id> [--actor <name>] [--no-review]\n");
+        fprintf(stderr, "Usage: dispatch ready <id> [<id> ...] "
+                        "[--actor <name>] [--no-review]\n");
         return 1;
     }
 
-    const char *task_id = argv[2];
+    /* Leading arguments are task IDs; options follow the last ID. */
+    int ids_end = 2;
+    while (ids_end < argc && strncmp(argv[ids_end], "--", 2) != 0)
+        ids_end++;
+    if (ids_end == 2) {
+        fprintf(stderr, "Usage: dispatch ready <id> [<id> ...] "
+                        "[--actor <name>] [--no-review]\n");
+        return 1;
+    }
+
     const char *actor = "user";
     int no_review = 0;
-
-    for (int i = 3; i < argc; i++) {
+    for (int i = ids_end; i < argc; i++) {
         if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
             actor = argv[++i];
         } else if (strcmp(argv[i], "--no-review") == 0) {
@@ -4816,19 +4824,30 @@ static int cmd_ready(int argc, char **argv) {
         return 1;
     }
 
-    DispatchTask *task = dispatch_board_find_task(board, task_id);
-    if (!task || !dispatch_task_mark_ready(board, task, actor)) {
+    /* Apply the whole batch in memory before saving so a bad ID leaves the
+     * board untouched. */
+    for (int i = 2; i < ids_end; i++) {
+        DispatchTask *task = dispatch_board_find_task(board, argv[i]);
+        if (!task || !dispatch_task_mark_ready(board, task, actor)) {
+            locked_board_close(&locked);
+            fprintf(stderr, "Could not mark %s ready\n", argv[i]);
+            return 1;
+        }
+        if (no_review)
+            task->requires_review = 0;
+    }
+
+    dispatch_board_normalize_states(board);
+    if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
-        fprintf(stderr, "Could not mark %s ready\n", task_id);
         return 1;
     }
-    if (no_review)
-        task->requires_review = 0;
 
-    int result = save_task_transition(&locked, "Readied", task_id);
-    if (result == 0) {
+    for (int i = 2; i < ids_end; i++) {
+        DispatchTask *task = dispatch_board_find_task(board, argv[i]);
+        printf("Readied %s\n", argv[i]);
         DispatchLogField targets[] = {
-            {"task", task_id},
+            {"task", argv[i]},
         };
         DispatchLogField context[] = {
             {"no_review", bool_string(no_review)},
@@ -4836,12 +4855,12 @@ static int cmd_ready(int argc, char **argv) {
              dispatch_state_name(dispatch_task_effective_state(board, task))},
         };
         char message[256];
-        snprintf(message, sizeof(message), "Readied %s", task_id);
+        snprintf(message, sizeof(message), "Readied %s", argv[i]);
         append_dispatch_log(actor, "ready", "ready", targets, 1, context, 2,
                             message);
     }
     locked_board_close(&locked);
-    return result;
+    return 0;
 }
 
 static int cmd_start(int argc, char **argv) {
@@ -4954,19 +4973,32 @@ static int cmd_finish(int argc, char **argv) {
 }
 
 static int cmd_review(int argc, char **argv) {
-    if (argc != 3 && argc != 5) {
-        fprintf(stderr, "Usage: dispatch review <id> [--actor <name>]\n");
+    if (argc < 3) {
+        fprintf(stderr,
+                "Usage: dispatch review <id> [<id> ...] [--actor <name>]\n");
         return 1;
     }
 
-    const char *task_id = argv[2];
+    /* Leading arguments are task IDs; options follow the last ID. */
+    int ids_end = 2;
+    while (ids_end < argc && strncmp(argv[ids_end], "--", 2) != 0)
+        ids_end++;
+    if (ids_end == 2) {
+        fprintf(stderr,
+                "Usage: dispatch review <id> [<id> ...] [--actor <name>]\n");
+        return 1;
+    }
+
     const char *actor = "user";
-    if (argc == 5) {
-        if (strcmp(argv[3], "--actor") != 0 || argv[4][0] == '\0') {
-            fprintf(stderr, "Usage: dispatch review <id> [--actor <name>]\n");
+    for (int i = ids_end; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc &&
+            argv[i + 1][0] != '\0') {
+            actor = argv[++i];
+        } else {
+            fprintf(stderr,
+                    "Usage: dispatch review <id> [<id> ...] [--actor <name>]\n");
             return 1;
         }
-        actor = argv[4];
     }
 
     LockedBoard locked;
@@ -4974,28 +5006,38 @@ static int cmd_review(int argc, char **argv) {
         return 1;
     DispatchBoard *board = &locked.board;
 
-    DispatchTask *task = dispatch_board_find_task(board, task_id);
-    if (!task || !dispatch_task_review(task, actor)) {
+    /* Apply the whole batch in memory before saving so a bad ID leaves the
+     * board untouched. */
+    for (int i = 2; i < ids_end; i++) {
+        DispatchTask *task = dispatch_board_find_task(board, argv[i]);
+        if (!task || !dispatch_task_review(task, actor)) {
+            locked_board_close(&locked);
+            fprintf(stderr, "Could not review %s\n", argv[i]);
+            return 1;
+        }
+    }
+
+    dispatch_board_normalize_states(board);
+    if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
-        fprintf(stderr, "Could not review %s\n", task_id);
         return 1;
     }
 
-    int result = save_task_transition(&locked, "Reviewed", task_id);
-    if (result == 0) {
+    for (int i = 2; i < ids_end; i++) {
+        printf("Reviewed %s\n", argv[i]);
         DispatchLogField targets[] = {
-            {"task", task_id},
+            {"task", argv[i]},
         };
         DispatchLogField context[] = {
             {"new_state", "done"},
         };
         char message[256];
-        snprintf(message, sizeof(message), "Reviewed %s", task_id);
+        snprintf(message, sizeof(message), "Reviewed %s", argv[i]);
         append_dispatch_log(actor, "review", "review", targets, 1, context, 1,
                             message);
     }
     locked_board_close(&locked);
-    return result;
+    return 0;
 }
 
 int dispatch_cli_dispatch(int argc, char **argv) {

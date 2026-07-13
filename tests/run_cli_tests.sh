@@ -1610,6 +1610,51 @@ assert_contains "[DE] Development"
 assert_contains "  (done)"
 assert_not_contains "  DE-01    done       DirectFinish"
 
+# WX-01: ready and review accept multiple task IDs in one command. The batch
+# is atomic: one bad ID leaves the board untouched.
+case_dir="$(make_case_dir batch-ready-review)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE First
+expect_ok "$BIN" task add DE Second
+expect_ok "$BIN" task add DE Third
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 --actor user
+assert_contains "Readied DE-01"
+assert_contains "Readied DE-02"
+assert_contains "Readied DE-03"
+expect_ok "$BIN" show DE-02
+assert_contains "State: ready"
+expect_fail "$BIN" ready DE-01 DE-99 --actor user
+assert_contains "Could not mark DE-99 ready"
+expect_ok "$BIN" start DE-01 --actor codex
+expect_ok "$BIN" finish DE-01 --actor codex
+expect_ok "$BIN" start DE-02 --actor codex
+expect_ok "$BIN" finish DE-02 --actor codex
+expect_ok "$BIN" review DE-01 DE-02 --actor reviewer
+assert_contains "Reviewed DE-01"
+assert_contains "Reviewed DE-02"
+expect_ok "$BIN" show DE-01
+assert_contains "State: done"
+expect_ok "$BIN" show DE-02
+assert_contains "State: done"
+# A bad ID in a review batch changes nothing.
+expect_ok "$BIN" start DE-03 --actor codex
+expect_ok "$BIN" finish DE-03 --actor codex
+expect_fail "$BIN" review DE-03 DE-99 --actor reviewer
+assert_contains "Could not review DE-99"
+expect_ok "$BIN" show DE-03
+assert_contains "State: review"
+# Batch ready honors --no-review for every task in the batch.
+expect_ok "$BIN" task add DE Fourth
+expect_ok "$BIN" task add DE Fifth
+expect_ok "$BIN" ready DE-04 DE-05 --actor user --no-review
+expect_ok "$BIN" show DE-04
+assert_contains "Requires review: no"
+expect_ok "$BIN" show DE-05
+assert_contains "Requires review: no"
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo
