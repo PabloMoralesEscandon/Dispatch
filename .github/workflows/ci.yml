@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libjansson-dev libncurses-dev
+
+      - name: Build
+        run: |
+          cc nob.c -o nob
+          ./nob
+
+      - name: Run tests
+        run: bash tests/run_cli_tests.sh
