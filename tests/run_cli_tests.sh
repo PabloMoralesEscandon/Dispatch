@@ -1339,11 +1339,15 @@ assert_contains "Session ID: tui-session-3"
 assert_not_contains "Session ID:  tui-session-3"
 
 EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
-assert_contains "ed '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+assert_line "argv[0]: ed"
+assert_line "argv[1]: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 VISUAL=nano EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
-assert_contains "nano '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+assert_line "argv[0]: nano"
+assert_line "argv[1]: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 EDITOR="code --wait" expect_ok "$BIN" tui --prompt-edit-smoke codex-a
-assert_contains "code --wait '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+assert_line "argv[0]: code"
+assert_line "argv[1]: --wait"
+assert_line "argv[2]: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 expect_fail /usr/bin/env PATH=/nonexistent EDITOR= VISUAL= "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "No editor configured"
 

@@ -1210,25 +1210,25 @@ static const char *configured_editor(void) {
     return fallback_editor();
 }
 
-static char *editor_command_for_path(const char *path, char *error,
-                                     size_t error_size) {
+static int editor_argv_for_path(const char *path, DispatchExecArgv *argv,
+                                char *error, size_t error_size) {
     const char *editor = configured_editor();
     if (!editor || !editor[0]) {
         snprintf(error, error_size,
                  "No editor configured; set VISUAL or EDITOR to edit %s",
                  path ? path : "the prompt");
-        return NULL;
+        return 0;
     }
-    char *path_q = tui_shell_quote(path);
-    size_t size = strlen(editor) + strlen(path_q) + 2;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
+    if (!dispatch_exec_argv_parse(argv, editor)) {
+        snprintf(error, error_size, "Could not parse editor command");
+        return 0;
     }
-    snprintf(command, size, "%s %s", editor, path_q);
-    free(path_q);
-    return command;
+    if (!dispatch_exec_argv_append(argv, path ? path : "")) {
+        dispatch_exec_argv_free(argv);
+        snprintf(error, error_size, "Out of memory");
+        return 0;
+    }
+    return 1;
 }
 
 static void edit_selected_agent_prompt(DispatchTui *tui) {
@@ -1243,22 +1243,29 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
     }
 
     char error[256] = {0};
-    char *command = editor_command_for_path(agent->prompt_path, error,
-                                           sizeof(error));
-    if (!command) {
+    DispatchExecArgv editor_argv = {0};
+    if (!editor_argv_for_path(agent->prompt_path, &editor_argv, error,
+                              sizeof(error))) {
         tui_set_status(tui, error);
         return;
     }
     def_prog_mode();
     endwin();
-    int result = system(command);
+    DispatchExecResult result;
+    int launched = dispatch_exec_run((const char *const *)editor_argv.items,
+                                     NULL, &result);
     reset_prog_mode();
     refresh();
 
     char message[256];
-    snprintf(message, sizeof(message), "Editor exited with status %d", result);
+    if (launched) {
+        snprintf(message, sizeof(message), "Editor exited with status %d",
+                 dispatch_exec_result_status(&result));
+    } else {
+        snprintf(message, sizeof(message), "Could not run editor");
+    }
     tui_set_status(tui, message);
-    free(command);
+    dispatch_exec_argv_free(&editor_argv);
     tui_load_board(tui);
 }
 
@@ -1323,19 +1330,10 @@ static int copy_command_to_tmux_buffer(const char *command) {
     if (!getenv("TMUX") || !command_available("tmux"))
         return 0;
 
-    char *command_q = tui_shell_quote(command);
-    size_t size = strlen("printf %s  | tmux load-buffer -") +
-                  strlen(command_q) + 1;
-    char *copy = malloc(size);
-    if (!copy) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(copy, size, "printf %%s %s | tmux load-buffer -", command_q);
-    int ok = system(copy) == 0;
-    free(command_q);
-    free(copy);
-    return ok;
+    const char *argv[] = {"tmux", "load-buffer", "-", NULL};
+    DispatchExecResult result;
+    return dispatch_exec_feed(argv, NULL, command, strlen(command), &result) &&
+           dispatch_exec_result_success(&result);
 }
 
 static int send_command_to_osc52_clipboard(const char *command) {
@@ -3149,18 +3147,23 @@ static void run_dependency_prompt(DispatchTui *tui, int add) {
     tui_set_status(tui, message);
 }
 
-static void run_external_command_in_terminal(DispatchTui *tui,
-                                             const char *command,
-                                             const char *label) {
+static void run_external_argv_in_terminal(DispatchTui *tui,
+                                          const char *const argv[],
+                                          const char *label) {
     def_prog_mode();
     endwin();
-    int result = system(command);
+    DispatchExecResult result;
+    int launched = dispatch_exec_run(argv, NULL, &result);
     reset_prog_mode();
     refresh();
 
     char message[256];
-    snprintf(message, sizeof(message), "%s exited with status %d", label,
-             result);
+    if (launched) {
+        snprintf(message, sizeof(message), "%s exited with status %d", label,
+                 dispatch_exec_result_status(&result));
+    } else {
+        snprintf(message, sizeof(message), "Could not run %s", label);
+    }
     tui_load_board(tui);
     tui_set_status(tui, message);
 }
@@ -3174,22 +3177,13 @@ static void run_workspace_create_form(DispatchTui *tui) {
         return;
     int sequence = prompt_yes_no("Create sequence workspace? [y/N]: ", 0);
 
-    char *task_q = tui_shell_quote(task_id);
-    char *actor_q = tui_shell_quote(actor);
-    size_t size = strlen("./dispatch workspace create  --actor  --sequence") +
-                  strlen(task_q) + strlen(actor_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "./dispatch workspace create %s --actor %s%s",
-             task_q, actor_q, sequence ? " --sequence" : "");
-    free(task_q);
-    free(actor_q);
-
-    run_external_command_in_terminal(tui, command, "Workspace create");
-    free(command);
+    const char *normal_argv[] = {"./dispatch", "workspace", "create", task_id,
+                                 "--actor",    actor,       NULL};
+    const char *sequence_argv[] = {"./dispatch", "workspace", "create",
+                                   task_id,      "--actor",   actor,
+                                   "--sequence", NULL};
+    run_external_argv_in_terminal(tui, sequence ? sequence_argv : normal_argv,
+                                  "Workspace create");
     clamp_workspace_selection(tui);
 }
 
@@ -3210,20 +3204,12 @@ static void run_workspace_remove_form(DispatchTui *tui, int force) {
         return;
     }
 
-    char *target_q = tui_shell_quote(workspace->task_id);
-    size_t size = strlen("./dispatch workspace remove  --force") +
-                  strlen(target_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "./dispatch workspace remove %s%s", target_q,
-             force ? " --force" : "");
-    free(target_q);
-
-    run_external_command_in_terminal(tui, command, "Workspace remove");
-    free(command);
+    const char *normal_argv[] = {"./dispatch", "workspace", "remove",
+                                 workspace->task_id, NULL};
+    const char *force_argv[] = {"./dispatch",       "workspace", "remove",
+                                workspace->task_id, "--force",   NULL};
+    run_external_argv_in_terminal(tui, force ? force_argv : normal_argv,
+                                  "Workspace remove");
     clamp_workspace_selection(tui);
 }
 
@@ -3278,8 +3264,8 @@ static void run_workspace_prune_form(DispatchTui *tui) {
         tui_set_status(tui, "Workspace prune cancelled");
         return;
     }
-    run_external_command_in_terminal(
-        tui, "./dispatch workspace prune --done", "Workspace prune");
+    const char *argv[] = {"./dispatch", "workspace", "prune", "--done", NULL};
+    run_external_argv_in_terminal(tui, argv, "Workspace prune");
     clamp_workspace_selection(tui);
 }
 
@@ -5955,15 +5941,16 @@ static int tui_prompt_edit_smoke(const char *name) {
     }
 
     char editor_error[256] = {0};
-    char *command = editor_command_for_path(agent->prompt_path, editor_error,
-                                           sizeof(editor_error));
-    if (!command) {
+    DispatchExecArgv command = {0};
+    if (!editor_argv_for_path(agent->prompt_path, &command, editor_error,
+                              sizeof(editor_error))) {
         fprintf(stderr, "%s\n", editor_error);
         dispatch_board_free(&board);
         return 1;
     }
-    printf("%s\n", command);
-    free(command);
+    for (size_t i = 0; i < command.count; i++)
+        printf("argv[%zu]: %s\n", i, command.items[i]);
+    dispatch_exec_argv_free(&command);
     dispatch_board_free(&board);
     return 0;
 }
