@@ -122,6 +122,11 @@ cc -Iinclude tests/workspace_naming_test.c src/dispatch.c \
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
 
+cc -Iinclude tests/exec_helper_test.c src/dispatch_exec.c \
+    -o "$TMP_ROOT/exec_helper_test"
+mkdir "$TMP_ROOT/exec helper cwd"
+"$TMP_ROOT/exec_helper_test" "$TMP_ROOT/exec helper cwd"
+
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
 mkdir repo
