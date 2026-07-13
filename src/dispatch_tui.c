@@ -1437,6 +1437,7 @@ static DispatchWorkspace *workspace_for_task(DispatchBoard *board,
 
 typedef enum {
     TUI_ACTION_READY,
+    TUI_ACTION_READY_NO_REVIEW,
     TUI_ACTION_START,
     TUI_ACTION_FINISH,
     TUI_ACTION_REVIEW
@@ -1480,6 +1481,12 @@ static int mutate_task(const char *task_id, const char *actor,
     case TUI_ACTION_READY:
         ok = dispatch_task_mark_ready(&board, task, actor);
         break;
+    case TUI_ACTION_READY_NO_REVIEW:
+        /* Mirrors the CLI `dispatch ready <id> --no-review`. */
+        ok = dispatch_task_mark_ready(&board, task, actor);
+        if (ok)
+            task->requires_review = 0;
+        break;
     case TUI_ACTION_START:
         ok = dispatch_task_start(&board, task, actor);
         break;
@@ -1512,6 +1519,9 @@ static int mutate_task(const char *task_id, const char *actor,
     switch (action) {
     case TUI_ACTION_READY:
         snprintf(message, message_size, "Readied %s", task_id);
+        break;
+    case TUI_ACTION_READY_NO_REVIEW:
+        snprintf(message, message_size, "Readied %s (no review)", task_id);
         break;
     case TUI_ACTION_START:
         snprintf(message, message_size, "Started %s as %s", task_id, actor);
@@ -3657,10 +3667,11 @@ static const HelpItem help_board_items[] = {
     {":", "command palette"},
     {NULL, "Tasks"},
     {"r s f v", "ready start finish review"},
+    {"R", "ready, skip review"},
     {"n  +", "new task / group"},
     {"d", "diff selected"},
     {NULL, "Filter & search"},
-    {"1-7  R", "filter presets"},
+    {"1-8", "filter presets"},
     {"G  A", "cycle group / actor"},
     {"/  c", "search / clear refine"},
     {NULL, "General"},
@@ -3673,6 +3684,7 @@ static const HelpItem help_task_inspector_items[] = {
     {NULL, "Task inspector"},
     {"q / Esc", "back to board"},
     {"r s f v", "ready start finish review"},
+    {"R", "ready, skip review"},
     {">", "add dependency"},
     {"<", "remove dependency"},
     {"d", "diff"},
@@ -4882,7 +4894,7 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
         if (tui->screen == TUI_SCREEN_BOARD)
             set_filter(tui, TUI_FILTER_DONE);
         break;
-    case 'R':
+    case '8':
         if (tui->screen == TUI_SCREEN_BOARD)
             set_filter(tui, TUI_FILTER_ATTENTION);
         break;
@@ -4890,6 +4902,11 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
         if (tui->screen == TUI_SCREEN_BOARD ||
             tui->screen == TUI_SCREEN_TASK_INSPECTOR)
             run_selected_task_action(tui, TUI_ACTION_READY);
+        break;
+    case 'R':
+        if (tui->screen == TUI_SCREEN_BOARD ||
+            tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_action(tui, TUI_ACTION_READY_NO_REVIEW);
         break;
     case 'n':
         if (tui->screen == TUI_SCREEN_BOARD) {
@@ -5275,6 +5292,8 @@ static int tui_filter_smoke(const char *filter_name_arg) {
 static int parse_action_name(const char *name, DispatchTuiAction *action) {
     if (strcmp(name, "ready") == 0) {
         *action = TUI_ACTION_READY;
+    } else if (strcmp(name, "ready-no-review") == 0) {
+        *action = TUI_ACTION_READY_NO_REVIEW;
     } else if (strcmp(name, "start") == 0) {
         *action = TUI_ACTION_START;
     } else if (strcmp(name, "finish") == 0) {
@@ -6280,6 +6299,7 @@ static void print_tui_help(void) {
     puts("  j/k or arrows move, Enter/i inspect, q/Esc backs out");
     puts("  Ctrl+C or :q quits");
     puts("  r/s/f/v ready/start/finish/review selected task");
+    puts("  R ready selected task without a review gate");
     puts("  tmux: no control-prefix bindings; run alongside tmux panes");
     puts("");
     puts("  --smoke   load the board and exit without initializing ncurses");
