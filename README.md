@@ -409,6 +409,8 @@ Noninteractive acceptance hooks are available for tests and terminal smoke
 checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
 `--action-smoke`, `--diff-smoke`, `--agents-smoke`, `--workspaces-smoke`,
 `--logs-smoke`, `--palette-smoke`, and `--palette-complete-smoke`.
+`--render-smoke <screen> <cols> <rows> [keys]` renders through an ncurses
+virtual terminal and prints a normalized plain-text frame for headless tests.
 
 Tmux keymap validation:
 

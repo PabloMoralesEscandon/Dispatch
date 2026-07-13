@@ -1145,6 +1145,21 @@ expect_ok "$BIN" tui --smoke
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
 assert_contains "2 visible"
+expect_ok "$BIN" tui --render-smoke board 80 24
+assert_contains "Frame: board 80x24"
+assert_contains "DISPATCH   Board"
+assert_contains "DE-01"
+assert_contains "Root"
+assert_not_contains "$ESC"
+expect_ok "$BIN" tui --render-smoke board 80 24 i
+assert_contains "Frame: task 80x24"
+assert_contains "DE-01  Root"
+assert_contains "Description"
+expect_ok "$BIN" tui --render-smoke board 80 24 "?"
+assert_contains "Dispatch  Keyboard Shortcuts"
+assert_contains "Navigation"
+expect_fail "$BIN" tui --render-smoke board 20 5
+assert_contains "Headless TUI dimensions must be"
 DISPATCH_TUI_DEFAULT_SMOKE=1 expect_ok "$BIN"
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
