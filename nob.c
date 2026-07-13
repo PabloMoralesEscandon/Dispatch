@@ -87,6 +87,11 @@ int main(int argc, char **argv) {
             if (!cmd_run(&cmd_clean))
                 return 1;
             nob_cmd_append(&cmd, "-DNDEBUG", "-O3");
+        } else if (!strcmp(argv[1], "asan")) {
+            /* Sanitizer build for CI: catches memory errors and undefined
+             * behavior while the test suite runs. */
+            nob_cmd_append(&cmd, "-g", "-O1", "-fsanitize=address,undefined",
+                           "-fno-omit-frame-pointer");
         } else
             nob_cmd_append(&cmd, "-g", "-O0");
     } else {
