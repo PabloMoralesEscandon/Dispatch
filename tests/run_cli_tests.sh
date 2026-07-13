@@ -97,25 +97,36 @@ make_case_dir() {
 }
 
 cd "$ROOT"
+# DISPATCH_TEST_BUILD_MODE selects the nob build mode for the suite (e.g.
+# "asan" builds dispatch and the unit tests with Address/UB sanitizers).
+BUILD_MODE="${DISPATCH_TEST_BUILD_MODE:-}"
+TEST_CFLAGS=""
+if [ "$BUILD_MODE" = "asan" ]; then
+    TEST_CFLAGS="-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer"
+fi
 if [ ! -x ./nob ]; then
     cc nob.c -o nob
 fi
-./nob >/dev/null
+./nob $BUILD_MODE >/dev/null
 
-cc -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
     -ljansson -o "$TMP_ROOT/lock_primitive_test"
 "$TMP_ROOT/lock_primitive_test" "$TMP_ROOT/dispatch.json" >/dev/null
 
-cc -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c \
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c \
     -ljansson -o "$TMP_ROOT/store_records_test"
 "$TMP_ROOT/store_records_test" "$TMP_ROOT/empty-records.json" \
     "$TMP_ROOT/populated-records.json" >/dev/null
 
-cc -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c \
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c \
     -ljansson -o "$TMP_ROOT/log_writer_test"
 "$TMP_ROOT/log_writer_test" "$TMP_ROOT/dispatch.log" >/dev/null
 
-cc -Iinclude tests/workspace_naming_test.c src/dispatch.c \
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/workspace_naming_test.c src/dispatch.c \
     -o "$TMP_ROOT/workspace_naming_test"
 "$TMP_ROOT/workspace_naming_test" "$TMP_ROOT/workspace-naming" >/dev/null
 
