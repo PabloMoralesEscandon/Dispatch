@@ -6448,6 +6448,12 @@ static int parse_screen_name(const char *name, DispatchTuiScreen *screen) {
         *screen = TUI_SCREEN_AGENTS;
     } else if (strcmp(name, "agent") == 0) {
         *screen = TUI_SCREEN_AGENT_INSPECTOR;
+    } else if (strcmp(name, "agent-form") == 0) {
+        *screen = TUI_SCREEN_AGENT_FORM;
+    } else if (strcmp(name, "task-form") == 0) {
+        *screen = TUI_SCREEN_TASK_FORM;
+    } else if (strcmp(name, "group-form") == 0) {
+        *screen = TUI_SCREEN_GROUP_FORM;
     } else if (strcmp(name, "workspaces") == 0) {
         *screen = TUI_SCREEN_WORKSPACES;
     } else if (strcmp(name, "workspace") == 0) {
@@ -6458,6 +6464,33 @@ static int parse_screen_name(const char *name, DispatchTuiScreen *screen) {
         return 0;
     }
     return 1;
+}
+
+static void tui_render_headless_screen(DispatchTui *tui) {
+    if (tui->screen == TUI_SCREEN_TASK_FORM) {
+        TuiTaskForm form;
+        memset(&form, 0, sizeof(form));
+        snprintf(form.group, sizeof(form.group), "%s", selected_task_group(tui));
+        form.requires_review = 1;
+        form.active_field = TUI_TASK_FORM_GROUP;
+        snprintf(form.status, sizeof(form.status), "Fill task fields");
+        render_task_form_screen(tui, &form);
+    } else if (tui->screen == TUI_SCREEN_AGENT_FORM) {
+        TuiAgentForm form;
+        memset(&form, 0, sizeof(form));
+        snprintf(form.runner, sizeof(form.runner), "codex");
+        form.active_field = TUI_AGENT_FORM_NAME;
+        snprintf(form.status, sizeof(form.status), "Fill agent fields");
+        render_agent_form_screen(tui, &form);
+    } else if (tui->screen == TUI_SCREEN_GROUP_FORM) {
+        TuiGroupForm form;
+        memset(&form, 0, sizeof(form));
+        form.active_field = TUI_GROUP_FORM_NAME;
+        snprintf(form.status, sizeof(form.status), "Fill group fields");
+        render_group_form_screen(tui, &form);
+    } else {
+        tui_render(tui);
+    }
 }
 
 static char tui_headless_cell_char(chtype cell) {
@@ -6551,7 +6584,7 @@ static int tui_render_smoke(const char *screen_arg, int cols, int rows,
 
     for (size_t i = 0; keys && keys[i] != '\0'; i++)
         tui_handle_key(&tui, (unsigned char)keys[i]);
-    tui_render(&tui);
+    tui_render_headless_screen(&tui);
     printf("Frame: %s %dx%d\n", screen_name(tui.screen), cols, rows);
     int captured = tui_capture_headless_frame(rows, cols);
 
