@@ -397,6 +397,8 @@ static int create_agent_dirs(const char *agent_dir, char **scratch_dir,
 int dispatch_agent_name_is_valid(const char *name) {
     if (!name || name[0] == '\0')
         return 0;
+    if (strlen(name) > DISPATCH_AGENT_NAME_MAX)
+        return 0;
     for (size_t i = 0; name[i] != '\0'; i++) {
         unsigned char c = (unsigned char)name[i];
         if (!(isalnum(c) || c == '-' || c == '_'))
@@ -677,7 +679,9 @@ int dispatch_agent_create(const DispatchAgentCreateOptions *options,
     if (!dispatch_agent_name_is_valid(name)) {
         if (error && error_size > 0) {
             snprintf(error, error_size,
-                     "Agent name must contain only letters, digits, '-' or '_'");
+                     "Agent name must be 1-%d characters of letters, digits, "
+                     "'-' or '_'",
+                     DISPATCH_AGENT_NAME_MAX);
         }
         return 0;
     }

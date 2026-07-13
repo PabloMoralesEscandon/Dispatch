@@ -208,6 +208,13 @@ int dispatch_board_has_dependency_path(const DispatchBoard *board,
 void dispatch_board_normalize_states(DispatchBoard *board);
 int dispatch_board_normalize_agent_sessions(DispatchBoard *board);
 
+/* Maximum stored agent name length. The TUI reserves exactly this much
+ * column space for agent names and actor labels, so names validated here
+ * always render without truncation. */
+#define DISPATCH_AGENT_NAME_MAX 24
+/* Maximum group name length shown in board group headers. */
+#define DISPATCH_GROUP_NAME_MAX 48
+
 int dispatch_agent_name_is_valid(const char *name);
 int dispatch_agent_runner_is_valid(const char *runner);
 int dispatch_agent_create(const DispatchAgentCreateOptions *options,

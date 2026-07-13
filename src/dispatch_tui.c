@@ -3903,6 +3903,62 @@ static void tui_render_help(DispatchTuiScreen screen) {
         attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
 }
 
+/* Fixed column widths for the list tables. These are the single source of
+ * truth: every value drawn into one of these slots is clamped by cell_text,
+ * and dependent positions (color overlays) are derived from the same
+ * constants, so an over-length value can never shift later columns or
+ * corrupt an overlay. Names are validated to DISPATCH_AGENT_NAME_MAX (which
+ * matches TUI_COL_NAME) at input time; clamping covers legacy data. */
+enum {
+    TUI_COL_MARKER = 2,  /* " >" selection marker */
+    TUI_COL_TASK = 8,    /* task ids like DE-01 */
+    TUI_COL_STATE = 8,   /* task lifecycle states ("proposed") */
+    TUI_COL_NAME = 24,   /* agent names and actor labels */
+    TUI_COL_RUNNER = 8,  /* codex/claude */
+    TUI_COL_AGENT_STATUS = 9, /* enabled/archived */
+    TUI_COL_SESSION = 7, /* yes/no */
+    TUI_COL_WS_STATE = 9, /* workspace record state */
+    TUI_COL_FLAG = 5,    /* dirty/clean */
+    TUI_COL_GIT = 7,     /* git/no-git */
+    TUI_COL_TIME = 20,   /* log timestamps */
+    TUI_COL_LOG_ACTOR = 14,
+    TUI_COL_COMMAND = 10,
+    TUI_COL_ACTION = 12,
+};
+
+/* Column start positions derived from the widths above: the marker column
+ * has no trailing space, every later column is separated by one space. */
+enum {
+    TUI_X_BOARD_STATE = TUI_COL_MARKER + TUI_COL_TASK + 1,
+    TUI_X_AGENT_STATUS =
+        TUI_COL_MARKER + TUI_COL_NAME + 1 + TUI_COL_RUNNER + 1,
+    TUI_X_WS_DIRTY = TUI_COL_MARKER + TUI_COL_TASK + 1 + TUI_COL_STATE + 1 +
+                     TUI_COL_WS_STATE + 1 + TUI_COL_NAME + 1,
+    TUI_X_LOG_ACTION = TUI_COL_MARKER + TUI_COL_TIME + 1 +
+                       TUI_COL_LOG_ACTOR + 1 + TUI_COL_COMMAND + 1,
+};
+
+/* Write value into a fixed-width column slot: space-padded to exactly width,
+ * truncated with a trailing ".." when it does not fit. */
+static void cell_text(char *out, size_t out_size, const char *value,
+                      int width) {
+    if (out_size == 0)
+        return;
+    if (width <= 0 || (size_t)width >= out_size) {
+        out[0] = '\0';
+        return;
+    }
+    const char *text = value ? value : "";
+    size_t len = strlen(text);
+    if (len <= (size_t)width) {
+        snprintf(out, out_size, "%-*s", width, text);
+    } else if (width > 2) {
+        snprintf(out, out_size, "%.*s..", width - 2, text);
+    } else {
+        snprintf(out, out_size, "%.*s", width, text);
+    }
+}
+
 /* Column header for the list views: accent, bold, drawn over a full-width row
  * so it reads as a header band. */
 static void draw_list_header(int y, int cols, const char *text) {
@@ -3917,6 +3973,28 @@ static void draw_list_header(int y, int cols, const char *text) {
         attroff(A_BOLD | A_UNDERLINE);
 }
 
+/* Format one agents-table row into out. Shared with --agent-row-smoke so
+ * tests can assert that over-length values stay inside their columns. */
+static void format_agent_row(char *out, size_t out_size,
+                             const DispatchAgent *agent, int selected) {
+    char name[TUI_COL_NAME + 1];
+    char runner[TUI_COL_RUNNER + 1];
+    char status[TUI_COL_AGENT_STATUS + 1];
+    char session[TUI_COL_SESSION + 1];
+    char task[TUI_COL_TASK + 1];
+    cell_text(name, sizeof(name), agent->name, TUI_COL_NAME);
+    cell_text(runner, sizeof(runner), agent->runner, TUI_COL_RUNNER);
+    cell_text(status, sizeof(status), agent->archived ? "archived" : "enabled",
+              TUI_COL_AGENT_STATUS);
+    cell_text(session, sizeof(session), agent->session_id ? "yes" : "no",
+              TUI_COL_SESSION);
+    cell_text(task, sizeof(task),
+              agent->current_task ? agent->current_task : "-", TUI_COL_TASK);
+    snprintf(out, out_size, "%s%s %s %s %s %s %s", selected ? " >" : "  ",
+             name, runner, status, session, task,
+             agent->last_workspace ? agent->last_workspace : "-");
+}
+
 static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int y = start_y;
     if (visible_agent_count(tui) == 0) {
@@ -3927,8 +4005,10 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int visible_rows = rows - start_y - 2;
     sync_agent_scroll(tui, visible_rows);
     char header[256];
-    snprintf(header, sizeof(header), "  %-16s %-8s %-9s %-7s %-12s %s", "Name",
-             "Runner", "Status", "Session", "Task", "Workspace");
+    snprintf(header, sizeof(header), "  %-*s %-*s %-*s %-*s %-*s %s",
+             TUI_COL_NAME, "Name", TUI_COL_RUNNER, "Runner",
+             TUI_COL_AGENT_STATUS, "Status", TUI_COL_SESSION, "Session",
+             TUI_COL_TASK, "Task", "Workspace");
     draw_list_header(y++, cols, header);
 
     int visible_index = 0;
@@ -3941,13 +4021,8 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
             continue;
         }
         int selected = visible_index == tui->selected_agent;
-        const char *status = agent->archived ? "archived" : "enabled";
         char line[1024];
-        snprintf(line, sizeof(line), "%s%-16s %-8s %-9s %-7s %-12s %s",
-                 selected ? " >" : "  ", agent->name, agent->runner, status,
-                 agent->session_id ? "yes" : "no",
-                 agent->current_task ? agent->current_task : "-",
-                 agent->last_workspace ? agent->last_workspace : "-");
+        format_agent_row(line, sizeof(line), agent, selected);
         tui_style_row_on(visible_index, selected);
         draw_padded(y, 0, cols, line);
         tui_style_row_off(visible_index, selected);
@@ -3955,7 +4030,9 @@ static void draw_agent_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         if (!selected && tui_colors_enabled) {
             int color = agent->archived ? TUI_COLOR_MUTED : TUI_COLOR_STATE_READY;
             attron(COLOR_PAIR(color) | A_BOLD);
-            mvaddnstr(y, 28, status, 9);
+            mvaddnstr(y, TUI_X_AGENT_STATUS,
+                      agent->archived ? "archived" : "enabled",
+                      TUI_COL_AGENT_STATUS);
             attroff(COLOR_PAIR(color) | A_BOLD);
         }
         y++;
@@ -3975,8 +4052,10 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
     int visible_rows = rows - start_y - 2;
     sync_workspace_scroll(tui, visible_rows);
     char header[256];
-    snprintf(header, sizeof(header), "  %-8s %-9s %-9s %-16s %-5s %-7s %s",
-             "Task", "State", "WS", "Actor", "Dirty", "Git", "Branch / Path");
+    snprintf(header, sizeof(header), "  %-*s %-*s %-*s %-*s %-*s %-*s %s",
+             TUI_COL_TASK, "Task", TUI_COL_STATE, "State", TUI_COL_WS_STATE,
+             "WS", TUI_COL_NAME, "Actor", TUI_COL_FLAG, "Dirty", TUI_COL_GIT,
+             "Git", "Branch / Path");
     draw_list_header(y++, cols, header);
 
     for (size_t i = 0; i < tui->board.workspaces.count && y < rows - 1; i++) {
@@ -4002,13 +4081,28 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         char branchpath[1100];
         snprintf(branchpath, sizeof(branchpath), "%s  %s", workspace->branch,
                  workspace->path);
+        char task_cell[TUI_COL_TASK + 1];
+        char state_cell[TUI_COL_STATE + 1];
+        char ws_cell[TUI_COL_WS_STATE + 1];
+        char actor_cell[TUI_COL_NAME + 1];
+        char dirty_cell[TUI_COL_FLAG + 1];
+        char git_cell[TUI_COL_GIT + 1];
+        cell_text(task_cell, sizeof(task_cell), workspace->task_id,
+                  TUI_COL_TASK);
+        cell_text(state_cell, sizeof(state_cell), task_state, TUI_COL_STATE);
+        cell_text(ws_cell, sizeof(ws_cell),
+                  dispatch_workspace_state_name(workspace->state),
+                  TUI_COL_WS_STATE);
+        cell_text(actor_cell, sizeof(actor_cell), workspace->actor,
+                  TUI_COL_NAME);
+        cell_text(dirty_cell, sizeof(dirty_cell), dirty ? "dirty" : "clean",
+                  TUI_COL_FLAG);
+        cell_text(git_cell, sizeof(git_cell), git_present ? "git" : "no-git",
+                  TUI_COL_GIT);
         char line[1200];
-        snprintf(line, sizeof(line),
-                 "%s%-8.8s %-9.9s %-9.9s %-16.16s %-5s %-7s %s",
-                 selected ? " >" : "  ", workspace->task_id, task_state,
-                 dispatch_workspace_state_name(workspace->state),
-                 workspace->actor, dirty ? "dirty" : "clean",
-                 git_present ? "git" : "no-git", branchpath);
+        snprintf(line, sizeof(line), "%s%s %s %s %s %s %s %s",
+                 selected ? " >" : "  ", task_cell, state_cell, ws_cell,
+                 actor_cell, dirty_cell, git_cell, branchpath);
         tui_style_row_on(visible_index, selected);
         draw_padded(y, 0, cols, line);
         tui_style_row_off(visible_index, selected);
@@ -4016,11 +4110,12 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         if (!selected && tui_colors_enabled) {
             int sc = has_state ? tui_state_color(wstate) : TUI_COLOR_MUTED;
             attron(COLOR_PAIR(sc) | A_BOLD);
-            mvaddnstr(y, 11, task_state, 9);
+            mvaddnstr(y, TUI_X_BOARD_STATE, task_state, TUI_COL_STATE);
             attroff(COLOR_PAIR(sc) | A_BOLD);
             int dc = dirty ? TUI_COLOR_STATE_DOING : TUI_COLOR_MUTED;
             attron(COLOR_PAIR(dc) | (dirty ? A_BOLD : A_DIM));
-            mvaddnstr(y, 48, dirty ? "dirty" : "clean", 5);
+            mvaddnstr(y, TUI_X_WS_DIRTY, dirty ? "dirty" : "clean",
+                      TUI_COL_FLAG);
             attroff(COLOR_PAIR(dc) | (dirty ? A_BOLD : A_DIM));
         }
         y++;
@@ -4062,8 +4157,9 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
     int visible_index = 0;
     int any_visible = 0;
     char header[256];
-    snprintf(header, sizeof(header), "  %-20s %-14s %-10s %-12s %s", "Time",
-             "Actor", "Command", "Action", "Target / Message");
+    snprintf(header, sizeof(header), "  %-*s %-*s %-*s %-*s %s", TUI_COL_TIME,
+             "Time", TUI_COL_LOG_ACTOR, "Actor", TUI_COL_COMMAND, "Command",
+             TUI_COL_ACTION, "Action", "Target / Message");
     draw_list_header(y++, cols, header);
 
     for (size_t i = records.count; i > 0 && y < rows - 1; i--) {
@@ -4094,9 +4190,18 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         snprintf(rest, sizeof(rest), "%s%s%s", target, target[0] ? "  " : "",
                  message);
         int selected = visible_index == tui->selected_log;
+        char time_cell[TUI_COL_TIME + 1];
+        char actor_cell[TUI_COL_LOG_ACTOR + 1];
+        char command_cell[TUI_COL_COMMAND + 1];
+        char action_cell[TUI_COL_ACTION + 1];
+        cell_text(time_cell, sizeof(time_cell), time, TUI_COL_TIME);
+        cell_text(actor_cell, sizeof(actor_cell), actor, TUI_COL_LOG_ACTOR);
+        cell_text(command_cell, sizeof(command_cell), command,
+                  TUI_COL_COMMAND);
+        cell_text(action_cell, sizeof(action_cell), action, TUI_COL_ACTION);
         char row[1600];
-        snprintf(row, sizeof(row), "%s%-20.20s %-14.14s %-10.10s %-12.12s %s",
-                 selected ? " >" : "  ", time, actor, command, action, rest);
+        snprintf(row, sizeof(row), "%s%s %s %s %s %s", selected ? " >" : "  ",
+                 time_cell, actor_cell, command_cell, action_cell, rest);
         tui_style_row_on(visible_index, selected);
         draw_padded(y, 0, cols, row);
         tui_style_row_off(visible_index, selected);
@@ -4104,7 +4209,7 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         if (!selected && tui_colors_enabled) {
             int color = log_action_color(action);
             attron(COLOR_PAIR(color) | A_BOLD);
-            mvaddnstr(y, 49, action, 12);
+            mvaddnstr(y, TUI_X_LOG_ACTION, action_cell, TUI_COL_ACTION);
             attroff(COLOR_PAIR(color) | A_BOLD);
         }
         y++;
@@ -4434,9 +4539,14 @@ static void draw_task_row(DispatchTui *tui, int y, int cols,
     DispatchState state = dispatch_task_effective_state(&tui->board, task);
     int selected = visible_index == tui->selected_task;
 
+    char id_cell[TUI_COL_TASK + 1];
+    char state_cell[TUI_COL_STATE + 1];
+    cell_text(id_cell, sizeof(id_cell), task->id, TUI_COL_TASK);
+    cell_text(state_cell, sizeof(state_cell), dispatch_state_name(state),
+              TUI_COL_STATE);
     char left[1024];
-    snprintf(left, sizeof(left), "%s %-7s %-8s %s", selected ? " >" : "  ",
-             task->id, dispatch_state_name(state), task->title);
+    snprintf(left, sizeof(left), "%s%s %s %s", selected ? " >" : "  ",
+             id_cell, state_cell, task->title);
 
     tui_style_row_on(visible_index, selected);
     draw_padded(y, 0, cols, left);
@@ -4461,10 +4571,11 @@ static void draw_task_row(DispatchTui *tui, int y, int cols,
     }
     tui_style_row_off(visible_index, selected);
 
-    /* Colored state badge sits at column 11 (after marker + id). */
+    /* Colored state badge overlays the state column. */
     if (!selected && tui_colors_enabled) {
         attron(COLOR_PAIR(tui_state_color(state)) | A_BOLD);
-        mvaddnstr(y, 11, dispatch_state_name(state), 8);
+        mvaddnstr(y, TUI_X_BOARD_STATE, dispatch_state_name(state),
+                  TUI_COL_STATE);
         attroff(COLOR_PAIR(tui_state_color(state)) | A_BOLD);
     }
 }
@@ -5867,6 +5978,47 @@ static int tui_key_smoke(const char *screen_arg, const char *keys) {
     return 0;
 }
 
+/* Print a clamped column cell between brackets so tests can assert exact
+ * padding and truncation. */
+static int tui_cell_smoke(int width, const char *text) {
+    char cell[256];
+    cell_text(cell, sizeof(cell), text, width);
+    printf("Cell: [%s]\n", cell);
+    return 0;
+}
+
+/* Print the agents-table row for one agent between brackets, plus the
+ * derived column positions, so tests can assert that over-length values do
+ * not shift later columns or the status overlay. */
+static int tui_agent_row_smoke(const char *name) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui agent row smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    if (!agent) {
+        fprintf(stderr, "No agent named %s\n", name);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    char row[1024];
+    format_agent_row(row, sizeof(row), agent, 0);
+    printf("Row: [%s]\n", row);
+    printf("Status col: %d\n", (int)TUI_X_AGENT_STATUS);
+    printf("Status text: %.*s\n", (int)TUI_COL_AGENT_STATUS,
+           row + TUI_X_AGENT_STATUS);
+    dispatch_board_free(&board);
+    return 0;
+}
+
 static int tui_palette_smoke(const char *command) {
     DispatchTui tui;
     tui_init(&tui);
@@ -6017,6 +6169,8 @@ static void print_tui_help(void) {
     puts("  --scroll-smoke board|agents|workspaces|logs <visible-rows> <selected-index>");
     puts("  --selection-smoke <filter> <selected-index>  verify highlight and action task match");
     puts("  --key-smoke <screen> <keys>  feed keys to the input handler on a screen");
+    puts("  --cell-smoke <width> <text>  print a clamped table cell");
+    puts("  --agent-row-smoke <name>     print the agents-table row for one agent");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
@@ -6098,6 +6252,10 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_selection_smoke(argv[3], atoi(argv[4]));
     if (argc == 5 && strcmp(argv[2], "--key-smoke") == 0)
         return tui_key_smoke(argv[3], argv[4]);
+    if (argc == 5 && strcmp(argv[2], "--cell-smoke") == 0)
+        return tui_cell_smoke(atoi(argv[3]), argv[4]);
+    if (argc == 4 && strcmp(argv[2], "--agent-row-smoke") == 0)
+        return tui_agent_row_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)

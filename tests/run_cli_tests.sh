@@ -150,10 +150,10 @@ expect_ok "$BIN" agent list
 assert_contains "(no agents)"
 
 expect_fail "$BIN" agent create --runner codex
-assert_contains "Agent name must contain only letters, digits, '-' or '_'"
+assert_contains "Agent name must be 1-24 characters of letters, digits, '-' or '_'"
 
 expect_fail "$BIN" agent create --name bad/name --runner codex
-assert_contains "Agent name must contain only letters, digits, '-' or '_'"
+assert_contains "Agent name must be 1-24 characters of letters, digits, '-' or '_'"
 
 expect_fail "$BIN" agent create --name codex-a --runner unknown
 assert_contains "Agent runner must be codex or claude"
@@ -1507,6 +1507,36 @@ expect_ok "$BIN" tui --key-smoke logs b
 assert_contains "Screen: board"
 expect_ok "$BIN" tui --key-smoke workspaces a
 assert_contains "Screen: agents"
+
+# FX-08: fixed-width table cells are clamped (with an ellipsis when cut) so
+# over-length values never shift later columns, overlay positions derive from
+# the shared width constants, and names are bounded at input time.
+case_dir="$(make_case_dir tui-fixed-width)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" tui --cell-smoke 8 short
+assert_contains "Cell: [short   ]"
+expect_ok "$BIN" tui --cell-smoke 8 exactly8
+assert_contains "Cell: [exactly8]"
+expect_ok "$BIN" tui --cell-smoke 8 averylongvalue
+assert_contains "Cell: [averyl..]"
+# A max-width agent name fills its column without shifting later columns.
+expect_ok "$BIN" agent create --name abcdefghijklmnopqrstuvwx --runner codex --no-run-script
+expect_ok "$BIN" tui --agent-row-smoke abcdefghijklmnopqrstuvwx
+assert_contains "Row: [  abcdefghijklmnopqrstuvwx codex    enabled"
+assert_contains "Status col: 36"
+assert_contains "Status text: enabled"
+# A short name pads to the same column positions.
+expect_ok "$BIN" agent create --name tiny --runner claude --no-run-script
+expect_ok "$BIN" tui --agent-row-smoke tiny
+assert_contains "Status col: 36"
+assert_contains "Status text: enabled"
+# Names are validated to the documented bounds at input time.
+expect_fail "$BIN" agent create --name abcdefghijklmnopqrstuvwxy --runner codex --no-run-script
+assert_contains "Agent name must be 1-24 characters"
+expect_fail "$BIN" group add "ThisGroupNameIsFarTooLongToFitInTheBoardHeaderBand" --prefix LG
+assert_contains "Could not add group"
 
 # FX-03: init resolves repo_path to an absolute path, rejects missing paths,
 # and `dispatch repo set` repairs the stored path without recreating the board.

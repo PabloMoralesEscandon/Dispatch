@@ -296,7 +296,8 @@ DispatchWorkspace *dispatch_board_find_workspace(DispatchBoard *board,
 
 int dispatch_board_add_group(DispatchBoard *board, const char *name,
                              const char *prefix) {
-    if (!board || !name || name[0] == '\0')
+    if (!board || !name || name[0] == '\0' ||
+        strlen(name) > DISPATCH_GROUP_NAME_MAX)
         return 0;
 
     char *resolved_prefix = prefix && prefix[0] ? dispatch_strdup(prefix)
