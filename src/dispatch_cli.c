@@ -94,6 +94,8 @@ int dispatch_cli_is_command(const char *command) {
     return find_command(command) != NULL;
 }
 
+static void scaffold_workflow_dir(void);
+
 static int cmd_init(int argc, char **argv) {
     if (argc > 3) {
         fprintf(stderr, "Usage: dispatch init [repo-path]\n");
@@ -139,6 +141,7 @@ static int cmd_init(int argc, char **argv) {
     }
 
     printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
+    scaffold_workflow_dir();
     DispatchLogField targets[] = {
         {"repo_path", repo_path},
     };
@@ -392,6 +395,36 @@ static int create_agent_dirs(const char *agent_dir, char **scratch_dir,
         return 0;
     }
     return 1;
+}
+
+/* Write an instruction file only when it does not exist yet: scaffolding
+ * must never clobber user edits. */
+static void scaffold_workflow_file(const char *path, const char *content) {
+    FILE *file = fopen(path, "r");
+    if (file) {
+        fclose(file);
+        return;
+    }
+    file = fopen(path, "w");
+    if (!file) {
+        fprintf(stderr, "Could not create %s: %s\n", path, strerror(errno));
+        return;
+    }
+    fputs(content, file);
+    fclose(file);
+    printf("Created %s\n", path);
+}
+
+/* On a fresh init, create the .dispatch/ tree and the workflow instruction
+ * files from the embedded templates. */
+static void scaffold_workflow_dir(void) {
+    if (!make_dir_if_needed(".dispatch") ||
+        !make_dir_if_needed(".dispatch/agents")) {
+        fprintf(stderr, "Could not create .dispatch directories: %s\n",
+                strerror(errno));
+    }
+    scaffold_workflow_file("AGENTS.md", dispatch_template_agents_md);
+    scaffold_workflow_file("CLAUDE.md", dispatch_template_claude_md);
 }
 
 int dispatch_agent_name_is_valid(const char *name) {

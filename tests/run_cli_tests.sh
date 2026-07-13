@@ -1538,6 +1538,40 @@ assert_contains "Agent name must be 1-24 characters"
 expect_fail "$BIN" group add "ThisGroupNameIsFarTooLongToFitInTheBoardHeaderBand" --prefix LG
 assert_contains "Could not add group"
 
+# FX-04: a fresh init scaffolds the .dispatch/ tree and the instruction
+# files from embedded templates, never overwrites existing files, and does
+# not scaffold when dispatch.json already exists.
+case_dir="$(make_case_dir init-scaffold)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+assert_contains "Created AGENTS.md"
+assert_contains "Created CLAUDE.md"
+if [ ! -d .dispatch/agents ]; then
+    fail "dispatch init did not create .dispatch/agents"
+fi
+assert_file_contains AGENTS.md "# Dispatch Agent Instructions"
+assert_file_contains AGENTS.md "Never read \`dispatch.json\` directly."
+assert_file_contains CLAUDE.md "# Dispatch Agent Instructions"
+expect_ok "$BIN" doctor
+assert_contains "AGENTS.md found in workflow directory"
+# Re-init with an existing board must not scaffold or recreate files.
+rm AGENTS.md
+expect_ok "$BIN" init repo
+assert_contains "dispatch.json already exists"
+assert_not_contains "Created AGENTS.md"
+if [ -e AGENTS.md ]; then
+    fail "re-init recreated AGENTS.md"
+fi
+# A fresh init never overwrites existing instruction files.
+rm dispatch.json CLAUDE.md
+printf 'custom instructions\n' > AGENTS.md
+expect_ok "$BIN" init repo
+assert_contains "Created CLAUDE.md"
+assert_not_contains "Created AGENTS.md"
+assert_file_contains AGENTS.md "custom instructions"
+assert_file_not_contains AGENTS.md "# Dispatch Agent Instructions"
+
 # FX-09: the task inspector shows the full description: wrapped across rows,
 # paragraph breaks preserved, and every line reachable by scrolling.
 case_dir="$(make_case_dir tui-description-wrap)"
