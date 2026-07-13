@@ -117,8 +117,9 @@ Use the Dispatch CLI for all workflow state.
 Never read dispatch.json directly.
 AGENTS
 
+repo_real="$(cd repo && pwd -P)"
 expect_ok "$BIN" init repo
-assert_contains "Created dispatch.json for repo repo"
+assert_contains "Created dispatch.json for repo $repo_real"
 
 if [ ! -f dispatch.json ]; then
     fail "dispatch init did not create dispatch.json"
@@ -143,7 +144,7 @@ expect_fail "$BIN" list
 assert_contains "Dispatch board is being updated; retry shortly."
 rm -f dispatch.json
 expect_ok "$BIN" init repo
-assert_contains "Created dispatch.json for repo repo"
+assert_contains "Created dispatch.json for repo $repo_real"
 
 expect_ok "$BIN" agent list
 assert_contains "(no agents)"
@@ -685,7 +686,8 @@ expect_fail "$BIN" workspace create Missing --actor codex
 assert_contains "No task with id Missing"
 
 expect_fail "$BIN" workspace create DE-01 --actor codex
-assert_contains "Configured repository is not a git repository: repo"
+assert_contains "Configured repository is not a git repository:"
+assert_contains "/repo"
 
 expect_ok git -C repo init
 expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
@@ -1035,7 +1037,8 @@ assert_contains "Commits: 1"
 assert_contains "Commit: abcdef1"
 
 expect_ok "$BIN" tui --diff-smoke DE-01
-assert_contains "git -C 'repo' show 'abcdef1'"
+assert_contains "git -C '"
+assert_contains "/repo' show 'abcdef1'"
 
 expect_fail "$BIN" tui --diff-smoke QA-01
 assert_contains "No commit metadata for QA-01"
@@ -1428,6 +1431,33 @@ expect_ok "$BIN" tui --selection-smoke ready 0
 assert_contains "Action task: AA-02"
 assert_contains "Highlighted task: AA-02"
 assert_contains "Match: yes"
+
+# FX-03: init resolves repo_path to an absolute path, rejects missing paths,
+# and `dispatch repo set` repairs the stored path without recreating the board.
+case_dir="$(make_case_dir repo-path)"
+cd "$case_dir"
+mkdir repo other-repo
+repo_real="$(cd repo && pwd -P)"
+other_real="$(cd other-repo && pwd -P)"
+expect_fail "$BIN" init missing-repo
+assert_contains "Repo path missing-repo does not exist"
+expect_ok "$BIN" init repo
+assert_contains "Created dispatch.json for repo $repo_real"
+expect_ok "$BIN" repo
+assert_contains "Repo: $repo_real"
+assert_contains "Warning: repo path is not a git repository"
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root
+expect_fail "$BIN" repo set missing-repo
+assert_contains "Repo path missing-repo does not exist"
+expect_ok "$BIN" repo set other-repo
+assert_contains "Set repo path to $other_real"
+expect_ok "$BIN" repo
+assert_contains "Repo: $other_real"
+expect_ok "$BIN" show DE-01
+assert_contains "Title: Root"
+expect_fail "$BIN" repo set
+expect_fail "$BIN" repo bogus other-repo
 
 case_dir="$(make_case_dir tui-palette-help)"
 cd "$case_dir"

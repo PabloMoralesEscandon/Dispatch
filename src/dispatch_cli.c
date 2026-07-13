@@ -35,6 +35,7 @@ static char *shell_quote(const char *value);
 
 static const DispatchCliCommand commands[] = {
     {"init", "Create dispatch.json for a target repository"},
+    {"repo", "Show or repair the board repo path"},
     {"agent", "Manage agents"},
     {"workspace", "Manage workspaces"},
     {"group", "Manage groups"},
@@ -78,7 +79,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
+    puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
     puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
     puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, tui, list, show, blocked");
 }
@@ -99,12 +100,18 @@ static int cmd_init(int argc, char **argv) {
         return 1;
     }
 
-    const char *repo_path = argc == 3 ? argv[2] : ".";
+    const char *repo_arg = argc == 3 ? argv[2] : ".";
+    char *repo_path = dispatch_resolve_path(".", repo_arg);
+    if (!repo_path) {
+        fprintf(stderr, "Repo path %s does not exist\n", repo_arg);
+        return 1;
+    }
     char error[256] = {0};
     DispatchStoreLock lock = {0};
     if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
                                      sizeof(error))) {
         fprintf(stderr, "%s\n", error);
+        free(repo_path);
         return 1;
     }
 
@@ -120,12 +127,14 @@ static int cmd_init(int argc, char **argv) {
         fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
                 error);
         dispatch_store_lock_release(&lock);
+        free(repo_path);
         return 1;
     }
 
     if (existed) {
         printf("%s already exists\n", DISPATCH_STORE_FILE);
         dispatch_store_lock_release(&lock);
+        free(repo_path);
         return 0;
     }
 
@@ -136,6 +145,7 @@ static int cmd_init(int argc, char **argv) {
     append_dispatch_log("user", "init", "init", targets, 1, NULL, 0,
                         "Created dispatch.json");
     dispatch_store_lock_release(&lock);
+    free(repo_path);
     return 0;
 }
 
@@ -2485,6 +2495,59 @@ static int cmd_workspace(int argc, char **argv) {
     return 1;
 }
 
+static int cmd_repo(int argc, char **argv) {
+    if (argc == 2) {
+        DispatchBoard board;
+        if (!load_board_or_error(&board))
+            return 1;
+        printf("Repo: %s\n", board.repo_path ? board.repo_path : ".");
+        if (!board.repo_path ||
+            !dispatch_path_is_git_repository(board.repo_path)) {
+            printf("Warning: repo path is not a git repository\n");
+            printf("Repair it with: dispatch repo set <path>\n");
+        }
+        dispatch_board_free(&board);
+        return 0;
+    }
+
+    if (argc != 4 || strcmp(argv[2], "set") != 0) {
+        fprintf(stderr, "Usage: dispatch repo [set <path>]\n");
+        return 1;
+    }
+
+    const char *repo_arg = argv[3];
+    char *repo_path = dispatch_resolve_path(".", repo_arg);
+    if (!repo_path) {
+        fprintf(stderr, "Repo path %s does not exist\n", repo_arg);
+        return 1;
+    }
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked)) {
+        free(repo_path);
+        return 1;
+    }
+
+    dispatch_board_set_repo_path(&locked.board, repo_path);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        free(repo_path);
+        return 1;
+    }
+
+    printf("Set repo path to %s\n", repo_path);
+    if (!dispatch_path_is_git_repository(repo_path))
+        printf("Warning: %s is not a git repository\n", repo_path);
+    DispatchLogField targets[] = {
+        {"repo_path", repo_path},
+    };
+    append_dispatch_log("user", "repo", "set", targets, 1, NULL, 0,
+                        "Set repo path");
+    locked_board_close(&locked);
+    free(repo_path);
+    return 0;
+}
+
 static int cmd_group_add(int argc, char **argv) {
     if (argc < 4) {
         fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
@@ -4645,6 +4708,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
 
     if (strcmp(command->name, "init") == 0)
         return cmd_init(argc, argv);
+    if (strcmp(command->name, "repo") == 0)
+        return cmd_repo(argc, argv);
     if (strcmp(command->name, "agent") == 0)
         return cmd_agent(argc, argv);
     if (strcmp(command->name, "workspace") == 0)
