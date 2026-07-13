@@ -448,6 +448,7 @@ yet.
 
 ```bash
 dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review]
+dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]
 dispatch task delete <id> [--force]
 dispatch show <id>
 dispatch list [all] [group]
@@ -459,6 +460,11 @@ its own column. By default, tasks require review after they are finished.
 `--actor` records who created the proposed task in task history and
 `dispatch.log`; it defaults to `user`. Use `--no-review` only when the task can
 safely complete and unblock the next task without human acceptance.
+
+`task edit` changes a task's title, description, or both without changing its
+ID, group, workflow state, dependencies, commit references, or prior history.
+The edit is appended to task history using the supplied `--actor`, which
+defaults to `user`. Pass an empty description to clear it.
 
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.

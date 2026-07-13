@@ -80,7 +80,7 @@ void dispatch_cli_print_help(void) {
     puts("");
     puts("Implemented now:");
     puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/list/show/remove/prune,");
-    puts("  group add/ready, task add, dep add/remove, commit add/list/show, completion candidates,");
+    puts("  group add/ready, task add/edit/delete, dep add/remove, commit add/list/show, completion candidates,");
     puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, tui, list, show, blocked");
 }
 
@@ -2702,6 +2702,92 @@ static int cmd_group(int argc, char **argv) {
 }
 
 static int cmd_task(int argc, char **argv) {
+    if (argc >= 4 && strcmp(argv[2], "edit") == 0) {
+        const char *task_id = argv[3];
+        const char *title = NULL;
+        const char *description = NULL;
+        const char *actor = "user";
+
+        for (int i = 4; i < argc; i++) {
+            if (strcmp(argv[i], "--title") == 0 && (i + 1) < argc) {
+                title = argv[++i];
+            } else if (strcmp(argv[i], "--description") == 0 &&
+                       (i + 1) < argc) {
+                description = argv[++i];
+            } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+                actor = argv[++i];
+            } else {
+                fprintf(stderr, "Unknown task edit option: %s\n", argv[i]);
+                return 1;
+            }
+        }
+
+        if (!title && !description) {
+            fprintf(stderr,
+                    "Task edit requires --title, --description, or both\n");
+            return 1;
+        }
+        if (title && title[0] == '\0') {
+            fprintf(stderr, "Task title must not be empty\n");
+            return 1;
+        }
+        if (title && title_starts_with_dispatch_id(title)) {
+            fprintf(stderr,
+                    "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
+            return 1;
+        }
+        if (!dispatch_actor_label_is_valid(actor)) {
+            fprintf(stderr,
+                    "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+            return 1;
+        }
+
+        LockedBoard locked;
+        if (!locked_board_load_or_error(&locked))
+            return 1;
+        DispatchTask *task =
+            dispatch_board_find_task(&locked.board, task_id);
+        if (!task) {
+            locked_board_close(&locked);
+            fprintf(stderr, "No task with id %s\n", task_id);
+            return 1;
+        }
+
+        if ((title && !dispatch_task_set_title(task, title)) ||
+            (description &&
+             !dispatch_task_set_description(task, description))) {
+            locked_board_close(&locked);
+            fprintf(stderr, "Could not edit task %s\n", task_id);
+            return 1;
+        }
+
+        const char *note = title && description
+                               ? "title and description"
+                               : title ? "title" : "description";
+        if (!dispatch_task_append_history(task, actor, "edited", note) ||
+            !locked_board_save_or_error(&locked)) {
+            locked_board_close(&locked);
+            return 1;
+        }
+
+        printf("Edited task %s\n", task_id);
+        DispatchLogField targets[] = {
+            {"task", task_id},
+        };
+        DispatchLogField context[] = {
+            {"title_changed", bool_string(title != NULL)},
+            {"description_changed", bool_string(description != NULL)},
+            {"title", title ? title : ""},
+            {"description", description ? description : ""},
+        };
+        char message[256];
+        snprintf(message, sizeof(message), "Edited task %s", task_id);
+        append_dispatch_log(actor, "task", "edit", targets, 1, context, 4,
+                            message);
+        locked_board_close(&locked);
+        return 0;
+    }
+
     if (argc >= 4 && strcmp(argv[2], "delete") == 0) {
         const char *task_id = argv[3];
         int force = 0;
@@ -2748,6 +2834,8 @@ static int cmd_task(int argc, char **argv) {
         fprintf(stderr,
                 "Usage: dispatch task add <group> <title> [--description "
                 "text] [--actor <name>] [--no-review]\n");
+        fprintf(stderr,
+                "       dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]\n");
         fprintf(stderr, "       dispatch task delete <id> [--force]\n");
         return 1;
     }

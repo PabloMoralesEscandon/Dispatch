@@ -506,6 +506,63 @@ assert_contains "Could not delete DE-01"
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
 
+case_dir="$(make_case_dir task-edit)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --description "Root task" --no-review
+expect_ok "$BIN" task add DE Dependent --description "Original description"
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" commit add DE-02 abc1234 --actor codex
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" ready DE-02 --actor user
+
+expect_fail "$BIN" task edit DE-02
+assert_contains "Task edit requires --title, --description, or both"
+expect_fail "$BIN" task edit missing --title Updated
+assert_contains "No task with id missing"
+expect_fail "$BIN" task edit DE-02 --title ""
+assert_contains "Task title must not be empty"
+expect_fail "$BIN" task edit DE-02 --title "DE-99 Bad title"
+assert_contains "Task titles should not include Dispatch IDs"
+expect_fail "$BIN" task edit DE-02 --title Updated --actor bad/name
+assert_contains "Actor must start with an ASCII letter or digit"
+expect_fail "$BIN" task edit DE-02 --unknown value
+assert_contains "Unknown task edit option"
+
+expect_ok "$BIN" task edit DE-02 --title "Revised dependent" --description "Revised description" --actor editor
+assert_contains "Edited task DE-02"
+expect_ok "$BIN" show DE-02
+assert_contains "ID: DE-02"
+assert_contains "Title: Revised dependent"
+assert_contains "Description: Revised description"
+assert_contains "Group: DE"
+assert_contains "State: blocked"
+assert_contains "Depends on: DE-01"
+assert_contains "Commits: abc1234"
+assert_contains "created by user"
+assert_contains "commit by codex: abc1234"
+assert_contains "ready by user"
+assert_contains "edited by editor: title and description"
+
+expect_ok "$BIN" task edit DE-02 --title "Final dependent"
+expect_ok "$BIN" show DE-02
+assert_contains "Title: Final dependent"
+assert_contains "Description: Revised description"
+assert_contains "edited by user: title"
+
+expect_ok "$BIN" task edit DE-02 --description "" --actor editor
+expect_ok "$BIN" show DE-02
+assert_contains "Title: Final dependent"
+assert_line "Description: "
+assert_contains "edited by editor: description"
+assert_file_contains dispatch.log '"actor":"editor"'
+assert_file_contains dispatch.log '"command":"task"'
+assert_file_contains dispatch.log '"action":"edit"'
+assert_file_contains dispatch.log '"task":"DE-02"'
+
 case_dir="$(make_case_dir dispatch-log)"
 cd "$case_dir"
 mkdir repo
