@@ -109,6 +109,11 @@ if [ ! -x ./nob ]; then
 fi
 ./nob $BUILD_MODE >/dev/null
 
+if grep -En '(^|[^[:alnum:]_])(system|popen|pclose)[[:space:]]*\(' \
+    src/*.c >/dev/null; then
+    fail "shell execution API remains in production source"
+fi
+
 # shellcheck disable=SC2086
 cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
     -ljansson -o "$TMP_ROOT/lock_primitive_test"
@@ -132,6 +137,11 @@ cc $TEST_CFLAGS -Iinclude tests/workspace_naming_test.c src/dispatch.c \
 
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
+
+cc -Iinclude tests/exec_helper_test.c src/dispatch_exec.c \
+    -o "$TMP_ROOT/exec_helper_test"
+mkdir "$TMP_ROOT/exec helper cwd"
+"$TMP_ROOT/exec_helper_test" "$TMP_ROOT/exec helper cwd"
 
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
@@ -538,6 +548,72 @@ assert_contains "Could not delete DE-01"
 
 expect_ok "$BIN" task delete DE-01 --force
 assert_contains "Deleted task DE-01"
+
+case_dir="$(make_case_dir "safe exec spaces")"
+cd "$case_dir"
+mkdir "repo with spaces"
+
+expect_ok "$BIN" init "repo with spaces"
+expect_ok git -C "repo with spaces" init
+printf 'safe exec marker\n' > "repo with spaces/marker.txt"
+expect_ok git -C "repo with spaces" add marker.txt
+expect_ok git -C "repo with spaces" -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit -m "safe exec marker"
+safe_exec_sha="$(git -C "repo with spaces" rev-parse HEAD)"
+
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Diff --no-review
+expect_ok "$BIN" task add DE Workspace --no-review
+expect_ok "$BIN" commit add DE-01 "$safe_exec_sha" --actor tester
+expect_ok "$BIN" ready DE-02 --actor user --no-review
+expect_ok "$BIN" agent create --name safe-agent --runner codex --no-run-script
+
+expect_ok "$BIN" tui --diff-exec-smoke DE-01
+assert_line "Diff status: 0"
+assert_contains "Diff bytes: "
+assert_line "Contains marker: yes"
+
+expect_ok "$BIN" workspace create DE-02 --actor safe-agent \
+    --dir "workspace with spaces" --branch agent/safe-agent/DE-02
+assert_contains "Created workspace DE-02 for safe-agent"
+if [ ! -e "workspace with spaces/.git" ]; then
+    fail "space-containing workspace was not created"
+fi
+expect_ok "$BIN" workspace show DE-02
+assert_contains "Path: $case_dir/workspace with spaces"
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "DE-02 ready active actor:safe-agent"
+assert_contains "dirty:no"
+
+printf 'untracked\n' > "workspace with spaces/untracked file.txt"
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "dirty:yes"
+expect_fail "$BIN" workspace remove DE-02
+assert_contains "Workspace has uncommitted changes"
+rm "workspace with spaces/untracked file.txt"
+expect_ok "$BIN" workspace remove DE-02
+assert_contains "Removed workspace DE-02"
+
+mkdir "fake tools"
+editor_capture="$case_dir/editor capture.txt"
+printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "%s" "$1" > "$EDITOR_CAPTURE"' > "fake tools/editor tool"
+chmod +x "fake tools/editor tool"
+EDITOR="'$case_dir/fake tools/editor tool'" \
+    EDITOR_CAPTURE="$editor_capture" \
+    expect_ok "$BIN" tui --prompt-edit-exec-smoke safe-agent
+assert_line "Editor status: 0"
+assert_file_contains "$editor_capture" \
+    ".dispatch/agents/safe-agent/safe-agent-PROMPT.md"
+
+tmux_capture="$case_dir/tmux capture.txt"
+printf '%s\n' '#!/usr/bin/env bash' \
+    'cat > "$TMUX_CAPTURE"' > "fake tools/tmux"
+chmod +x "fake tools/tmux"
+TMUX=1 TMUX_CAPTURE="$tmux_capture" PATH="$case_dir/fake tools:$PATH" \
+    expect_ok "$BIN" tui --tmux-copy-smoke 'literal ; $(not-run) with spaces'
+assert_line "Tmux copied: yes"
+assert_file_contains "$tmux_capture" 'literal ; $(not-run) with spaces'
 
 case_dir="$(make_case_dir json-output)"
 cd "$case_dir"
@@ -1334,11 +1410,15 @@ assert_contains "Session ID: tui-session-3"
 assert_not_contains "Session ID:  tui-session-3"
 
 EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
-assert_contains "ed '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+assert_line "argv[0]: ed"
+assert_line "argv[1]: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 VISUAL=nano EDITOR=ed expect_ok "$BIN" tui --prompt-edit-smoke codex-a
-assert_contains "nano '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+assert_line "argv[0]: nano"
+assert_line "argv[1]: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 EDITOR="code --wait" expect_ok "$BIN" tui --prompt-edit-smoke codex-a
-assert_contains "code --wait '.dispatch/agents/codex-a/codex-a-PROMPT.md'"
+assert_line "argv[0]: code"
+assert_line "argv[1]: --wait"
+assert_line "argv[2]: .dispatch/agents/codex-a/codex-a-PROMPT.md"
 expect_fail /usr/bin/env PATH=/nonexistent EDITOR= VISUAL= "$BIN" tui --prompt-edit-smoke codex-a
 assert_contains "No editor configured"
 
@@ -1408,8 +1488,12 @@ assert_contains "Commits: 1"
 assert_contains "Commit: abcdef1"
 
 expect_ok "$BIN" tui --diff-smoke DE-01
-assert_contains "git -C '"
-assert_contains "/repo' show 'abcdef1'"
+assert_line "argv[0]: git"
+assert_line "argv[1]: -C"
+assert_contains "argv[2]: "
+assert_contains "/repo"
+assert_line "argv[3]: show"
+assert_line "argv[4]: abcdef1"
 
 expect_fail "$BIN" tui --diff-smoke QA-01
 assert_contains "No commit metadata for QA-01"

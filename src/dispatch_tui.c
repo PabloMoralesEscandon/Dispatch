@@ -14,6 +14,7 @@
 #include <jansson.h>
 
 #include "dispatch.h"
+#include "dispatch_exec.h"
 #include "dispatch_store.h"
 
 typedef enum {
@@ -1059,41 +1060,28 @@ static char *osc52_sequence_for_text(const char *text) {
     return sequence;
 }
 
-static char *diff_command_for_task(const DispatchBoard *board,
-                                   const DispatchTask *task) {
+static int diff_argv_for_task(const DispatchBoard *board,
+                              const DispatchTask *task, int force_color,
+                              DispatchExecArgv *argv) {
     if (!task || task->commits.count == 0)
-        return NULL;
-
-    char *repo_q = tui_shell_quote(board->repo_path ? board->repo_path : ".");
-
-    /* Quote every recorded commit so the diff covers the full task change set,
-     * not just the first commit. */
-    char **commit_q = calloc(task->commits.count, sizeof(char *));
-    if (!commit_q) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
+        return 0;
+    if (!dispatch_exec_argv_append(argv, "git") ||
+        !dispatch_exec_argv_append(argv, "-C") ||
+        !dispatch_exec_argv_append(
+            argv, board->repo_path ? board->repo_path : ".") ||
+        !dispatch_exec_argv_append(argv, "show") ||
+        (force_color &&
+         !dispatch_exec_argv_append(argv, "--color=always"))) {
+        dispatch_exec_argv_free(argv);
+        return 0;
     }
-    size_t size = strlen("git -C  show") + strlen(repo_q) + 1;
     for (size_t i = 0; i < task->commits.count; i++) {
-        commit_q[i] = tui_shell_quote(task->commits.items[i]);
-        size += strlen(" ") + strlen(commit_q[i]);
+        if (!dispatch_exec_argv_append(argv, task->commits.items[i])) {
+            dispatch_exec_argv_free(argv);
+            return 0;
+        }
     }
-
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    size_t out = 0;
-    out += snprintf(command + out, size - out, "git -C %s show", repo_q);
-    for (size_t i = 0; i < task->commits.count; i++)
-        out += snprintf(command + out, size - out, " %s", commit_q[i]);
-
-    for (size_t i = 0; i < task->commits.count; i++)
-        free(commit_q[i]);
-    free(commit_q);
-    free(repo_q);
-    return command;
+    return 1;
 }
 
 static int path_has_git_metadata(const char *path) {
@@ -1114,25 +1102,17 @@ static int workspace_is_dirty(const DispatchWorkspace *workspace) {
     if (!workspace || !workspace->path || !path_has_git_metadata(workspace->path))
         return 0;
 
-    char *path_q = tui_shell_quote(workspace->path);
-    size_t size = strlen("git -C  status --porcelain 2>/dev/null") +
-                  strlen(path_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "git -C %s status --porcelain 2>/dev/null",
-             path_q);
-    free(path_q);
-
-    FILE *pipe = popen(command, "r");
-    free(command);
-    if (!pipe)
+    const char *argv[] = {"git", "-C", workspace->path, "status",
+                          "--porcelain", NULL};
+    DispatchExecOptions options = {.stderr_mode = DISPATCH_EXEC_DEV_NULL};
+    DispatchExecResult result;
+    char *output = NULL;
+    size_t output_size = 0;
+    if (!dispatch_exec_capture(argv, &options, &output, &output_size, &result))
         return 1;
-    int ch = fgetc(pipe);
-    int status = pclose(pipe);
-    return ch != EOF || status != 0;
+    int dirty = output_size > 0 || !dispatch_exec_result_success(&result);
+    free(output);
+    return dirty;
 }
 
 static int command_available(const char *command);
@@ -1160,67 +1140,55 @@ static void run_selected_task_diff(DispatchTui *tui) {
         tui_set_status(tui, "git is not available to show the diff");
         return;
     }
-    char *diff = diff_command_for_task(&tui->board, task);
-    if (!diff) {
+    const char *pager = diff_pager();
+    DispatchExecArgv diff_argv = {0};
+    if (!diff_argv_for_task(&tui->board, task, pager != NULL, &diff_argv)) {
         tui_set_status(tui, "No commit metadata for selected task");
         return;
     }
 
-    /* Force color and route git's output, including any error message, through
-     * a pager so the diff stays on screen until the user quits it. Without a
-     * pager, fall back to running the diff directly. */
-    const char *pager = diff_pager();
-    char *command;
-    if (pager) {
-        size_t size = strlen(diff) + strlen(" --color=always 2>&1 | ") +
-                      strlen(pager) + 1;
-        command = malloc(size);
-        if (!command) {
-            fprintf(stderr, "Out of memory\n");
-            exit(1);
-        }
-        snprintf(command, size, "%s --color=always 2>&1 | %s", diff, pager);
-    } else {
-        command = diff;
+    DispatchExecArgv pager_argv = {0};
+    if (pager && !dispatch_exec_argv_parse(&pager_argv, pager)) {
+        dispatch_exec_argv_free(&diff_argv);
+        tui_set_status(tui, "Could not parse the pager command");
+        return;
     }
 
     def_prog_mode();
     endwin();
-    int result = system(command);
+    DispatchExecResult result;
+    int launched;
+    if (pager) {
+        DispatchExecOptions git_options = {.merge_stderr_to_stdout = 1};
+        launched = dispatch_exec_pipeline(
+            (const char *const *)diff_argv.items, &git_options,
+            (const char *const *)pager_argv.items, NULL, &result);
+    } else {
+        launched = dispatch_exec_run((const char *const *)diff_argv.items, NULL,
+                                     &result);
+    }
     reset_prog_mode();
     refresh();
 
-    if (command != diff)
-        free(command);
-
     char message[256];
-    if (result == -1)
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    if (!launched)
         snprintf(message, sizeof(message), "Could not run the diff command");
-    else if (result != 0)
+    else if (status != 0)
         snprintf(message, sizeof(message),
-                 "Diff viewer exited with status %d", result);
+                 "Diff viewer exited with status %d", status);
     else if (!pager)
         snprintf(message, sizeof(message),
                  "Showed diff without a pager; set $PAGER to keep it on screen");
     else
         snprintf(message, sizeof(message), "Closed diff");
     tui_set_status(tui, message);
-    free(diff);
+    dispatch_exec_argv_free(&pager_argv);
+    dispatch_exec_argv_free(&diff_argv);
 }
 
 static int command_available(const char *command) {
-    char *command_q = tui_shell_quote(command);
-    size_t size = strlen("command -v  >/dev/null 2>&1") + strlen(command_q) + 1;
-    char *check = malloc(size);
-    if (!check) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(check, size, "command -v %s >/dev/null 2>&1", command_q);
-    int ok = system(check) == 0;
-    free(command_q);
-    free(check);
-    return ok;
+    return dispatch_exec_command_available(command);
 }
 
 static const char *fallback_editor(void) {
@@ -1242,25 +1210,25 @@ static const char *configured_editor(void) {
     return fallback_editor();
 }
 
-static char *editor_command_for_path(const char *path, char *error,
-                                     size_t error_size) {
+static int editor_argv_for_path(const char *path, DispatchExecArgv *argv,
+                                char *error, size_t error_size) {
     const char *editor = configured_editor();
     if (!editor || !editor[0]) {
         snprintf(error, error_size,
                  "No editor configured; set VISUAL or EDITOR to edit %s",
                  path ? path : "the prompt");
-        return NULL;
+        return 0;
     }
-    char *path_q = tui_shell_quote(path);
-    size_t size = strlen(editor) + strlen(path_q) + 2;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
+    if (!dispatch_exec_argv_parse(argv, editor)) {
+        snprintf(error, error_size, "Could not parse editor command");
+        return 0;
     }
-    snprintf(command, size, "%s %s", editor, path_q);
-    free(path_q);
-    return command;
+    if (!dispatch_exec_argv_append(argv, path ? path : "")) {
+        dispatch_exec_argv_free(argv);
+        snprintf(error, error_size, "Out of memory");
+        return 0;
+    }
+    return 1;
 }
 
 static void edit_selected_agent_prompt(DispatchTui *tui) {
@@ -1275,22 +1243,29 @@ static void edit_selected_agent_prompt(DispatchTui *tui) {
     }
 
     char error[256] = {0};
-    char *command = editor_command_for_path(agent->prompt_path, error,
-                                           sizeof(error));
-    if (!command) {
+    DispatchExecArgv editor_argv = {0};
+    if (!editor_argv_for_path(agent->prompt_path, &editor_argv, error,
+                              sizeof(error))) {
         tui_set_status(tui, error);
         return;
     }
     def_prog_mode();
     endwin();
-    int result = system(command);
+    DispatchExecResult result;
+    int launched = dispatch_exec_run((const char *const *)editor_argv.items,
+                                     NULL, &result);
     reset_prog_mode();
     refresh();
 
     char message[256];
-    snprintf(message, sizeof(message), "Editor exited with status %d", result);
+    if (launched) {
+        snprintf(message, sizeof(message), "Editor exited with status %d",
+                 dispatch_exec_result_status(&result));
+    } else {
+        snprintf(message, sizeof(message), "Could not run editor");
+    }
     tui_set_status(tui, message);
-    free(command);
+    dispatch_exec_argv_free(&editor_argv);
     tui_load_board(tui);
 }
 
@@ -1355,19 +1330,10 @@ static int copy_command_to_tmux_buffer(const char *command) {
     if (!getenv("TMUX") || !command_available("tmux"))
         return 0;
 
-    char *command_q = tui_shell_quote(command);
-    size_t size = strlen("printf %s  | tmux load-buffer -") +
-                  strlen(command_q) + 1;
-    char *copy = malloc(size);
-    if (!copy) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(copy, size, "printf %%s %s | tmux load-buffer -", command_q);
-    int ok = system(copy) == 0;
-    free(command_q);
-    free(copy);
-    return ok;
+    const char *argv[] = {"tmux", "load-buffer", "-", NULL};
+    DispatchExecResult result;
+    return dispatch_exec_feed(argv, NULL, command, strlen(command), &result) &&
+           dispatch_exec_result_success(&result);
 }
 
 static int send_command_to_osc52_clipboard(const char *command) {
@@ -3181,18 +3147,23 @@ static void run_dependency_prompt(DispatchTui *tui, int add) {
     tui_set_status(tui, message);
 }
 
-static void run_external_command_in_terminal(DispatchTui *tui,
-                                             const char *command,
-                                             const char *label) {
+static void run_external_argv_in_terminal(DispatchTui *tui,
+                                          const char *const argv[],
+                                          const char *label) {
     def_prog_mode();
     endwin();
-    int result = system(command);
+    DispatchExecResult result;
+    int launched = dispatch_exec_run(argv, NULL, &result);
     reset_prog_mode();
     refresh();
 
     char message[256];
-    snprintf(message, sizeof(message), "%s exited with status %d", label,
-             result);
+    if (launched) {
+        snprintf(message, sizeof(message), "%s exited with status %d", label,
+                 dispatch_exec_result_status(&result));
+    } else {
+        snprintf(message, sizeof(message), "Could not run %s", label);
+    }
     tui_load_board(tui);
     tui_set_status(tui, message);
 }
@@ -3206,22 +3177,13 @@ static void run_workspace_create_form(DispatchTui *tui) {
         return;
     int sequence = prompt_yes_no("Create sequence workspace? [y/N]: ", 0);
 
-    char *task_q = tui_shell_quote(task_id);
-    char *actor_q = tui_shell_quote(actor);
-    size_t size = strlen("./dispatch workspace create  --actor  --sequence") +
-                  strlen(task_q) + strlen(actor_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "./dispatch workspace create %s --actor %s%s",
-             task_q, actor_q, sequence ? " --sequence" : "");
-    free(task_q);
-    free(actor_q);
-
-    run_external_command_in_terminal(tui, command, "Workspace create");
-    free(command);
+    const char *normal_argv[] = {"./dispatch", "workspace", "create", task_id,
+                                 "--actor",    actor,       NULL};
+    const char *sequence_argv[] = {"./dispatch", "workspace", "create",
+                                   task_id,      "--actor",   actor,
+                                   "--sequence", NULL};
+    run_external_argv_in_terminal(tui, sequence ? sequence_argv : normal_argv,
+                                  "Workspace create");
     clamp_workspace_selection(tui);
 }
 
@@ -3242,20 +3204,12 @@ static void run_workspace_remove_form(DispatchTui *tui, int force) {
         return;
     }
 
-    char *target_q = tui_shell_quote(workspace->task_id);
-    size_t size = strlen("./dispatch workspace remove  --force") +
-                  strlen(target_q) + 1;
-    char *command = malloc(size);
-    if (!command) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(command, size, "./dispatch workspace remove %s%s", target_q,
-             force ? " --force" : "");
-    free(target_q);
-
-    run_external_command_in_terminal(tui, command, "Workspace remove");
-    free(command);
+    const char *normal_argv[] = {"./dispatch", "workspace", "remove",
+                                 workspace->task_id, NULL};
+    const char *force_argv[] = {"./dispatch",       "workspace", "remove",
+                                workspace->task_id, "--force",   NULL};
+    run_external_argv_in_terminal(tui, force ? force_argv : normal_argv,
+                                  "Workspace remove");
     clamp_workspace_selection(tui);
 }
 
@@ -3310,8 +3264,8 @@ static void run_workspace_prune_form(DispatchTui *tui) {
         tui_set_status(tui, "Workspace prune cancelled");
         return;
     }
-    run_external_command_in_terminal(
-        tui, "./dispatch workspace prune --done", "Workspace prune");
+    const char *argv[] = {"./dispatch", "workspace", "prune", "--done", NULL};
+    run_external_argv_in_terminal(tui, argv, "Workspace prune");
     clamp_workspace_selection(tui);
 }
 
@@ -5859,17 +5813,57 @@ static int tui_diff_smoke(const char *task_id) {
         return 1;
     }
 
-    char *command = diff_command_for_task(&board, task);
-    if (!command) {
+    DispatchExecArgv command = {0};
+    if (!diff_argv_for_task(&board, task, 0, &command)) {
         fprintf(stderr, "No commit metadata for %s\n", task_id);
         dispatch_board_free(&board);
         return 1;
     }
 
-    printf("%s\n", command);
-    free(command);
+    for (size_t i = 0; i < command.count; i++)
+        printf("argv[%zu]: %s\n", i, command.items[i]);
+    dispatch_exec_argv_free(&command);
     dispatch_board_free(&board);
     return 0;
+}
+
+static int tui_diff_exec_smoke(const char *task_id) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui diff exec smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    DispatchExecArgv command = {0};
+    if (!task || !diff_argv_for_task(&board, task, 0, &command)) {
+        fprintf(stderr, "No commit metadata for %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    DispatchExecOptions options = {.merge_stderr_to_stdout = 1};
+    DispatchExecResult result;
+    char *output = NULL;
+    size_t output_size = 0;
+    int launched =
+        dispatch_exec_capture((const char *const *)command.items, &options,
+                              &output, &output_size, &result);
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    printf("Diff status: %d\n", status);
+    printf("Diff bytes: %zu\n", output_size);
+    printf("Contains marker: %s\n",
+           output && strstr(output, "safe exec marker") ? "yes" : "no");
+
+    free(output);
+    dispatch_exec_argv_free(&command);
+    dispatch_board_free(&board);
+    return launched && status == 0 && output_size > 0 ? 0 : 1;
 }
 
 static int tui_agents_smoke(void) {
@@ -5986,17 +5980,56 @@ static int tui_prompt_edit_smoke(const char *name) {
     }
 
     char editor_error[256] = {0};
-    char *command = editor_command_for_path(agent->prompt_path, editor_error,
-                                           sizeof(editor_error));
-    if (!command) {
+    DispatchExecArgv command = {0};
+    if (!editor_argv_for_path(agent->prompt_path, &command, editor_error,
+                              sizeof(editor_error))) {
         fprintf(stderr, "%s\n", editor_error);
         dispatch_board_free(&board);
         return 1;
     }
-    printf("%s\n", command);
-    free(command);
+    for (size_t i = 0; i < command.count; i++)
+        printf("argv[%zu]: %s\n", i, command.items[i]);
+    dispatch_exec_argv_free(&command);
     dispatch_board_free(&board);
     return 0;
+}
+
+static int tui_prompt_edit_exec_smoke(const char *name) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui prompt edit exec smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchAgent *agent = dispatch_board_find_agent(&board, name);
+    DispatchExecArgv command = {0};
+    if (!agent || !agent->prompt_path ||
+        !editor_argv_for_path(agent->prompt_path, &command, error,
+                              sizeof(error))) {
+        fprintf(stderr, "%s\n", error[0] ? error : "No matching agent prompt");
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    DispatchExecResult result;
+    int launched =
+        dispatch_exec_run((const char *const *)command.items, NULL, &result);
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    printf("Editor status: %d\n", status);
+    dispatch_exec_argv_free(&command);
+    dispatch_board_free(&board);
+    return launched && status == 0 ? 0 : 1;
+}
+
+static int tui_tmux_copy_smoke(const char *text) {
+    int copied = copy_command_to_tmux_buffer(text ? text : "");
+    printf("Tmux copied: %s\n", copied ? "yes" : "no");
+    return copied ? 0 : 1;
 }
 
 static int tui_agent_archive_smoke(const char *name, const char *action) {
@@ -6971,15 +7004,18 @@ static void print_tui_help(void) {
     puts("  --task-move-smoke <task-id> <group> [actor]");
     puts("  --task-move-options-smoke <current-group>");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
+    puts("  --diff-exec-smoke <task-id>  execute external diff and exit");
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
     puts("  --agent-set-session-smoke <name> <session|->");
     puts("  --prompt-edit-smoke <name>    print prompt editor command and exit");
+    puts("  --prompt-edit-exec-smoke <name>  execute prompt editor and exit");
     puts("  --agent-archive-smoke <name> archive|restore");
     puts("  --agent-selection-smoke enabled|all <selected-index>");
     puts("  --agent-run-command-smoke <name>");
     puts("  --osc52-smoke <text>        print OSC 52 payload metadata and exit");
+    puts("  --tmux-copy-smoke <text>    copy text through tmux stdin and exit");
     puts("  --create-group-smoke <name> <prefix|->");
     puts("  --create-task-smoke <group> <title> <description|-> review|no-review <deps|->");
     puts("  --task-form-submit-smoke <group> <title> <description|-> review|no-review <deps|->");
@@ -7035,6 +7071,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_task_move_options_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--diff-smoke") == 0)
         return tui_diff_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--diff-exec-smoke") == 0)
+        return tui_diff_exec_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)
         return tui_agents_smoke();
     if (argc == 4 && strcmp(argv[2], "--agent-inspect-smoke") == 0)
@@ -7045,6 +7083,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_set_session_smoke(argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[2], "--prompt-edit-smoke") == 0)
         return tui_prompt_edit_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--prompt-edit-exec-smoke") == 0)
+        return tui_prompt_edit_exec_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--agent-archive-smoke") == 0)
         return tui_agent_archive_smoke(argv[3], argv[4]);
     if (argc == 5 && strcmp(argv[2], "--agent-selection-smoke") == 0)
@@ -7053,6 +7093,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_agent_run_command_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--osc52-smoke") == 0)
         return tui_osc52_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--tmux-copy-smoke") == 0)
+        return tui_tmux_copy_smoke(argv[3]);
     if (argc == 5 && strcmp(argv[2], "--create-group-smoke") == 0)
         return tui_create_group_smoke(argv[3], argv[4]);
     if (argc == 8 && strcmp(argv[2], "--create-task-smoke") == 0)
