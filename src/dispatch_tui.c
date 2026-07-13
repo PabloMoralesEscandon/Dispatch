@@ -2075,6 +2075,24 @@ static size_t task_form_group_options(const DispatchBoard *board,
     return count;
 }
 
+static size_t task_move_group_options(const DispatchBoard *board,
+                                      const char *current_group,
+                                      TuiTaskFormOption *out, size_t max) {
+    size_t count = 0;
+    for (size_t i = 0; board && i < board->groups.count && count < max; i++) {
+        const DispatchGroup *group = &board->groups.items[i];
+        if (current_group && strcmp(group->id, current_group) == 0)
+            continue;
+        snprintf(out[count].value, sizeof(out[count].value), "%s",
+                 group->prefix ? group->prefix : "");
+        snprintf(out[count].label, sizeof(out[count].label), "%-4s %s",
+                 group->prefix ? group->prefix : "",
+                 group->name ? group->name : "");
+        count++;
+    }
+    return count;
+}
+
 /* Fills out[] with tasks that can be selected as dependencies: not-done tasks
  * that are not already present in deps_text. Returns the option count. */
 static size_t task_form_dep_options(const DispatchBoard *board,
@@ -2587,6 +2605,14 @@ static void handle_task_edit_form_key(TuiTaskEditForm *form, int ch,
     }
 }
 
+static int task_edit_form_submit(const char *task_id,
+                                 const TuiTaskEditForm *form,
+                                 const char *actor, char *message,
+                                 size_t message_size) {
+    return mutate_task_content(task_id, form->title, form->description, actor,
+                               message, message_size);
+}
+
 static void run_task_edit_form(DispatchTui *tui) {
     DispatchTask *task = selected_visible_task(tui);
     if (!task) {
@@ -2619,8 +2645,8 @@ static void run_task_edit_form(DispatchTui *tui) {
         }
         if (submit) {
             char message[256] = {0};
-            if (!mutate_task_content(task_id, form.title, form.description,
-                                     tui->actor, message, sizeof(message))) {
+            if (!task_edit_form_submit(task_id, &form, tui->actor, message,
+                                       sizeof(message))) {
                 snprintf(form.status, sizeof(form.status), "%s", message);
                 continue;
             }
@@ -2646,15 +2672,9 @@ static void run_task_move_picker(DispatchTui *tui) {
     snprintf(task_id, sizeof(task_id), "%s", task->id);
     snprintf(current_group, sizeof(current_group), "%s", task->group);
 
-    TuiTaskFormOption all[64];
     TuiTaskFormOption options[64];
-    size_t all_count = task_form_group_options(&tui->board, all, 64);
-    size_t count = 0;
-    for (size_t i = 0; i < all_count; i++) {
-        DispatchGroup *group = dispatch_board_find_group(&tui->board, all[i].value);
-        if (group && strcmp(group->id, current_group) != 0)
-            options[count++] = all[i];
-    }
+    size_t count =
+        task_move_group_options(&tui->board, current_group, options, 64);
     if (count == 0) {
         tui_set_status(tui, "No other group to move this task to");
         return;
@@ -5538,14 +5558,27 @@ static int tui_inspect_smoke(const char *task_id) {
 
     printf("Task: %s\n", task->id);
     printf("Title: %s\n", task->title);
+    printf("Description: %s\n", task->description);
+    printf("Group: %s\n", task->group);
     printf("State: %s\n",
            dispatch_state_name(dispatch_task_effective_state(&board, task)));
     printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
     printf("Depends on: %zu\n", task->depends_on.count);
+    char relationships[1024];
+    join_string_list(&task->depends_on, relationships, sizeof(relationships));
+    printf("Dependency IDs: %s\n", relationships);
+    blocks_text(&board, task->id, relationships, sizeof(relationships));
+    printf("Blocks: %s\n", relationships);
     printf("Commits: %zu\n", task->commits.count);
     for (size_t i = 0; i < task->commits.count; i++)
         printf("Commit: %s\n", task->commits.items[i]);
     printf("History: %zu\n", task->history.count);
+    for (size_t i = 0; i < task->history.count; i++) {
+        DispatchHistoryEntry *entry = &task->history.items[i];
+        printf("History entry: %s by %s%s%s\n", entry->action, entry->actor,
+               entry->note && entry->note[0] ? ": " : "",
+               entry->note && entry->note[0] ? entry->note : "");
+    }
     DispatchWorkspace *workspace = workspace_for_task(&board, task->id);
     printf("Workspace: %s\n", workspace ? workspace->id : "-");
 
@@ -5636,14 +5669,47 @@ static int tui_action_smoke(const char *action_name, const char *task_id,
 
 static int tui_task_edit_smoke(const char *task_id, const char *title,
                                const char *description, const char *actor) {
+    TuiTaskEditForm form;
+    memset(&form, 0, sizeof(form));
+    snprintf(form.title, sizeof(form.title), "%s", title);
+    snprintf(form.description, sizeof(form.description), "%s",
+             strcmp(description, "-") == 0 ? "" : description);
     char message[256] = {0};
-    const char *value = strcmp(description, "-") == 0 ? "" : description;
-    if (!mutate_task_content(task_id, title, value, actor, message,
-                             sizeof(message))) {
+    if (!task_edit_form_submit(task_id, &form, actor, message,
+                               sizeof(message))) {
         fprintf(stderr, "%s\n", message);
         return 1;
     }
     printf("%s\n", message);
+    return 0;
+}
+
+static int tui_task_move_options_smoke(const char *current_group) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui move options smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchGroup *group = dispatch_board_find_group(&board, current_group);
+    if (!group) {
+        fprintf(stderr, "No group with id, prefix, or name %s\n",
+                current_group);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    TuiTaskFormOption options[64];
+    size_t count = task_move_group_options(&board, group->id, options, 64);
+    printf("Options: %zu\n", count);
+    for (size_t i = 0; i < count; i++)
+        printf("%s\n", options[i].label);
+    dispatch_board_free(&board);
     return 0;
 }
 
@@ -6642,6 +6708,7 @@ static void print_tui_help(void) {
     puts("  --action-smoke <action> <task-id> [actor]  run lifecycle action and exit");
     puts("  --task-edit-smoke <task-id> <title> <description|-> [actor]");
     puts("  --task-move-smoke <task-id> <group> [actor]");
+    puts("  --task-move-options-smoke <current-group>");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
@@ -6701,6 +6768,8 @@ int dispatch_tui_main(int argc, char **argv) {
         strcmp(argv[2], "--task-move-smoke") == 0)
         return tui_task_move_smoke(argv[3], argv[4],
                                    argc == 6 ? argv[5] : "user");
+    if (argc == 4 && strcmp(argv[2], "--task-move-options-smoke") == 0)
+        return tui_task_move_options_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--diff-smoke") == 0)
         return tui_diff_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)

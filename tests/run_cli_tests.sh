@@ -1400,23 +1400,53 @@ mkdir repo
 expect_ok "$BIN" init repo
 expect_ok "$BIN" group add Development --prefix DE
 expect_ok "$BIN" group add Quality --prefix QA
-expect_ok "$BIN" task add DE Root --description "Original"
-expect_ok "$BIN" tui --task-edit-smoke DE-01 "Revised task" "Revised description" editor
-assert_contains "Edited task DE-01"
-expect_ok "$BIN" show DE-01
-assert_contains "ID: DE-01"
+expect_ok "$BIN" group add Research --prefix RE
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE Dependent --description "Original"
+expect_ok "$BIN" task add DE Follower
+expect_ok "$BIN" dep add DE-01 DE-02
+expect_ok "$BIN" dep add DE-02 DE-03
+expect_ok "$BIN" commit add DE-02 feed123 --actor codex
+expect_ok "$BIN" ready DE-01 --actor user --no-review
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" tui --task-move-options-smoke DE
+assert_contains "Options: 2"
+assert_contains "QA   Quality"
+assert_contains "RE   Research"
+assert_not_contains "DE   Development"
+expect_ok "$BIN" tui --task-edit-smoke DE-02 "Revised task" "Revised description" editor
+assert_contains "Edited task DE-02"
+expect_ok "$BIN" tui --inspect-smoke DE-02
+assert_contains "Task: DE-02"
 assert_contains "Title: Revised task"
 assert_contains "Description: Revised description"
-assert_contains "edited by editor: title and description"
-expect_fail "$BIN" tui --task-edit-smoke DE-01 "DE-99 Bad title" - editor
+assert_contains "Group: DE"
+assert_contains "State: blocked"
+assert_contains "Dependency IDs: DE-01"
+assert_contains "Blocks: DE-03"
+assert_contains "Commit: feed123"
+assert_contains "History entry: edited by editor: title and description"
+expect_fail "$BIN" tui --task-edit-smoke DE-02 "DE-99 Bad title" - editor
 assert_contains "Task title should not include an ID"
-expect_ok "$BIN" tui --task-move-smoke DE-01 QA mover
-assert_contains "Moved task DE-01 from DE to QA"
-expect_ok "$BIN" show DE-01
-assert_contains "ID: DE-01"
+expect_ok "$BIN" tui --task-move-smoke DE-02 QA mover
+assert_contains "Moved task DE-02 from DE to QA"
+expect_ok "$BIN" tui --inspect-smoke DE-02
+assert_contains "Task: DE-02"
+assert_contains "Title: Revised task"
+assert_contains "Description: Revised description"
 assert_contains "Group: QA"
-assert_contains "moved by mover: from DE to QA"
-expect_fail "$BIN" tui --task-move-smoke DE-01 QA mover
+assert_contains "State: blocked"
+assert_contains "Dependency IDs: DE-01"
+assert_contains "Blocks: DE-03"
+assert_contains "Commit: feed123"
+assert_contains "History entry: edited by editor: title and description"
+assert_contains "History entry: moved by mover: from DE to QA"
+expect_ok "$BIN" list QA
+assert_contains "DE-02"
+assert_contains "Revised task"
+expect_ok "$BIN" show DE-03
+assert_contains "Depends on: DE-02"
+expect_fail "$BIN" tui --task-move-smoke DE-02 QA mover
 assert_contains "already belongs to group QA"
 
 case_dir="$(make_case_dir tui-create)"
