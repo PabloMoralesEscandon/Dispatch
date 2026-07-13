@@ -1538,6 +1538,36 @@ assert_contains "Agent name must be 1-24 characters"
 expect_fail "$BIN" group add "ThisGroupNameIsFarTooLongToFitInTheBoardHeaderBand" --prefix LG
 assert_contains "Could not add group"
 
+# FX-09: the task inspector shows the full description: wrapped across rows,
+# paragraph breaks preserved, and every line reachable by scrolling.
+case_dir="$(make_case_dir tui-description-wrap)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Long --description "$(printf 'First paragraph with enough words to wrap over the width.\n\nSecond paragraph follows here.\nFinal tail line.')"
+# The full text wraps into rows at width 20 and the first window shows the top.
+expect_ok "$BIN" tui --desc-wrap-smoke DE-01 20 3 0
+assert_contains "Line: [First paragraph with]"
+run_total="$(printf '%s\n' "$RUN_OUTPUT" | sed -n 's/^Total: //p')"
+if [ "$run_total" -lt 6 ]; then
+    fail "expected long description to wrap into at least 6 rows, got $run_total"
+fi
+# Scrolling to the end reaches the final line; the tail is never dropped.
+expect_ok "$BIN" tui --desc-wrap-smoke DE-01 20 3 999
+assert_contains "Line: [Final tail line.]"
+# Paragraph breaks produce empty rows between paragraphs.
+expect_ok "$BIN" tui --desc-wrap-smoke DE-01 200 10 0
+assert_contains "Line: [First paragraph with enough words to wrap over the width.]"
+assert_contains "Line: []"
+assert_contains "Line: [Second paragraph follows here.]"
+assert_contains "Line: [Final tail line.]"
+# A short description fits in one row with no scroll window.
+expect_ok "$BIN" task add DE Short --description "Tiny."
+expect_ok "$BIN" tui --desc-wrap-smoke DE-02 80 5 0
+assert_contains "Total: 1"
+assert_contains "Line: [Tiny.]"
+
 # FX-03: init resolves repo_path to an absolute path, rejects missing paths,
 # and `dispatch repo set` repairs the stored path without recreating the board.
 case_dir="$(make_case_dir repo-path)"

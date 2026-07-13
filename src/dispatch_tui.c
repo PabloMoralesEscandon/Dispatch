@@ -61,6 +61,9 @@ typedef struct {
     int workspace_top;
     int selected_log;
     int log_top;
+    int desc_top;    /* task inspector description scroll offset (rows) */
+    int desc_region; /* description rows shown by the last render */
+    int desc_total;  /* total wrapped description rows at the last render */
     char log_filter_field[32];
     char log_filter_value[128];
     time_t board_mtime;
@@ -736,6 +739,7 @@ static int select_task_by_id(DispatchTui *tui, const char *task_id) {
 
     snprintf(tui->inspected_task_id, sizeof(tui->inspected_task_id), "%s",
              requested->id);
+    tui->desc_top = 0;
     VisibleTaskIter it;
     visible_task_iter_init(tui, &it);
     int visible_index = 0;
@@ -3474,7 +3478,7 @@ static void draw_footer(const char *message, const char *hints) {
 static const char *tui_footer_hints(DispatchTuiScreen screen) {
     switch (screen) {
     case TUI_SCREEN_TASK_INSPECTOR:
-        return "q/Esc back   > add dep   < remove dep   d diff   L logs";
+        return "q/Esc back   > add dep   < remove dep   d diff   L logs   PgUp/PgDn scroll";
     case TUI_SCREEN_AGENT_INSPECTOR:
         return "q/Esc back   y run   e prompt   S session   x clear   z archive";
     case TUI_SCREEN_WORKSPACE_INSPECTOR:
@@ -3673,6 +3677,7 @@ static const HelpItem help_task_inspector_items[] = {
     {"<", "remove dependency"},
     {"d", "diff"},
     {"L", "task logs"},
+    {"PgUp/PgDn", "scroll description"},
     {"h / ?", "toggle help"},
 };
 
@@ -4278,6 +4283,41 @@ static int draw_field(int y, int rows, int cols, const char *label,
     return y + 1;
 }
 
+/* Wrap text into fixed-width rows: the same width-slice wrap the task form
+ * box uses, plus hard breaks at newlines so CLI-created multi-paragraph
+ * descriptions keep their paragraphs. Returns the total row count; when out
+ * is non-NULL it receives row number `row` (empty when out of range). */
+static int description_rows(const char *text, int width, int row, char *out,
+                            size_t out_size) {
+    if (out && out_size > 0)
+        out[0] = '\0';
+    if (!text || width <= 0)
+        return 0;
+
+    int count = 0;
+    const char *p = text;
+    for (;;) {
+        const char *nl = strchr(p, '\n');
+        size_t seg = nl ? (size_t)(nl - p) : strlen(p);
+        size_t off = 0;
+        do {
+            size_t len =
+                seg - off > (size_t)width ? (size_t)width : seg - off;
+            if (out && count == row) {
+                size_t copy = len < out_size - 1 ? len : out_size - 1;
+                memcpy(out, p + off, copy);
+                out[copy] = '\0';
+            }
+            count++;
+            off += len;
+        } while (off < seg);
+        if (!nl)
+            break;
+        p = nl + 1;
+    }
+    return count;
+}
+
 /* A bold, accented section heading. */
 static int draw_section(int y, int rows, int cols, const char *title) {
     if (y >= rows - 1)
@@ -4351,8 +4391,52 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
                                   tui_state_color(state));
     y++;
 
-    y = draw_field(y, rows, cols, "Description",
-                   task->description[0] ? task->description : "-");
+    /* Description gets its own multi-line region: the full text is wrapped
+     * across as many rows as fit, the fields below reflow after it, and
+     * PgUp/PgDn scroll the region when the text is longer than the space
+     * available. */
+    const char *desc = task->description[0] ? task->description : "-";
+    int desc_x = 2 + 15;
+    int desc_width = cols - desc_x;
+    int total = description_rows(desc, desc_width, -1, NULL, 0);
+    /* Leave room for the fixed sections below the description. */
+    int reserved = 16;
+    int region = rows - 1 - y - reserved;
+    if (region < 3)
+        region = 3;
+    if (region > total)
+        region = total;
+    int max_top = total - region;
+    if (tui->desc_top > max_top)
+        tui->desc_top = max_top;
+    if (tui->desc_top < 0)
+        tui->desc_top = 0;
+    tui->desc_region = region;
+    tui->desc_total = total;
+
+    if (y < rows - 1) {
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        mvaddnstr(y, 2, "Description", cols - 2);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+    }
+    char desc_line[512];
+    for (int r = 0; r < region && y < rows - 1; r++, y++) {
+        description_rows(desc, desc_width, tui->desc_top + r, desc_line,
+                         sizeof(desc_line));
+        draw_truncated(y, desc_x, desc_width, desc_line);
+    }
+    if (total > region && y < rows - 1) {
+        snprintf(buf, sizeof(buf), "(%d-%d of %d lines, PgUp/PgDn scroll)",
+                 tui->desc_top + 1, tui->desc_top + region, total);
+        if (tui_colors_enabled)
+            attron(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        draw_truncated(y, desc_x, desc_width, buf);
+        if (tui_colors_enabled)
+            attroff(COLOR_PAIR(TUI_COLOR_MUTED) | A_DIM);
+        y++;
+    }
     y++;
 
     y = draw_section(y, rows, cols, "Details");
@@ -4751,6 +4835,7 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
     case 'i':
         if (tui->screen == TUI_SCREEN_BOARD && selected_visible_task(tui)) {
             tui->inspected_task_id[0] = '\0';
+            tui->desc_top = 0;
             tui->screen = TUI_SCREEN_TASK_INSPECTOR;
             tui_set_status(tui, "Inspecting task");
         } else if (tui->screen == TUI_SCREEN_AGENTS && selected_agent(tui)) {
@@ -4954,6 +5039,7 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
             clamp_log_selection(tui);
         } else {
             tui->selected_task--;
+            tui->desc_top = 0;
             clamp_selection(tui);
         }
         break;
@@ -4970,7 +5056,19 @@ static void tui_handle_key(DispatchTui *tui, int ch) {
             clamp_log_selection(tui);
         } else {
             tui->selected_task++;
+            tui->desc_top = 0;
             clamp_selection(tui);
+        }
+        break;
+    case KEY_NPAGE:
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            tui->desc_top += tui->desc_region > 0 ? tui->desc_region : 1;
+        break;
+    case KEY_PPAGE:
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR) {
+            tui->desc_top -= tui->desc_region > 0 ? tui->desc_region : 1;
+            if (tui->desc_top < 0)
+                tui->desc_top = 0;
         }
         break;
     case 'u':
@@ -5978,6 +6076,52 @@ static int tui_key_smoke(const char *screen_arg, const char *keys) {
     return 0;
 }
 
+/* Print a task's wrapped description region the way the inspector renders
+ * it: total wrapped rows, the clamped scroll window for a given width /
+ * region height / top offset, and each visible line between brackets. Lets
+ * tests verify the whole description is reachable end to end. */
+static int tui_desc_wrap_smoke(const char *task_id, int width, int region,
+                               int top) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
+                                  sizeof(error)) ||
+        !dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui desc wrap smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        fprintf(stderr, "No task with id %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    const char *desc = task->description[0] ? task->description : "-";
+    int total = description_rows(desc, width, -1, NULL, 0);
+    if (region > total)
+        region = total;
+    int max_top = total - region;
+    if (top > max_top)
+        top = max_top;
+    if (top < 0)
+        top = 0;
+
+    printf("Total: %d\n", total);
+    printf("Region: %d\n", region);
+    printf("Top: %d\n", top);
+    char line[512];
+    for (int r = 0; r < region; r++) {
+        description_rows(desc, width, top + r, line, sizeof(line));
+        printf("Line: [%s]\n", line);
+    }
+    dispatch_board_free(&board);
+    return 0;
+}
+
 /* Print a clamped column cell between brackets so tests can assert exact
  * padding and truncation. */
 static int tui_cell_smoke(int width, const char *text) {
@@ -6171,6 +6315,7 @@ static void print_tui_help(void) {
     puts("  --key-smoke <screen> <keys>  feed keys to the input handler on a screen");
     puts("  --cell-smoke <width> <text>  print a clamped table cell");
     puts("  --agent-row-smoke <name>     print the agents-table row for one agent");
+    puts("  --desc-wrap-smoke <task-id> <width> <region> <top>  print the wrapped description window");
     puts("  --palette-smoke <command>");
     puts("  --palette-complete-smoke <prefix>");
     puts("  --search-smoke <keys>");
@@ -6256,6 +6401,9 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_cell_smoke(atoi(argv[3]), argv[4]);
     if (argc == 4 && strcmp(argv[2], "--agent-row-smoke") == 0)
         return tui_agent_row_smoke(argv[3]);
+    if (argc == 7 && strcmp(argv[2], "--desc-wrap-smoke") == 0)
+        return tui_desc_wrap_smoke(argv[3], atoi(argv[4]), atoi(argv[5]),
+                                   atoi(argv[6]));
     if (argc == 4 && strcmp(argv[2], "--palette-smoke") == 0)
         return tui_palette_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--palette-complete-smoke") == 0)
