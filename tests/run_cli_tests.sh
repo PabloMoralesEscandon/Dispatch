@@ -1964,4 +1964,13 @@ assert_contains "${ESC}[2;37mdepends_on:DE-02,DE-03${ESC}[0m"
 expect_ok env FORCE_COLOR=1 NO_COLOR=1 "$BIN" list DE
 assert_not_contains "${ESC}["
 
+expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
+assert_contains "PASS: TUI golden frames"
+
+# The aggregate suite also proves that a deliberate captured-frame mutation
+# is rejected by the golden comparison instead of silently updating fixtures.
+expect_fail env DISPATCH_BIN="$BIN" TUI_GOLDEN_MUTATE_FRAME=board \
+    "$ROOT/tests/run_tui_golden_tests.sh"
+assert_contains "FAIL: TUI golden frame changed: board"
+
 printf 'PASS: Dispatch CLI tests\n'

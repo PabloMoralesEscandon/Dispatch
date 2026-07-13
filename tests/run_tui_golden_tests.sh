@@ -3,11 +3,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${DISPATCH_BIN:-$ROOT/dispatch}"
-GOLDEN_DIR="$ROOT/tests/golden/tui"
+GOLDEN_DIR="${TUI_GOLDEN_DIR:-$ROOT/tests/golden/tui}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-tui-golden.XXXXXX")"
 UPDATE_GOLDENS="${UPDATE_GOLDENS:-0}"
+MUTATE_FRAME="${TUI_GOLDEN_MUTATE_FRAME:-}"
 
 trap 'rm -rf "$TMP_ROOT"' EXIT
+
+if [ "$UPDATE_GOLDENS" = "1" ] && [ -n "$MUTATE_FRAME" ]; then
+    printf 'UPDATE_GOLDENS and TUI_GOLDEN_MUTATE_FRAME are mutually exclusive\n' >&2
+    exit 1
+fi
 
 normalize_frame() {
     sed -E \
@@ -25,6 +31,10 @@ capture_frame() {
 
     "$BIN" tui --render-smoke "$screen" 100 30 "$keys" |
         normalize_frame >"$actual"
+
+    if [ "$MUTATE_FRAME" = "$name" ]; then
+        sed -i '2s/DISPATCH/DISPATCH-MUTATED/' "$actual"
+    fi
 
     if [ "$UPDATE_GOLDENS" = "1" ]; then
         mkdir -p "$GOLDEN_DIR"

@@ -768,9 +768,11 @@ tests/run_tui_golden_tests.sh
 The test runner builds Dispatch, creates temporary boards under `/tmp`, and
 checks command behavior through the CLI.
 
-The TUI golden runner creates a deterministic workflow fixture and compares
-normalized `100x30` frames for the main views, forms, and help overlay. Refresh
-the committed frames after an intentional rendering change with:
+The CLI suite runs the TUI golden checks and verifies that a deliberately
+mutated frame is rejected. The standalone golden runner creates a deterministic
+workflow fixture and compares normalized `100x30` frames for the main views,
+forms, and help overlay. Refresh the committed frames after an intentional
+rendering change with:
 
 ```bash
 UPDATE_GOLDENS=1 tests/run_tui_golden_tests.sh

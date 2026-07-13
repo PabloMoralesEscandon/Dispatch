@@ -16,6 +16,7 @@ View   not-done    1-7/R fil|  j / k       move selection              |
                             |  R           ready, skip review          |
                             |  n  +        new task / group            |
                             |  d           diff selected               |
+                            |  x  X        delete / force delete       |
                             |  Filter & search                         |
                             |  1-8         filter presets              |
                             |  G  A        cycle group / actor         |
@@ -27,5 +28,4 @@ View   not-done    1-7/R fil|  j / k       move selection              |
                             |                                          |
                             |       press h, ?, or Esc to close        |
                             +------------------------------------------+
-
  Ready                          : palette   Tab/a agents   w workspaces   n task   + group   ? help

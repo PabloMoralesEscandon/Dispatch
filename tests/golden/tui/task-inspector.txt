@@ -28,4 +28,4 @@ History
   - ready by user
 
 
- Ready                 q/Esc back   e edit   m move   >/< deps   d diff   L logs   PgUp/PgDn scroll
+ Ready    q/Esc back   e edit   m move   >/< deps   d diff   x/X delete   L logs   PgUp/PgDn scroll
