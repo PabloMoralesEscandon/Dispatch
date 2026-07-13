@@ -197,7 +197,7 @@ dispatch ready
 ```bash
 dispatch init [repo-path]
 dispatch normalize
-dispatch status
+dispatch status [--json]
 dispatch doctor
 ```
 
@@ -455,8 +455,8 @@ dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-
 dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]
 dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
-dispatch show <id>
-dispatch list [all] [group]
+dispatch show <id> [--json]
+dispatch list [all] [group] [--json]
 ```
 
 Tasks require a group and a title. Titles are human-readable labels and should
@@ -497,7 +497,7 @@ output, or `NO_COLOR=1` to disable it.
 ```bash
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
-dispatch blocked
+dispatch blocked [--json]
 ```
 
 `dep add DE-01 DE-02` means `DE-02` depends on `DE-01`; the first argument is
@@ -521,9 +521,10 @@ task-to-diff link.
 ### Lifecycle
 
 ```bash
-dispatch ready [<id> [--actor <name>] [--no-review]]
-dispatch reviews
-dispatch proposed
+dispatch ready [--json]
+dispatch ready <id> [--actor <name>] [--no-review]
+dispatch reviews [--json]
+dispatch proposed [--json]
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
 dispatch review <id> [--actor <name>]
@@ -555,6 +556,84 @@ for approval.
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to
 `review` or `done`. `review` accepts a review task as done.
+
+## JSON Output
+
+The read commands `list`, `show`, `ready`, `blocked`, `reviews`, `proposed`,
+and `status` accept `--json`. The option may appear anywhere after the command
+name:
+
+```bash
+dispatch list --json
+dispatch list all Development --json
+dispatch show --json DE-01
+dispatch ready --json
+dispatch status --json
+```
+
+`ready --json` is the read-only queue form. `--json` is not accepted with
+`ready <id>`, which changes workflow state.
+
+A successful JSON command writes one versioned JSON object and a trailing
+newline to stdout. It does not include headings, color escapes, empty-queue
+hints, or other human text. Errors keep their existing non-zero exit status and
+text on stderr without writing a partial JSON document. Omitting `--json`
+retains the normal human-readable output.
+
+Every response uses the same top-level envelope:
+
+```json
+{
+  "schema_version": 1,
+  "command": "ready",
+  "board": {"name": "Dispatch", "repo_path": "repo", "groups": []},
+  "query": {
+    "task_id": null,
+    "group": null,
+    "include_done": null,
+    "states": ["ready"]
+  },
+  "summary": {
+    "total": 3,
+    "returned": 1,
+    "states": {
+      "proposed": 0,
+      "ready": 1,
+      "blocked": 1,
+      "doing": 1,
+      "review": 0,
+      "done": 0,
+      "paused": 0
+    },
+    "agents": {"enabled": 1, "archived": 0, "with_current_task": 1},
+    "workspaces": {"active": 1, "removed": 0}
+  },
+  "tasks": [],
+  "warnings": []
+}
+```
+
+`summary.total` and `summary.states` describe the complete board;
+`summary.returned` is the length of the filtered `tasks` array. `show` returns
+its task as a one-element array. `status` returns ready and review tasks while
+its summary still counts every task. Empty selections use an empty array.
+
+Task objects consistently include identity and lifecycle fields, direct
+dependencies and dependents, unmet blockers, recorded commits, the active
+workspace when present, Unix timestamps, and history. The public `state` is
+the state shown by the CLI after dependencies are evaluated; `stored_state` is
+the persisted lifecycle state. Unset actor, workspace, and timestamp fields are
+JSON `null`.
+
+Only `status` populates `warnings`. Warning objects contain a stable `code`, a
+human-readable `message`, and nullable `task_id` and `agent` fields. Version 1
+reports missing commits, assignment/state mismatches, and agent sessions that
+reference missing tasks.
+
+Consumers should ignore unknown fields. Adding optional fields is compatible;
+removing a field or changing its type or meaning requires a new
+`schema_version`. The complete field definitions and command selection rules
+are in [the JSON output contract](docs/json-output-contract.md).
 
 ## Agent Workflow
 
