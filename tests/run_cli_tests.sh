@@ -1145,6 +1145,21 @@ expect_ok "$BIN" tui --smoke
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
 assert_contains "2 visible"
+expect_ok "$BIN" tui --render-smoke board 80 24
+assert_contains "Frame: board 80x24"
+assert_contains "DISPATCH   Board"
+assert_contains "DE-01"
+assert_contains "Root"
+assert_not_contains "$ESC"
+expect_ok "$BIN" tui --render-smoke board 80 24 i
+assert_contains "Frame: task 80x24"
+assert_contains "DE-01  Root"
+assert_contains "Description"
+expect_ok "$BIN" tui --render-smoke board 80 24 "?"
+assert_contains "Dispatch  Keyboard Shortcuts"
+assert_contains "Navigation"
+expect_fail "$BIN" tui --render-smoke board 20 5
+assert_contains "Headless TUI dimensions must be"
 DISPATCH_TUI_DEFAULT_SMOKE=1 expect_ok "$BIN"
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
@@ -1458,6 +1473,15 @@ assert_contains "already belongs to group QA"
 
 # TX-01: R readies the selected task AND clears its review gate in one step,
 # mirroring `dispatch ready <id> --no-review`; r keeps the gate.
+case_dir="$(make_case_dir tui-ready-no-review)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" start DE-01 --actor user
+expect_ok "$BIN" finish DE-01 --actor user
 expect_ok "$BIN" task add DE Gated
 expect_ok "$BIN" tui --action-smoke ready-no-review DE-02 tester
 assert_contains "Readied DE-02 (no review)"

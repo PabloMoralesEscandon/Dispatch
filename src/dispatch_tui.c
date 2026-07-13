@@ -6460,6 +6460,110 @@ static int parse_screen_name(const char *name, DispatchTuiScreen *screen) {
     return 1;
 }
 
+static char tui_headless_cell_char(chtype cell) {
+    unsigned char ch = (unsigned char)(cell & A_CHARTEXT);
+    if (cell & A_ALTCHARSET) {
+        switch (ch) {
+        case 'q':
+            return '-';
+        case 'x':
+            return '|';
+        default:
+            return '+';
+        }
+    }
+    return ch >= 32 && ch <= 126 ? (char)ch : ' ';
+}
+
+static int tui_capture_headless_frame(int rows, int cols) {
+    char *line = malloc((size_t)cols + 1);
+    if (!line) {
+        fprintf(stderr, "Out of memory capturing TUI frame\n");
+        return 0;
+    }
+
+    for (int y = 0; y < rows; y++) {
+        for (int x = 0; x < cols; x++)
+            line[x] = tui_headless_cell_char(mvinch(y, x));
+        int length = cols;
+        while (length > 0 && line[length - 1] == ' ')
+            length--;
+        line[length] = '\0';
+        puts(line);
+    }
+    free(line);
+    return 1;
+}
+
+static int tui_render_smoke(const char *screen_arg, int cols, int rows,
+                            const char *keys) {
+    if (cols < 40 || cols > 300 || rows < 10 || rows > 120) {
+        fprintf(stderr,
+                "Headless TUI dimensions must be 40-300 columns and 10-120 rows\n");
+        return 1;
+    }
+
+    DispatchTui tui;
+    tui_init(&tui);
+    if (!parse_screen_name(screen_arg, &tui.screen)) {
+        fprintf(stderr, "Unknown TUI screen %s\n", screen_arg);
+        return 1;
+    }
+    if (!tui_load_board(&tui)) {
+        fprintf(stderr, "%s\n", tui.status);
+        return 1;
+    }
+
+    FILE *input = fopen("/dev/null", "r");
+    FILE *output = tmpfile();
+    if (!input || !output) {
+        fprintf(stderr, "Could not create headless TUI streams\n");
+        if (input)
+            fclose(input);
+        if (output)
+            fclose(output);
+        tui_free_board(&tui);
+        return 1;
+    }
+
+    SCREEN *virtual_screen = newterm("xterm", output, input);
+    if (!virtual_screen) {
+        fprintf(stderr, "Could not initialize headless ncurses screen\n");
+        fclose(input);
+        fclose(output);
+        tui_free_board(&tui);
+        return 1;
+    }
+
+    set_term(virtual_screen);
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    if (resizeterm(rows, cols) == ERR) {
+        fprintf(stderr, "Could not resize headless TUI screen\n");
+        endwin();
+        delscreen(virtual_screen);
+        fclose(input);
+        fclose(output);
+        tui_free_board(&tui);
+        return 1;
+    }
+
+    for (size_t i = 0; keys && keys[i] != '\0'; i++)
+        tui_handle_key(&tui, (unsigned char)keys[i]);
+    tui_render(&tui);
+    printf("Frame: %s %dx%d\n", screen_name(tui.screen), cols, rows);
+    int captured = tui_capture_headless_frame(rows, cols);
+
+    endwin();
+    delscreen(virtual_screen);
+    fclose(input);
+    fclose(output);
+    tui_colors_enabled = 0;
+    tui_free_board(&tui);
+    return captured ? 0 : 1;
+}
+
 /* Feed keys through the real top-level key handler starting on a given
  * screen, then report the state a render would use. Exercises per-view key
  * scoping without ncurses. */
@@ -6729,6 +6833,7 @@ static void print_tui_help(void) {
     puts("  --scroll-smoke board|agents|workspaces|logs <visible-rows> <selected-index>");
     puts("  --selection-smoke <filter> <selected-index>  verify highlight and action task match");
     puts("  --key-smoke <screen> <keys>  feed keys to the input handler on a screen");
+    puts("  --render-smoke <screen> <cols> <rows> [keys]  capture a headless frame");
     puts("  --cell-smoke <width> <text>  print a clamped table cell");
     puts("  --agent-row-smoke <name>     print the agents-table row for one agent");
     puts("  --desc-wrap-smoke <task-id> <width> <region> <top>  print the wrapped description window");
@@ -6822,6 +6927,9 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_selection_smoke(argv[3], atoi(argv[4]));
     if (argc == 5 && strcmp(argv[2], "--key-smoke") == 0)
         return tui_key_smoke(argv[3], argv[4]);
+    if ((argc == 6 || argc == 7) && strcmp(argv[2], "--render-smoke") == 0)
+        return tui_render_smoke(argv[3], atoi(argv[4]), atoi(argv[5]),
+                                argc == 7 ? argv[6] : "");
     if (argc == 5 && strcmp(argv[2], "--cell-smoke") == 0)
         return tui_cell_smoke(atoi(argv[3]), argv[4]);
     if (argc == 4 && strcmp(argv[2], "--agent-row-smoke") == 0)
