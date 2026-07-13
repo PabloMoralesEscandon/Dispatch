@@ -173,6 +173,8 @@ int dispatch_board_delete_task(DispatchBoard *board, const char *task_id,
                                int force);
 int dispatch_task_set_title(DispatchTask *task, const char *title);
 int dispatch_task_set_description(DispatchTask *task, const char *description);
+int dispatch_task_move_to_group(DispatchBoard *board, DispatchTask *task,
+                                const char *group_id, const char *actor);
 
 const char *dispatch_state_name(DispatchState state);
 int dispatch_state_from_name(const char *name, DispatchState *state);

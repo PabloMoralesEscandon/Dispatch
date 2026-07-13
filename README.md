@@ -449,6 +449,7 @@ yet.
 ```bash
 dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review]
 dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]
+dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
 dispatch show <id>
 dispatch list [all] [group]
@@ -465,6 +466,12 @@ safely complete and unblock the next task without human acceptance.
 ID, group, workflow state, dependencies, commit references, or prior history.
 The edit is appended to task history using the supplied `--actor`, which
 defaults to `user`. Pass an empty description to clear it.
+
+`task move` changes the task's group while preserving its ID, workflow state,
+dependencies, commit references, workspace associations, agent session links,
+and history. The move is appended to task history using the supplied `--actor`,
+which defaults to `user`. Because IDs are stable, a moved task can keep an ID
+prefix from its original group, such as `DE-02` while listed in group `QA`.
 
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.

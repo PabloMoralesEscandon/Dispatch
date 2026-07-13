@@ -652,6 +652,18 @@ int dispatch_task_set_description(DispatchTask *task, const char *description) {
     return 1;
 }
 
+int dispatch_task_move_to_group(DispatchBoard *board, DispatchTask *task,
+                                const char *group_id, const char *actor) {
+    DispatchGroup *group = dispatch_board_find_group(board, group_id);
+    if (!board || !task || !group || strcmp(task->group, group->id) == 0)
+        return 0;
+
+    char note[64];
+    snprintf(note, sizeof(note), "from %s to %s", task->group, group->id);
+    replace_string(&task->group, group->id);
+    return dispatch_task_append_history(task, actor, "moved", note);
+}
+
 const char *dispatch_state_name(DispatchState state) {
     switch (state) {
     case DISPATCH_STATE_PROPOSED:
