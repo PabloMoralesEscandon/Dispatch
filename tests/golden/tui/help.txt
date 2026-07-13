@@ -1,0 +1,31 @@
+Frame: board 100x30
+ DISPATCH   Board                                                        actor:user  board:Dispatch
+                            +------------------------------------------+
+Tasks  1 ready   0 doing   0|       Dispatch  Keyboard Shortcuts       |
+                            |                                          |
+Repo <path>   Navigation                              |   2 groups    1 agents    1
+View   not-done    1-7/R fil|  j / k       move selection              |
+                            |  Enter / i   inspect task                |
+   DE  Development  1       |  Tab         switch to agents            |
+ >DE-01    ready    Render h|  Views                                   |                   review
+   QA  Quality  1           |  b a w l     board agents ws logs        |
+  QA-01    blocked  Golden a|  :           command palette             |                   review
+                            |  Tasks                                   |
+                            |  r s f v     ready start finish review   |
+                            |  e  m        edit / move selected        |
+                            |  R           ready, skip review          |
+                            |  n  +        new task / group            |
+                            |  d           diff selected               |
+                            |  x  X        delete / force delete       |
+                            |  Filter & search                         |
+                            |  1-8         filter presets              |
+                            |  G  A        cycle group / actor         |
+                            |  /  c        search / clear refine       |
+                            |  General                                 |
+                            |  u           reload board                |
+                            |  h / ?       toggle help                 |
+                            |  ^C  :q      quit                        |
+                            |                                          |
+                            |       press h, ?, or Esc to close        |
+                            +------------------------------------------+
+ Ready                          : palette   Tab/a agents   w workspaces   n task   + group   ? help

@@ -1,0 +1,31 @@
+Frame: task 100x30
+ DISPATCH   Task                                                         actor:user  board:Dispatch
+
+  DE-01  Render harness                                                                      ready
+  ------------------------------------------------------------------------------------------------
+
+  Description    Capture deterministic terminal frames.
+
+Details
+  Group          DE
+  Review gate    required
+  Assigned       -
+  Started by     -
+  Completed by   -
+
+Dependencies
+  Depends on     -
+  Blocks         QA-01
+  Commits        -
+
+Workspace
+  Actor          golden
+  Branch         agent/golden/DE-01
+  Path           <tmp>/task-workspace
+
+History
+  - created by user
+  - ready by user
+
+
+ Ready    q/Esc back   e edit   m move   >/< deps   d diff   x/X delete   L logs   PgUp/PgDn scroll

@@ -1145,6 +1145,21 @@ expect_ok "$BIN" tui --smoke
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
 assert_contains "2 visible"
+expect_ok "$BIN" tui --render-smoke board 80 24
+assert_contains "Frame: board 80x24"
+assert_contains "DISPATCH   Board"
+assert_contains "DE-01"
+assert_contains "Root"
+assert_not_contains "$ESC"
+expect_ok "$BIN" tui --render-smoke board 80 24 i
+assert_contains "Frame: task 80x24"
+assert_contains "DE-01  Root"
+assert_contains "Description"
+expect_ok "$BIN" tui --render-smoke board 80 24 "?"
+assert_contains "Dispatch  Keyboard Shortcuts"
+assert_contains "Navigation"
+expect_fail "$BIN" tui --render-smoke board 20 5
+assert_contains "Headless TUI dimensions must be"
 DISPATCH_TUI_DEFAULT_SMOKE=1 expect_ok "$BIN"
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"
@@ -1948,5 +1963,14 @@ assert_contains "${ESC}[2;37mdepends_on:DE-02,DE-03${ESC}[0m"
 
 expect_ok env FORCE_COLOR=1 NO_COLOR=1 "$BIN" list DE
 assert_not_contains "${ESC}["
+
+expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
+assert_contains "PASS: TUI golden frames"
+
+# The aggregate suite also proves that a deliberate captured-frame mutation
+# is rejected by the golden comparison instead of silently updating fixtures.
+expect_fail env DISPATCH_BIN="$BIN" TUI_GOLDEN_MUTATE_FRAME=board \
+    "$ROOT/tests/run_tui_golden_tests.sh"
+assert_contains "FAIL: TUI golden frame changed: board"
 
 printf 'PASS: Dispatch CLI tests\n'

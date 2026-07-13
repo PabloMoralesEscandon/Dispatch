@@ -1,0 +1,31 @@
+Frame: agents 100x30
+ DISPATCH   Agents                                                       actor:user  board:Dispatch
+
+1 agents   1 enabled   0 archived   showing enabled
+
+  Name                     Runner   Status    Session Task     Workspace
+ >codex-golden             codex    enabled   no      -        -
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Ready                               Enter/i inspect   n create   y run   A all/enabled   z archive

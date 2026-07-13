@@ -1,0 +1,31 @@
+Frame: group-form 100x30
+ DISPATCH   New Group                                                    actor:user  board:Dispatch
+                    Creating group as user
+
+                    > Name
+                    +----------------------------------------------------------+
+                    |                                                          |
+                    +----------------------------------------------------------+
+                      Prefix (blank = auto)
+                    +----------------------------------------------------------+
+                    |                                                          |
+                    +----------------------------------------------------------+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Fill group fields                                          Enter next/save   Tab move   Esc cancel
