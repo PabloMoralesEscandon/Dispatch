@@ -12,6 +12,12 @@ const char *sources[] = {
     "src/dispatch_json.c",
     "src/dispatch_store.c",
     "src/dispatch_tui.c",
+    "src/dispatch_tui_external.c",
+    "src/dispatch_tui_actions.c",
+    "src/dispatch_tui_forms.c",
+    "src/dispatch_tui_render.c",
+    "src/dispatch_tui_input.c",
+    "src/dispatch_tui_smoke.c",
     NULL,
 };
 
