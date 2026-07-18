@@ -178,3 +178,39 @@ The version 1 warning codes are:
 
 Each warning always contains `code`, `message`, `task_id`, and `agent`. Fields
 that do not apply are `null`.
+
+## Workspace responses
+
+`workspace list --json` and `workspace show <id> --json` use a workspace
+envelope instead of the task envelope:
+
+```json
+{
+  "schema_version": 1,
+  "command": "workspace list",
+  "board": { "name": "Dispatch", "repo_path": "repo" },
+  "summary": { "returned": 1 },
+  "workspaces": [ ... ]
+}
+```
+
+`workspace list` returns every non-removed record in board order;
+`workspace show` returns the selected record as a one-element array. An empty
+successful listing returns `"workspaces": []`.
+
+Each workspace record contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Workspace identifier (normally the anchor task ID) |
+| `task_id` | string | Task the workspace was created for |
+| `task_state` | string or null | Effective state of that task, `null` if the task is missing |
+| `actor` | string | Owning agent |
+| `path` | string | Worktree path |
+| `branch` | string | Worktree branch |
+| `repo_path` | string | Repository the worktree was created from |
+| `state` | string | `creating`, `active`, or `removed` |
+| `sequence_tasks` | array of string | Task chain for `--sequence` workspaces, else `[]` |
+| `review_gate` | string or null | Sequence-terminating review task, if any |
+| `created_at` | integer or null | Unix timestamp |
+| `updated_at` | integer or null | Unix timestamp |

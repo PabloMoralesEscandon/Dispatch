@@ -72,6 +72,78 @@ static json_t *workspace_json(const DispatchWorkspace *workspace) {
     return object;
 }
 
+static json_t *workspace_record_json(const DispatchBoard *board,
+                                     const DispatchWorkspace *workspace) {
+    json_t *object = json_object();
+    json_object_set_new(object, "id", json_string(workspace->id));
+    json_object_set_new(object, "task_id", json_string(workspace->task_id));
+    const DispatchTask *task = find_task(board, workspace->task_id);
+    json_object_set_new(
+        object, "task_state",
+        task ? json_string(dispatch_state_name(
+                   dispatch_task_effective_state(board, task)))
+             : json_null());
+    json_object_set_new(object, "actor", json_string(workspace->actor));
+    json_object_set_new(object, "path", json_string(workspace->path));
+    json_object_set_new(object, "branch", json_string(workspace->branch));
+    json_object_set_new(object, "repo_path",
+                        json_string(workspace->repo_path));
+    json_object_set_new(
+        object, "state",
+        json_string(dispatch_workspace_state_name(workspace->state)));
+    json_object_set_new(object, "sequence_tasks",
+                        string_list_json(&workspace->sequence_tasks));
+    json_object_set_new(object, "review_gate",
+                        optional_string(workspace->review_gate));
+    json_object_set_new(object, "created_at",
+                        time_or_null(workspace->created_at));
+    json_object_set_new(object, "updated_at",
+                        time_or_null(workspace->updated_at));
+    return object;
+}
+
+int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
+                                  const char *command,
+                                  const DispatchWorkspace *only) {
+    json_t *workspaces = json_array();
+    size_t returned = 0;
+    if (only) {
+        json_array_append_new(workspaces, workspace_record_json(board, only));
+        returned = 1;
+    } else {
+        for (size_t i = 0; i < board->workspaces.count; i++) {
+            const DispatchWorkspace *workspace = &board->workspaces.items[i];
+            if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+                continue;
+            json_array_append_new(workspaces,
+                                  workspace_record_json(board, workspace));
+            returned++;
+        }
+    }
+
+    json_t *board_json = json_object();
+    json_object_set_new(board_json, "name", json_string(board->name));
+    json_object_set_new(board_json, "repo_path",
+                        json_string(board->repo_path ? board->repo_path : "."));
+
+    json_t *summary = json_object();
+    json_object_set_new(summary, "returned",
+                        json_integer((json_int_t)returned));
+
+    json_t *root = json_object();
+    json_object_set_new(root, "schema_version", json_integer(1));
+    json_object_set_new(root, "command", json_string(command));
+    json_object_set_new(root, "board", board_json);
+    json_object_set_new(root, "summary", summary);
+    json_object_set_new(root, "workspaces", workspaces);
+
+    int result = json_dumpf(root, stream, JSON_INDENT(2));
+    json_decref(root);
+    if (result != 0 || fputc('\n', stream) == EOF)
+        return 0;
+    return 1;
+}
+
 static json_t *blocked_by_json(const DispatchBoard *board,
                                const DispatchTask *task) {
     json_t *array = json_array();

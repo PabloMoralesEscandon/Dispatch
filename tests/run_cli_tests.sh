@@ -794,6 +794,42 @@ assert_json \
     warnings.1.task_id string DE-06 \
     warnings array_length 2
 
+# JS-06: workspace list/show emit workspace records as JSON.
+expect_ok "$BIN" workspace list --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace list" \
+    board.name string Dispatch \
+    summary.returned integer 1 \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-07 \
+    workspaces.0.task_id string DE-07 \
+    workspaces.0.task_state string ready \
+    workspaces.0.actor string json-agent \
+    workspaces.0.branch string agent/json-agent/DE-07 \
+    workspaces.0.state string active \
+    workspaces.0.sequence_tasks array_length 0 \
+    workspaces.0.review_gate null -
+
+expect_ok "$BIN" workspace show DE-07 --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace show" \
+    summary.returned integer 1 \
+    workspaces array_length 1 \
+    workspaces.0.task_id string DE-07 \
+    workspaces.0.actor string json-agent
+
+expect_fail "$BIN" workspace list --json --json
+assert_contains "Usage: dispatch workspace list [--json]"
+assert_not_contains '"schema_version"'
+expect_fail "$BIN" workspace show --json
+assert_contains "Usage: dispatch workspace show <task-id-or-workspace> [--json]"
+assert_not_contains '"schema_version"'
+expect_fail "$BIN" workspace show Missing --json
+assert_contains "No workspace for Missing"
+assert_not_contains '"schema_version"'
+
 expect_fail "$BIN" ready DE-07 --json
 assert_contains "--json is only valid when listing ready tasks"
 assert_not_contains '"schema_version"'
