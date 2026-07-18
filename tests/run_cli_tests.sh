@@ -1828,6 +1828,23 @@ assert_contains "done task DE-01 has no recorded commits"
 assert_contains "task DE-02 depends on missing task ZZ-99"
 assert_contains "task DE-02 depends on itself"
 assert_contains "task DE-02 lists dependency DE-01 more than once"
+# JS-07: the same diagnostics as machine-readable checks.
+expect_ok "$BIN" doctor --json
+assert_json \
+    schema_version integer 1 \
+    command string doctor \
+    board.name string Dispatch \
+    checks.0.status string ok \
+    checks.0.message string "board loaded"
+assert_contains '"kind": "orphaned_workspace"'
+assert_contains '"subject": "DE-77"'
+assert_contains '"kind": "missing_commits"'
+assert_contains '"kind": "dep_missing_reference"'
+assert_contains '"kind": "dep_self"'
+assert_contains '"kind": "dep_duplicate"'
+assert_contains '"subject": "DE-02"'
+expect_fail "$BIN" doctor --json --json
+assert_contains "Usage: dispatch doctor [--json]"
 # A healthy board reports the new checks as ok.
 rm dispatch.json
 expect_ok "$BIN" init repo
@@ -1906,6 +1923,10 @@ cp "$ROOT/tests/fixtures/zombie-assignment-board.json" dispatch.json
 expect_ok "$BIN" doctor
 assert_contains "task DE-01 is ready but still assigned to codex"
 assert_contains "task DE-01 is ready but carries start provenance from codex"
+expect_ok "$BIN" doctor --json
+assert_contains '"kind": "assignment_state_mismatch"'
+assert_contains '"kind": "start_provenance_mismatch"'
+assert_contains '"subject": "DE-01"'
 expect_fail "$BIN" start DE-01 --actor codex
 assert_contains "Cannot start DE-01: already assigned to codex"
 assert_contains "dispatch unassign DE-01 --actor <name>"
