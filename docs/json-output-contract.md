@@ -178,3 +178,86 @@ The version 1 warning codes are:
 
 Each warning always contains `code`, `message`, `task_id`, and `agent`. Fields
 that do not apply are `null`.
+
+## Workspace responses
+
+`workspace list --json` and `workspace show <id> --json` use a workspace
+envelope instead of the task envelope:
+
+```json
+{
+  "schema_version": 1,
+  "command": "workspace list",
+  "board": { "name": "Dispatch", "repo_path": "repo" },
+  "summary": { "returned": 1 },
+  "workspaces": [ ... ]
+}
+```
+
+`workspace list` returns every non-removed record in board order;
+`workspace show` returns the selected record as a one-element array. An empty
+successful listing returns `"workspaces": []`.
+
+Each workspace record contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | Workspace identifier (normally the anchor task ID) |
+| `task_id` | string | Task the workspace was created for |
+| `task_state` | string or null | Effective state of that task, `null` if the task is missing |
+| `actor` | string | Owning agent |
+| `path` | string | Worktree path |
+| `branch` | string | Worktree branch |
+| `repo_path` | string | Repository the worktree was created from |
+| `state` | string | `creating`, `active`, or `removed` |
+| `sequence_tasks` | array of string | Task chain for `--sequence` workspaces, else `[]` |
+| `review_gate` | string or null | Sequence-terminating review task, if any |
+| `created_at` | integer or null | Unix timestamp |
+| `updated_at` | integer or null | Unix timestamp |
+
+## Doctor responses
+
+`doctor --json` emits every diagnostic check in run order:
+
+```json
+{
+  "schema_version": 1,
+  "command": "doctor",
+  "board": { "name": "Dispatch", "repo_path": "repo" },
+  "summary": { "warnings": 2 },
+  "checks": [
+    {
+      "status": "ok",
+      "kind": null,
+      "subject": null,
+      "message": "board loaded",
+      "fix": null
+    },
+    {
+      "status": "warn",
+      "kind": "missing_commits",
+      "subject": "DE-01",
+      "message": "done task DE-01 has no recorded commits",
+      "fix": "record one with dispatch commit add <id> <sha>"
+    }
+  ]
+}
+```
+
+Every check has `status` (`ok` or `warn`), `message`, and — for warnings —
+a machine-stable `kind`, an optional `subject` (the task ID, agent name,
+workspace ID, or shell the warning refers to), and a `fix` hint. `ok` checks
+carry `null` for `kind`, `subject`, and `fix`. If the board itself cannot be
+loaded, `board` is `null` and the single `board_load_failed` warning is
+emitted with exit status 1.
+
+The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
+`agents_md_missing`, `dispatch_not_on_path`, `workflow_entry_missing`,
+`workflow_entry_unexpected_type`, `completion_home_unset`,
+`completion_missing`, `agent_prompt_missing`,
+`agent_run_script_not_executable`, `missing_current_task`,
+`workspace_path_missing`, `orphaned_workspace`, `missing_commits`,
+`dep_self`, `dep_missing_reference`, `dep_duplicate`,
+`assignment_state_mismatch`, and `start_provenance_mismatch`. Kinds shared
+with status warnings (`missing_commits`, `missing_current_task`,
+`assignment_state_mismatch`) describe the same conditions.

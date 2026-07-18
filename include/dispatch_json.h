@@ -24,4 +24,10 @@ int dispatch_cli_extract_json_flag(int *argc, char **argv, int first_arg,
 int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
                        const DispatchJsonRequest *request);
 
+/* Writes one versioned JSON response listing workspace records. When only
+ * is non-NULL, emits just that record; otherwise every non-removed record. */
+int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
+                                  const char *command,
+                                  const DispatchWorkspace *only);
+
 #endif

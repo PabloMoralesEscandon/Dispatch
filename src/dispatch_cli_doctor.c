@@ -1,15 +1,73 @@
 #include "dispatch_cli_internal.h"
 
+#include <jansson.h>
+
+/* When non-NULL, doctor checks are collected here as JSON objects instead
+ * of being printed (doctor --json). */
+static json_t *doctor_json_checks = NULL;
+
 static void doctor_ok(const char *message) {
+    if (doctor_json_checks) {
+        json_t *object = json_object();
+        json_object_set_new(object, "status", json_string("ok"));
+        json_object_set_new(object, "kind", json_null());
+        json_object_set_new(object, "subject", json_null());
+        json_object_set_new(object, "message", json_string(message));
+        json_object_set_new(object, "fix", json_null());
+        json_array_append_new(doctor_json_checks, object);
+        return;
+    }
     printf("[ok] %s\n", message);
 }
 
-static void doctor_warn(size_t *warnings, const char *message,
+static void doctor_warn(size_t *warnings, const char *kind,
+                        const char *subject, const char *message,
                         const char *fix) {
+    if (doctor_json_checks) {
+        json_t *object = json_object();
+        json_object_set_new(object, "status", json_string("warn"));
+        json_object_set_new(object, "kind", json_string(kind));
+        json_object_set_new(object, "subject",
+                            subject ? json_string(subject) : json_null());
+        json_object_set_new(object, "message", json_string(message));
+        json_object_set_new(object, "fix",
+                            fix && fix[0] ? json_string(fix) : json_null());
+        json_array_append_new(doctor_json_checks, object);
+        (*warnings)++;
+        return;
+    }
     printf("[warn] %s\n", message);
     if (fix && fix[0])
         printf("       fix: %s\n", fix);
     (*warnings)++;
+}
+
+static int doctor_json_finish(const DispatchBoard *board, size_t warnings) {
+    json_t *root = json_object();
+    json_object_set_new(root, "schema_version", json_integer(1));
+    json_object_set_new(root, "command", json_string("doctor"));
+    if (board) {
+        json_t *board_json = json_object();
+        json_object_set_new(board_json, "name", json_string(board->name));
+        json_object_set_new(
+            board_json, "repo_path",
+            json_string(board->repo_path ? board->repo_path : "."));
+        json_object_set_new(root, "board", board_json);
+    } else {
+        json_object_set_new(root, "board", json_null());
+    }
+    json_t *summary = json_object();
+    json_object_set_new(summary, "warnings",
+                        json_integer((json_int_t)warnings));
+    json_object_set_new(root, "summary", summary);
+    json_object_set_new(root, "checks", doctor_json_checks);
+    doctor_json_checks = NULL;
+
+    int result = json_dumpf(root, stdout, JSON_INDENT(2));
+    json_decref(root);
+    if (result != 0 || fputc('\n', stdout) == EOF)
+        return 0;
+    return 1;
 }
 
 static int path_exists(const char *path) {
@@ -24,7 +82,8 @@ static int path_is_executable(const char *path) {
 static void doctor_check_completion(size_t *warnings, const char *shell_name) {
     char *path = completion_install_path(shell_name);
     if (!path) {
-        doctor_warn(warnings, "HOME is not set; cannot check completions",
+        doctor_warn(warnings, "completion_home_unset", shell_name,
+                    "HOME is not set; cannot check completions",
                     "set HOME or install completions manually");
         return;
     }
@@ -38,25 +97,33 @@ static void doctor_check_completion(size_t *warnings, const char *shell_name) {
         char fix[256];
         snprintf(fix, sizeof(fix), "dispatch completion install %s",
                  shell_name);
-        doctor_warn(warnings, message, fix);
+        doctor_warn(warnings, "completion_missing", shell_name, message,
+                    fix);
     }
     free(path);
 }
 
 int cmd_doctor(int argc, char **argv) {
-    (void)argv;
-    if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch doctor\n");
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output) ||
+        argc != 2) {
+        fprintf(stderr, "Usage: dispatch doctor [--json]\n");
         return 1;
     }
 
-    printf("Dispatch doctor\n");
+    if (json_output)
+        doctor_json_checks = json_array();
+    else
+        printf("Dispatch doctor\n");
     size_t warnings = 0;
 
     DispatchBoard board;
     if (!load_board_or_error(&board)) {
-        doctor_warn(&warnings, "could not load Dispatch board",
+        doctor_warn(&warnings, "board_load_failed", NULL,
+                    "could not load Dispatch board",
                     "run dispatch normalize after resolving the load error");
+        if (json_output)
+            doctor_json_finish(NULL, warnings);
         return 1;
     }
     doctor_ok("board loaded");
@@ -64,20 +131,23 @@ int cmd_doctor(int argc, char **argv) {
     if (board.repo_path && dispatch_path_is_git_repository(board.repo_path)) {
         doctor_ok("configured repository is a git repository");
     } else {
-        doctor_warn(&warnings, "configured repository is not a git repository",
+        doctor_warn(&warnings, "repo_not_git", NULL,
+                    "configured repository is not a git repository",
                     "run dispatch init <repo-path> from the workflow directory");
     }
 
     if (path_exists("AGENTS.md"))
         doctor_ok("AGENTS.md found in workflow directory");
     else
-        doctor_warn(&warnings, "AGENTS.md missing in workflow directory",
+        doctor_warn(&warnings, "agents_md_missing", NULL,
+                    "AGENTS.md missing in workflow directory",
                     "add repository workflow instructions for agents");
 
     if (command_exists_on_path("dispatch"))
         doctor_ok("dispatch found on PATH");
     else
-        doctor_warn(&warnings, "dispatch not found on PATH",
+        doctor_warn(&warnings, "dispatch_not_on_path", NULL,
+                    "dispatch not found on PATH",
                     "add the workflow dispatch symlink or binary directory to PATH");
 
     struct stat dispatch_link;
@@ -87,10 +157,12 @@ int cmd_doctor(int argc, char **argv) {
         else if (S_ISREG(dispatch_link.st_mode))
             doctor_ok("workflow dispatch entry is a regular executable");
         else
-            doctor_warn(&warnings, "workflow dispatch entry has unexpected type",
+            doctor_warn(&warnings, "workflow_entry_unexpected_type", NULL,
+                        "workflow dispatch entry has unexpected type",
                         "replace it with a symlink to the built dispatch binary");
     } else {
-        doctor_warn(&warnings, "no dispatch executable in workflow directory",
+        doctor_warn(&warnings, "workflow_entry_missing", NULL,
+                    "no dispatch executable in workflow directory",
                     "ln -sf Dispatch/dispatch dispatch");
     }
 
@@ -106,7 +178,8 @@ int cmd_doctor(int argc, char **argv) {
         if (path_exists(agent->prompt_path))
             doctor_ok(message);
         else
-            doctor_warn(&warnings, message, "run dispatch normalize");
+            doctor_warn(&warnings, "agent_prompt_missing", agent->name,
+                        message, "run dispatch normalize");
 
         if (agent->run_script_path) {
             snprintf(message, sizeof(message),
@@ -114,7 +187,8 @@ int cmd_doctor(int argc, char **argv) {
             if (path_is_executable(agent->run_script_path))
                 doctor_ok(message);
             else
-                doctor_warn(&warnings, message, "run dispatch normalize");
+                doctor_warn(&warnings, "agent_run_script_not_executable",
+                            agent->name, message, "run dispatch normalize");
         }
 
         if (agent->current_task &&
@@ -122,7 +196,8 @@ int cmd_doctor(int argc, char **argv) {
             snprintf(message, sizeof(message),
                      "agent %s references missing current task %s",
                      agent->name, agent->current_task);
-            doctor_warn(&warnings, message,
+            doctor_warn(&warnings, "missing_current_task", agent->name,
+                        message,
                         "clear or update the agent session current task");
         }
     }
@@ -137,7 +212,8 @@ int cmd_doctor(int argc, char **argv) {
         if (path_exists(workspace->path))
             doctor_ok(message);
         else
-            doctor_warn(&warnings, message,
+            doctor_warn(&warnings, "workspace_path_missing",
+                        workspace->id, message,
                         "run dispatch workspace show <id> and prune stale records if needed");
     }
 
@@ -152,7 +228,8 @@ int cmd_doctor(int argc, char **argv) {
             snprintf(message, sizeof(message),
                      "workspace %s references missing task %s", workspace->id,
                      workspace->task_id);
-            doctor_warn(&warnings, message,
+            doctor_warn(&warnings, "orphaned_workspace", workspace->id,
+                        message,
                         "remove it with dispatch workspace remove <id> --force");
             orphaned++;
         }
@@ -169,7 +246,7 @@ int cmd_doctor(int argc, char **argv) {
         char message[512];
         snprintf(message, sizeof(message),
                  "done task %s has no recorded commits", task->id);
-        doctor_warn(&warnings, message,
+        doctor_warn(&warnings, "missing_commits", task->id, message,
                     "record one with dispatch commit add <id> <sha>");
         done_without_commits++;
     }
@@ -187,7 +264,7 @@ int cmd_doctor(int argc, char **argv) {
             if (strcmp(dep, task->id) == 0) {
                 snprintf(message, sizeof(message),
                          "task %s depends on itself", task->id);
-                doctor_warn(&warnings, message,
+                doctor_warn(&warnings, "dep_self", task->id, message,
                             "remove it with dispatch dep remove");
                 dep_anomalies++;
                 continue;
@@ -195,7 +272,8 @@ int cmd_doctor(int argc, char **argv) {
             if (!dispatch_board_find_task(&board, dep)) {
                 snprintf(message, sizeof(message),
                          "task %s depends on missing task %s", task->id, dep);
-                doctor_warn(&warnings, message,
+                doctor_warn(&warnings, "dep_missing_reference", task->id,
+                            message,
                             "remove it with dispatch dep remove");
                 dep_anomalies++;
                 continue;
@@ -205,7 +283,8 @@ int cmd_doctor(int argc, char **argv) {
                     snprintf(message, sizeof(message),
                              "task %s lists dependency %s more than once",
                              task->id, dep);
-                    doctor_warn(&warnings, message,
+                    doctor_warn(&warnings, "dep_duplicate", task->id,
+                                message,
                                 "remove the duplicate with dispatch dep remove");
                     dep_anomalies++;
                     break;
@@ -229,7 +308,8 @@ int cmd_doctor(int argc, char **argv) {
             snprintf(message, sizeof(message),
                      "task %s is %s but still assigned to %s", task->id,
                      dispatch_state_name(task->state), task->assigned_to);
-            doctor_warn(&warnings, message,
+            doctor_warn(&warnings, "assignment_state_mismatch",
+                        task->id, message,
                         "repair it with dispatch normalize");
             assignment_violations++;
         }
@@ -241,7 +321,8 @@ int cmd_doctor(int argc, char **argv) {
                      "task %s is %s but carries start provenance from %s",
                      task->id, dispatch_state_name(task->state),
                      task->started_by);
-            doctor_warn(&warnings, message,
+            doctor_warn(&warnings, "start_provenance_mismatch", task->id,
+                        message,
                         "repair it with dispatch normalize");
             assignment_violations++;
         }
@@ -249,6 +330,11 @@ int cmd_doctor(int argc, char **argv) {
     if (assignment_violations == 0)
         doctor_ok("no assignment invariant violations");
 
+    if (json_output) {
+        int ok = doctor_json_finish(&board, warnings);
+        dispatch_board_free(&board);
+        return ok ? 0 : 1;
+    }
     printf("Summary: %zu warning%s\n", warnings, warnings == 1 ? "" : "s");
     dispatch_board_free(&board);
     return 0;

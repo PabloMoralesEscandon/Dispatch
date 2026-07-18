@@ -766,15 +766,23 @@ static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
 }
 
 static int cmd_workspace_list(int argc, char **argv) {
-    (void)argv;
-    if (argc != 3) {
-        fprintf(stderr, "Usage: dispatch workspace list\n");
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
+        argc != 3) {
+        fprintf(stderr, "Usage: dispatch workspace list [--json]\n");
         return 1;
     }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    if (json_output) {
+        int ok = dispatch_json_emit_workspaces(stdout, &board,
+                                               "workspace list", NULL);
+        dispatch_board_free(&board);
+        return ok ? 0 : 1;
+    }
 
     if (board.workspaces.count == 0) {
         printf("(no workspaces)\n");
@@ -802,8 +810,12 @@ static int cmd_workspace_list(int argc, char **argv) {
 }
 
 static int cmd_workspace_show(int argc, char **argv) {
-    if (argc != 4) {
-        fprintf(stderr, "Usage: dispatch workspace show <task-id-or-workspace>\n");
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
+        argc != 4) {
+        fprintf(stderr,
+                "Usage: dispatch workspace show <task-id-or-workspace> "
+                "[--json]\n");
         return 1;
     }
 
@@ -816,6 +828,13 @@ static int cmd_workspace_show(int argc, char **argv) {
         dispatch_board_free(&board);
         fprintf(stderr, "No workspace for %s\n", argv[3]);
         return 1;
+    }
+
+    if (json_output) {
+        int ok = dispatch_json_emit_workspaces(stdout, &board,
+                                               "workspace show", workspace);
+        dispatch_board_free(&board);
+        return ok ? 0 : 1;
     }
 
     DispatchTask *task = dispatch_board_find_task(&board, workspace->task_id);
