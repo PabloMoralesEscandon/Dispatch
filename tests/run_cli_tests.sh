@@ -1880,6 +1880,60 @@ assert_contains "no assignment invariant violations"
 expect_ok "$BIN" start DE-01 --actor codex
 assert_contains "Started DE-01"
 
+# GRP-05: group scope descriptions persist, are editable, and are visible in
+# group list / group show; legacy boards without the field still load.
+case_dir="$(make_case_dir group-scope)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE --description "Core CLI development work"
+assert_contains "Added group Development (DE)"
+expect_ok "$BIN" group add Extras --prefix EX
+expect_ok "$BIN" task add DE First --no-review
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" task add DE Second
+# The scope persists across processes and shows in the compact listing; the
+# undescribed group shows a visible gap.
+expect_ok "$BIN" group list
+assert_contains "DE   Development"
+assert_contains "2 open /  2 tasks  Core CLI development work"
+assert_contains "EX   Extras"
+assert_contains "0 open /  0 tasks  -"
+# The scope is part of the JSON envelope's board.groups.
+expect_ok "$BIN" list --json
+assert_json \
+    board.groups.0.prefix string DE \
+    board.groups.0.description string "Core CLI development work" \
+    board.groups.1.prefix string EX \
+    board.groups.1.description string ""
+# Updating an existing group's scope works.
+expect_ok "$BIN" group edit EX --description "Everything else"
+assert_contains "Updated group EX description"
+expect_ok "$BIN" group list
+assert_contains "Everything else"
+# group show prints the group detail with per-state counts and ready tasks.
+expect_ok "$BIN" group show DE
+assert_contains "Group: Development"
+assert_contains "Prefix: DE"
+assert_contains "Description: Core CLI development work"
+assert_contains "Tasks: 2 total  proposed:1 ready:1 blocked:0 doing:0 review:0 done:0 paused:0"
+assert_contains "DE-01"
+expect_fail "$BIN" group show ZZ
+assert_contains "No group with id, prefix, or name ZZ"
+expect_fail "$BIN" group edit ZZ --description scope
+assert_contains "No group with id, prefix, or name ZZ"
+expect_fail "$BIN" group edit EX
+assert_contains "Usage: dispatch group edit <prefix> --description <text>"
+# A legacy board whose groups have no description field loads cleanly and
+# lists every scope as unset.
+rm dispatch.json
+cp "$ROOT/tests/fixtures/dependency-board.json" dispatch.json
+expect_ok "$BIN" group list
+assert_contains "RE   Requirements"
+assert_contains "DE   Development"
+assert_contains "VD   Validation Delivery"
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo
