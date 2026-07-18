@@ -364,7 +364,15 @@ void render_task_form_screen(DispatchTui *tui, const TuiTaskForm *form) {
     if (width > 76)
         width = 76;
     int left = (cols - width) / 2;
-    int desc_height = rows >= 30 ? 5 : 3;
+    /* The description gets the vertical space left over after the fixed
+     * boxes: group and title above (8 rows), deps and review below (8),
+     * plus title bar, heading, and footer (4). Capped so the box never
+     * outgrows what the description buffer can fill. */
+    int desc_height = rows - 20;
+    if (desc_height < 3)
+        desc_height = 3;
+    if (desc_height > 12)
+        desc_height = 12;
 
     char heading[256];
     snprintf(heading, sizeof(heading), "Creating task as %s", tui->actor);
