@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "workspace": {
+    "repo_path": "repo"
+  },
+  "board": {
+    "name": "Dispatch",
+    "groups": [
+      {
+        "id": "DE",
+        "name": "Development",
+        "prefix": "DE"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "DE-01",
+        "title": "Zombie ready task",
+        "description": "Ready but still assigned; produced by pre-fix re-ready of a doing task.",
+        "group": "DE",
+        "state": "ready",
+        "depends_on": [],
+        "requires_review": false,
+        "assigned_to": "codex",
+        "started_by": "codex",
+        "completed_by": null,
+        "created_at": null,
+        "started_at": 1,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      }
+    ],
+    "agents": [],
+    "workspaces": []
+  }
+}

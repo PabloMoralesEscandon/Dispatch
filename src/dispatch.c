@@ -978,28 +978,6 @@ void dispatch_board_normalize_states(DispatchBoard *board) {
 
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
-
-        /* Repair assignment invariant violations: assignment exists only
-         * between start and finish (doing/paused). Anything else is stale
-         * data that makes the task unstartable. See
-         * docs/task-state-invariants.md. */
-        if (task->state != DISPATCH_STATE_DOING &&
-            task->state != DISPATCH_STATE_PAUSED) {
-            if (task->assigned_to) {
-                free(task->assigned_to);
-                task->assigned_to = NULL;
-            }
-            if (task->state == DISPATCH_STATE_PROPOSED ||
-                task->state == DISPATCH_STATE_READY ||
-                task->state == DISPATCH_STATE_BLOCKED) {
-                if (task->started_by) {
-                    free(task->started_by);
-                    task->started_by = NULL;
-                }
-                task->started_at = 0;
-            }
-        }
-
         if (task->state == DISPATCH_STATE_DONE ||
             task->state == DISPATCH_STATE_DOING ||
             task->state == DISPATCH_STATE_REVIEW ||
@@ -1013,6 +991,49 @@ void dispatch_board_normalize_states(DispatchBoard *board) {
             task->state = DISPATCH_STATE_READY;
         }
     }
+}
+
+int dispatch_board_repair_assignments(DispatchBoard *board) {
+    if (!board)
+        return 0;
+
+    /* Repair assignment invariant violations: assignment exists only
+     * between start and finish (doing/paused); startable states must carry
+     * no start provenance. Stale fields make a task unstartable. Runs only
+     * from the explicit normalize command so doctor can still report the
+     * violations first. See docs/task-state-invariants.md. */
+    int repaired = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (task->state == DISPATCH_STATE_DOING ||
+            task->state == DISPATCH_STATE_PAUSED)
+            continue;
+
+        int changed = 0;
+        if (task->assigned_to) {
+            free(task->assigned_to);
+            task->assigned_to = NULL;
+            changed = 1;
+        }
+        if (task->state == DISPATCH_STATE_PROPOSED ||
+            task->state == DISPATCH_STATE_READY ||
+            task->state == DISPATCH_STATE_BLOCKED) {
+            if (task->started_by) {
+                free(task->started_by);
+                task->started_by = NULL;
+                changed = 1;
+            }
+            if (task->started_at != 0) {
+                task->started_at = 0;
+                changed = 1;
+            }
+        }
+        if (changed) {
+            task->updated_at = time(NULL);
+            repaired++;
+        }
+    }
+    return repaired;
 }
 
 int dispatch_board_normalize_agent_sessions(DispatchBoard *board) {

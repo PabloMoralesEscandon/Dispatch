@@ -1820,6 +1820,66 @@ expect_ok "$BIN" workspace remove DE-02 --force
 expect_ok "$BIN" doctor
 assert_contains "no orphaned workspaces"
 
+# SI-06: re-readying a doing task clears its assignment (the zombie bug),
+# unassign provides an escape hatch, normalize repairs corrupted boards,
+# and start explains exactly why it refuses.
+case_dir="$(make_case_dir state-integrity)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE First --no-review
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" start DE-01 --actor codex
+# Re-readying the doing task reverts it to a clean, startable state.
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" show DE-01
+assert_contains "State: ready"
+assert_contains "Assigned to: -"
+assert_contains "Started by: -"
+expect_ok "$BIN" start DE-01 --actor codex
+assert_contains "Started DE-01"
+# unassign clears an in-flight assignment and returns the task to ready.
+expect_ok "$BIN" unassign DE-01 --actor user
+assert_contains "Unassigned DE-01 from codex (ready)"
+expect_ok "$BIN" show DE-01
+assert_contains "Assigned to: -"
+expect_ok "$BIN" start DE-01 --actor codex
+# unassign refuses unknown, unassigned, and completed tasks.
+expect_fail "$BIN" unassign DE-99 --actor user
+assert_contains "No task with id DE-99"
+expect_ok "$BIN" finish DE-01 --actor codex
+expect_fail "$BIN" unassign DE-01 --actor user
+assert_contains "Cannot unassign DE-01: task is done"
+# start refusal reasons name the blocking state or the missing task.
+expect_ok "$BIN" task add DE Second --no-review
+expect_ok "$BIN" task add DE Third --no-review
+expect_ok "$BIN" dep add DE-02 DE-03
+expect_ok "$BIN" ready DE-02 --actor user
+expect_ok "$BIN" ready DE-03 --actor user
+expect_fail "$BIN" start DE-03 --actor codex
+assert_contains "Cannot start DE-03: task is blocked, not ready"
+expect_fail "$BIN" start DE-99 --actor codex
+assert_contains "No task with id DE-99"
+
+# A corrupted board (ready but assigned) is flagged by doctor, start points
+# at the escape hatch, and normalize repairs it in place.
+rm dispatch.json
+cp "$ROOT/tests/fixtures/zombie-assignment-board.json" dispatch.json
+expect_ok "$BIN" doctor
+assert_contains "task DE-01 is ready but still assigned to codex"
+assert_contains "task DE-01 is ready but carries start provenance from codex"
+expect_fail "$BIN" start DE-01 --actor codex
+assert_contains "Cannot start DE-01: already assigned to codex"
+assert_contains "dispatch unassign DE-01 --actor <name>"
+expect_ok "$BIN" normalize
+assert_contains "Repaired 1 stale task assignment"
+expect_ok "$BIN" doctor
+assert_contains "no assignment invariant violations"
+expect_ok "$BIN" start DE-01 --actor codex
+assert_contains "Started DE-01"
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo

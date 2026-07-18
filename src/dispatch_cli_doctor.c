@@ -351,6 +351,7 @@ int cmd_normalize(void) {
         return 1;
 
     dispatch_board_normalize_states(&locked.board);
+    int assignment_repairs = dispatch_board_repair_assignments(&locked.board);
     int session_updates = dispatch_board_normalize_agent_sessions(&locked.board);
     int prompt_updates = normalize_agent_prompts(&locked.board);
     if (prompt_updates < 0) {
@@ -363,6 +364,9 @@ int cmd_normalize(void) {
     }
 
     printf("Normalized %s\n", DISPATCH_STORE_FILE);
+    if (assignment_repairs > 0)
+        printf("Repaired %d stale task assignment%s\n", assignment_repairs,
+               assignment_repairs == 1 ? "" : "s");
     if (session_updates > 0)
         printf("Trimmed %d agent session ID%s\n", session_updates,
                session_updates == 1 ? "" : "s");

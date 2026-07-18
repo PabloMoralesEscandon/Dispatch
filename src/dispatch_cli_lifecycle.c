@@ -187,11 +187,12 @@ int cmd_unassign(int argc, char **argv) {
     }
     if (task->state == DISPATCH_STATE_REVIEW ||
         task->state == DISPATCH_STATE_DONE) {
+        const char *state_name = dispatch_state_name(task->state);
         locked_board_close(&locked);
         fprintf(stderr,
                 "Cannot unassign %s: task is %s and unassigning would "
                 "discard its completion\n",
-                task_id, dispatch_state_name(task->state));
+                task_id, state_name);
         return 1;
     }
     if (!task->assigned_to || task->assigned_to[0] == '\0') {
