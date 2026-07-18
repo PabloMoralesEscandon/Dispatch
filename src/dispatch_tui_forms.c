@@ -669,7 +669,13 @@ static void render_task_edit_form(DispatchTui *tui,
     if (width > 76)
         width = 76;
     int left = (cols - width) / 2;
-    int desc_height = rows >= 22 ? 7 : 5;
+    /* Grow the description box to fill the space between the Title box and the
+     * footer so the whole description is visible instead of being clipped to a
+     * fixed height. The box top sits at row 8 (label at row 7); leave the last
+     * row for the footer. */
+    int desc_height = rows - 9;
+    if (desc_height < 5)
+        desc_height = 5;
 
     char heading[256];
     snprintf(heading, sizeof(heading), "Editing %s as %s", task_id,
