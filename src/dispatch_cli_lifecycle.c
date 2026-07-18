@@ -150,6 +150,71 @@ int cmd_start(int argc, char **argv) {
     return result;
 }
 
+int cmd_unassign(int argc, char **argv) {
+    if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
+        fprintf(stderr, "Usage: dispatch unassign <id> --actor <name>\n");
+        return 1;
+    }
+
+    const char *task_id = argv[2];
+    const char *actor = argv[4];
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+    DispatchBoard *board = &locked.board;
+
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
+    if (!task) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No task with id %s\n", task_id);
+        return 1;
+    }
+    if (task->state == DISPATCH_STATE_REVIEW ||
+        task->state == DISPATCH_STATE_DONE) {
+        locked_board_close(&locked);
+        fprintf(stderr,
+                "Cannot unassign %s: task is %s and unassigning would "
+                "discard its completion\n",
+                task_id, dispatch_state_name(task->state));
+        return 1;
+    }
+    if (!task->assigned_to || task->assigned_to[0] == '\0') {
+        locked_board_close(&locked);
+        fprintf(stderr, "Task %s is not assigned\n", task_id);
+        return 1;
+    }
+    char previous[DISPATCH_AGENT_NAME_MAX + 1];
+    snprintf(previous, sizeof(previous), "%s", task->assigned_to);
+    if (!dispatch_task_unassign(board, task, actor)) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Could not unassign %s\n", task_id);
+        return 1;
+    }
+
+    DispatchState new_state = task->state;
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        return 1;
+    }
+
+    printf("Unassigned %s from %s (%s)\n", task_id, previous,
+           dispatch_state_name(new_state));
+    DispatchLogField targets[] = {
+        {"task", task_id},
+    };
+    DispatchLogField context[] = {
+        {"previous_assignee", previous},
+        {"new_state", dispatch_state_name(new_state)},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Unassigned %s", task_id);
+    append_dispatch_log(actor, "unassign", "unassign", targets, 1, context, 2,
+                        message);
+    locked_board_close(&locked);
+    return 0;
+}
+
 int cmd_finish(int argc, char **argv) {
     if (argc != 5 || strcmp(argv[3], "--actor") != 0) {
         fprintf(stderr, "Usage: dispatch finish <id> --actor <name>\n");

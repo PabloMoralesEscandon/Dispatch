@@ -72,6 +72,7 @@ dispatch show <TASK-ID>
 dispatch start <TASK-ID> --actor <agent-id>
 dispatch finish <TASK-ID> --actor <agent-id>
 dispatch review <TASK-ID> --actor <user-or-reviewer-id>
+dispatch unassign <TASK-ID> --actor <name>
 dispatch group add <name> --prefix <PREFIX>
 dispatch group ready <group> --actor <name> [--no-review]
 dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review]

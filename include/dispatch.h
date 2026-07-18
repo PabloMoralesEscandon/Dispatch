@@ -195,6 +195,8 @@ int dispatch_task_mark_ready(DispatchBoard *board, DispatchTask *task,
 int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
                         const char *actor);
 int dispatch_task_finish(DispatchTask *task, const char *actor);
+int dispatch_task_unassign(DispatchBoard *board, DispatchTask *task,
+                           const char *actor);
 int dispatch_task_review(DispatchTask *task, const char *actor);
 
 DispatchState dispatch_task_effective_state(const DispatchBoard *board,

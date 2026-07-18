@@ -813,6 +813,31 @@ int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
     return dispatch_task_append_history(task, actor, "started", "");
 }
 
+int dispatch_task_unassign(DispatchBoard *board, DispatchTask *task,
+                           const char *actor) {
+    if (!board || !task || !actor || actor[0] == '\0')
+        return 0;
+    /* Review/done tasks carry completion provenance; unassigning them
+     * would silently discard a finished result. */
+    if (task->state == DISPATCH_STATE_REVIEW ||
+        task->state == DISPATCH_STATE_DONE)
+        return 0;
+    if (!task->assigned_to || task->assigned_to[0] == '\0')
+        return 0;
+
+    dispatch_task_clear_assignment(task);
+    free(task->started_by);
+    task->started_by = NULL;
+    task->started_at = 0;
+    if (task->state == DISPATCH_STATE_DOING ||
+        task->state == DISPATCH_STATE_PAUSED)
+        task->state = DISPATCH_STATE_READY;
+    task->updated_at = time(NULL);
+    dispatch_task_append_history(task, actor, "unassigned", "");
+    dispatch_board_normalize_states(board);
+    return 1;
+}
+
 int dispatch_task_finish(DispatchTask *task, const char *actor) {
     if (!task || !actor || actor[0] == '\0')
         return 0;
