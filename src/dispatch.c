@@ -779,6 +779,16 @@ int dispatch_task_mark_ready(DispatchBoard *board, DispatchTask *task,
                              const char *actor) {
     if (!task)
         return 0;
+    /* Re-readying an active task is a deliberate revert; restore the
+     * "ready implies unassigned" invariant so the task stays startable. */
+    if (task->state == DISPATCH_STATE_DOING ||
+        task->state == DISPATCH_STATE_PAUSED ||
+        task->state == DISPATCH_STATE_REVIEW) {
+        dispatch_task_clear_assignment(task);
+        free(task->started_by);
+        task->started_by = NULL;
+        task->started_at = 0;
+    }
     task->state = DISPATCH_STATE_READY;
     task->updated_at = time(NULL);
     dispatch_task_append_history(task, actor, "ready", "");
@@ -801,6 +811,31 @@ int dispatch_task_start(DispatchBoard *board, DispatchTask *task,
     task->state = DISPATCH_STATE_DOING;
     task->updated_at = task->started_at;
     return dispatch_task_append_history(task, actor, "started", "");
+}
+
+int dispatch_task_unassign(DispatchBoard *board, DispatchTask *task,
+                           const char *actor) {
+    if (!board || !task || !actor || actor[0] == '\0')
+        return 0;
+    /* Review/done tasks carry completion provenance; unassigning them
+     * would silently discard a finished result. */
+    if (task->state == DISPATCH_STATE_REVIEW ||
+        task->state == DISPATCH_STATE_DONE)
+        return 0;
+    if (!task->assigned_to || task->assigned_to[0] == '\0')
+        return 0;
+
+    dispatch_task_clear_assignment(task);
+    free(task->started_by);
+    task->started_by = NULL;
+    task->started_at = 0;
+    if (task->state == DISPATCH_STATE_DOING ||
+        task->state == DISPATCH_STATE_PAUSED)
+        task->state = DISPATCH_STATE_READY;
+    task->updated_at = time(NULL);
+    dispatch_task_append_history(task, actor, "unassigned", "");
+    dispatch_board_normalize_states(board);
+    return 1;
 }
 
 int dispatch_task_finish(DispatchTask *task, const char *actor) {
@@ -956,6 +991,49 @@ void dispatch_board_normalize_states(DispatchBoard *board) {
             task->state = DISPATCH_STATE_READY;
         }
     }
+}
+
+int dispatch_board_repair_assignments(DispatchBoard *board) {
+    if (!board)
+        return 0;
+
+    /* Repair assignment invariant violations: assignment exists only
+     * between start and finish (doing/paused); startable states must carry
+     * no start provenance. Stale fields make a task unstartable. Runs only
+     * from the explicit normalize command so doctor can still report the
+     * violations first. See docs/task-state-invariants.md. */
+    int repaired = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        DispatchTask *task = &board->tasks.items[i];
+        if (task->state == DISPATCH_STATE_DOING ||
+            task->state == DISPATCH_STATE_PAUSED)
+            continue;
+
+        int changed = 0;
+        if (task->assigned_to) {
+            free(task->assigned_to);
+            task->assigned_to = NULL;
+            changed = 1;
+        }
+        if (task->state == DISPATCH_STATE_PROPOSED ||
+            task->state == DISPATCH_STATE_READY ||
+            task->state == DISPATCH_STATE_BLOCKED) {
+            if (task->started_by) {
+                free(task->started_by);
+                task->started_by = NULL;
+                changed = 1;
+            }
+            if (task->started_at != 0) {
+                task->started_at = 0;
+                changed = 1;
+            }
+        }
+        if (changed) {
+            task->updated_at = time(NULL);
+            repaired++;
+        }
+    }
+    return repaired;
 }
 
 int dispatch_board_normalize_agent_sessions(DispatchBoard *board) {

@@ -25,6 +25,7 @@ const DispatchCliCommand commands[] = {
     {"start", "Start and assign a ready task"},
     {"finish", "Finish a task"},
     {"review", "Accept a task in review"},
+    {"unassign", "Clear a stuck task assignment"},
     {"normalize", "Repair IDs and derived state"},
     {NULL, NULL},
 };
@@ -462,6 +463,8 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         return cmd_finish(argc, argv);
     if (strcmp(command->name, "review") == 0)
         return cmd_review(argc, argv);
+    if (strcmp(command->name, "unassign") == 0)
+        return cmd_unassign(argc, argv);
 
     fprintf(stderr, "Command '%s' is not implemented.\n", command->name);
     return 2;

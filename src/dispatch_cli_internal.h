@@ -59,6 +59,7 @@ int cmd_show(int argc, char **argv);
 int cmd_start(int argc, char **argv);
 int cmd_status(int argc, char **argv);
 int cmd_task(int argc, char **argv);
+int cmd_unassign(int argc, char **argv);
 int cmd_workspace(int argc, char **argv);
 int command_exists_on_path(const char *command);
 char *completion_install_path(const char *shell_name);

@@ -216,6 +216,39 @@ int cmd_doctor(int argc, char **argv) {
     if (dep_anomalies == 0)
         doctor_ok("no dependency anomalies");
 
+    /* Assignment invariant: assignment fields are only valid while a task
+     * is doing/paused (see docs/task-state-invariants.md). Stale fields
+     * make a task unstartable. */
+    size_t assignment_violations = 0;
+    for (size_t i = 0; i < board.tasks.count; i++) {
+        DispatchTask *task = &board.tasks.items[i];
+        int active = task->state == DISPATCH_STATE_DOING ||
+                     task->state == DISPATCH_STATE_PAUSED;
+        char message[512];
+        if (!active && task->assigned_to && task->assigned_to[0] != '\0') {
+            snprintf(message, sizeof(message),
+                     "task %s is %s but still assigned to %s", task->id,
+                     dispatch_state_name(task->state), task->assigned_to);
+            doctor_warn(&warnings, message,
+                        "repair it with dispatch normalize");
+            assignment_violations++;
+        }
+        int startable = task->state == DISPATCH_STATE_PROPOSED ||
+                        task->state == DISPATCH_STATE_READY ||
+                        task->state == DISPATCH_STATE_BLOCKED;
+        if (startable && task->started_by && task->started_by[0] != '\0') {
+            snprintf(message, sizeof(message),
+                     "task %s is %s but carries start provenance from %s",
+                     task->id, dispatch_state_name(task->state),
+                     task->started_by);
+            doctor_warn(&warnings, message,
+                        "repair it with dispatch normalize");
+            assignment_violations++;
+        }
+    }
+    if (assignment_violations == 0)
+        doctor_ok("no assignment invariant violations");
+
     printf("Summary: %zu warning%s\n", warnings, warnings == 1 ? "" : "s");
     dispatch_board_free(&board);
     return 0;
@@ -318,6 +351,7 @@ int cmd_normalize(void) {
         return 1;
 
     dispatch_board_normalize_states(&locked.board);
+    int assignment_repairs = dispatch_board_repair_assignments(&locked.board);
     int session_updates = dispatch_board_normalize_agent_sessions(&locked.board);
     int prompt_updates = normalize_agent_prompts(&locked.board);
     if (prompt_updates < 0) {
@@ -330,6 +364,9 @@ int cmd_normalize(void) {
     }
 
     printf("Normalized %s\n", DISPATCH_STORE_FILE);
+    if (assignment_repairs > 0)
+        printf("Repaired %d stale task assignment%s\n", assignment_repairs,
+               assignment_repairs == 1 ? "" : "s");
     if (session_updates > 0)
         printf("Trimmed %d agent session ID%s\n", session_updates,
                session_updates == 1 ? "" : "s");

@@ -86,6 +86,22 @@ int mutate_task(const char *task_id, const char *actor,
         break;
     case TUI_ACTION_START:
         ok = dispatch_task_start(&board, task, actor);
+        if (!ok) {
+            /* Mirror the CLI's specific start refusal reasons. */
+            DispatchState effective =
+                dispatch_task_effective_state(&board, task);
+            if (effective != DISPATCH_STATE_READY)
+                snprintf(message, message_size,
+                         "Cannot start %s: task is %s, not ready", task_id,
+                         dispatch_state_name(effective));
+            else
+                snprintf(message, message_size,
+                         "Cannot start %s: already assigned to %s", task_id,
+                         task->assigned_to ? task->assigned_to : "?");
+            dispatch_board_free(&board);
+            dispatch_store_lock_release(&lock);
+            return 0;
+        }
         break;
     case TUI_ACTION_FINISH:
         ok = dispatch_task_finish(task, actor);
