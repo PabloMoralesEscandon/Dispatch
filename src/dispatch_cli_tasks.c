@@ -235,6 +235,103 @@ static int cmd_group_edit(int argc, char **argv) {
     return 0;
 }
 
+static void group_task_counts(const DispatchBoard *board,
+                              const DispatchGroup *group, size_t *by_state,
+                              size_t *total) {
+    *total = 0;
+    for (int state = 0; state <= DISPATCH_STATE_PAUSED; state++)
+        by_state[state] = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        if (strcmp(task->group, group->id) != 0)
+            continue;
+        by_state[dispatch_task_effective_state(board, task)]++;
+        (*total)++;
+    }
+}
+
+static int cmd_group_list(int argc, char **argv) {
+    (void)argv;
+    if (argc != 3) {
+        fprintf(stderr, "Usage: dispatch group list\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    if (board.groups.count == 0) {
+        printf("(no groups)\n");
+        dispatch_board_free(&board);
+        return 0;
+    }
+
+    for (size_t i = 0; i < board.groups.count; i++) {
+        const DispatchGroup *group = &board.groups.items[i];
+        size_t by_state[DISPATCH_STATE_PAUSED + 1];
+        size_t total = 0;
+        group_task_counts(&board, group, by_state, &total);
+        size_t open = total - by_state[DISPATCH_STATE_DONE];
+        printf("%-4s %-24s %2zu open / %2zu tasks  %s\n", group->prefix,
+               group->name, open, total,
+               group->description && group->description[0]
+                   ? group->description
+                   : "-");
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
+static int cmd_group_show(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: dispatch group show <prefix>\n");
+        return 1;
+    }
+
+    DispatchBoard board;
+    if (!load_board_or_error(&board))
+        return 1;
+
+    DispatchGroup *group = dispatch_board_find_group(&board, argv[3]);
+    if (!group) {
+        dispatch_board_free(&board);
+        fprintf(stderr, "No group with id, prefix, or name %s\n", argv[3]);
+        return 1;
+    }
+
+    size_t by_state[DISPATCH_STATE_PAUSED + 1];
+    size_t total = 0;
+    group_task_counts(&board, group, by_state, &total);
+
+    printf("Group: %s\n", group->name);
+    printf("Prefix: %s\n", group->prefix);
+    printf("Description: %s\n",
+           group->description && group->description[0] ? group->description
+                                                       : "-");
+    printf("Tasks: %zu total  proposed:%zu ready:%zu blocked:%zu doing:%zu "
+           "review:%zu done:%zu paused:%zu\n",
+           total, by_state[DISPATCH_STATE_PROPOSED],
+           by_state[DISPATCH_STATE_READY], by_state[DISPATCH_STATE_BLOCKED],
+           by_state[DISPATCH_STATE_DOING], by_state[DISPATCH_STATE_REVIEW],
+           by_state[DISPATCH_STATE_DONE], by_state[DISPATCH_STATE_PAUSED]);
+    if (by_state[DISPATCH_STATE_READY] > 0) {
+        printf("Ready:\n");
+        for (size_t i = 0; i < board.tasks.count; i++) {
+            const DispatchTask *task = &board.tasks.items[i];
+            if (strcmp(task->group, group->id) != 0 ||
+                dispatch_task_effective_state(&board, task) !=
+                    DISPATCH_STATE_READY)
+                continue;
+            printf("  %-8s %s\n", task->id, task_display_title(task));
+        }
+    }
+
+    dispatch_board_free(&board);
+    return 0;
+}
+
 int cmd_group(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "add") == 0)
         return cmd_group_add(argc, argv);
@@ -242,6 +339,10 @@ int cmd_group(int argc, char **argv) {
         return cmd_group_ready(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "edit") == 0)
         return cmd_group_edit(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "list") == 0)
+        return cmd_group_list(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "show") == 0)
+        return cmd_group_show(argc, argv);
 
     fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX] "
                     "[--description <text>]\n");
@@ -249,6 +350,8 @@ int cmd_group(int argc, char **argv) {
             "       dispatch group ready <group> [--actor <name>] [--no-review]\n");
     fprintf(stderr,
             "       dispatch group edit <prefix> --description <text>\n");
+    fprintf(stderr, "       dispatch group list\n");
+    fprintf(stderr, "       dispatch group show <prefix>\n");
     return 1;
 }
 

@@ -77,6 +77,9 @@ regardless of the command filter. `summary.returned` equals the length of
 workspace counts follow the existing `status` command: a workspace is active
 unless its stored state is `removed`.
 
+Each `board.groups` entry contains `id`, `name`, `prefix`, and
+`description` (the group's recorded scope, empty string when unset).
+
 ## Task object
 
 Every entry in `tasks` has the same shape:
