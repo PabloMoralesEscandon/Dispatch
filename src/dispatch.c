@@ -779,6 +779,16 @@ int dispatch_task_mark_ready(DispatchBoard *board, DispatchTask *task,
                              const char *actor) {
     if (!task)
         return 0;
+    /* Re-readying an active task is a deliberate revert; restore the
+     * "ready implies unassigned" invariant so the task stays startable. */
+    if (task->state == DISPATCH_STATE_DOING ||
+        task->state == DISPATCH_STATE_PAUSED ||
+        task->state == DISPATCH_STATE_REVIEW) {
+        dispatch_task_clear_assignment(task);
+        free(task->started_by);
+        task->started_by = NULL;
+        task->started_at = 0;
+    }
     task->state = DISPATCH_STATE_READY;
     task->updated_at = time(NULL);
     dispatch_task_append_history(task, actor, "ready", "");
