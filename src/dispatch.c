@@ -221,6 +221,7 @@ void dispatch_board_free(DispatchBoard *board) {
         free(board->groups.items[i].id);
         free(board->groups.items[i].name);
         free(board->groups.items[i].prefix);
+        free(board->groups.items[i].description);
     }
     free(board->groups.items);
 
@@ -324,6 +325,16 @@ int dispatch_board_add_group(DispatchBoard *board, const char *name,
     group->id = dispatch_strdup(resolved_prefix);
     group->name = dispatch_strdup(name);
     group->prefix = resolved_prefix;
+    group->description = dispatch_strdup("");
+    return 1;
+}
+
+int dispatch_group_set_description(DispatchGroup *group,
+                                   const char *description) {
+    if (!group)
+        return 0;
+    free(group->description);
+    group->description = dispatch_strdup(description ? description : "");
     return 1;
 }
 

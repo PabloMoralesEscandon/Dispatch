@@ -353,6 +353,9 @@ static json_t *group_to_json(const DispatchGroup *group) {
     json_object_set_new(object, "id", json_string(group->id));
     json_object_set_new(object, "name", json_string(group->name));
     json_object_set_new(object, "prefix", json_string(group->prefix));
+    json_object_set_new(
+        object, "description",
+        json_string(group->description ? group->description : ""));
     return object;
 }
 
@@ -535,6 +538,10 @@ static int load_groups(DispatchBoard *board, json_t *groups, char *error,
             set_error(error, error_size, "invalid or duplicate group");
             return 0;
         }
+        /* Boards written before the scope field exist load as empty. */
+        dispatch_group_set_description(
+            dispatch_board_find_group(board, prefix),
+            json_string_or(value, "description", ""));
     }
     return 1;
 }

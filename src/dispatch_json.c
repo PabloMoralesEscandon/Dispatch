@@ -233,6 +233,9 @@ static json_t *groups_json(const DispatchBoard *board) {
         json_object_set_new(object, "id", json_string(group->id));
         json_object_set_new(object, "name", json_string(group->name));
         json_object_set_new(object, "prefix", json_string(group->prefix));
+        json_object_set_new(
+            object, "description",
+            json_string(group->description ? group->description : ""));
         json_array_append_new(array, object);
     }
     return array;
