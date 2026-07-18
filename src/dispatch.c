@@ -978,6 +978,28 @@ void dispatch_board_normalize_states(DispatchBoard *board) {
 
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
+
+        /* Repair assignment invariant violations: assignment exists only
+         * between start and finish (doing/paused). Anything else is stale
+         * data that makes the task unstartable. See
+         * docs/task-state-invariants.md. */
+        if (task->state != DISPATCH_STATE_DOING &&
+            task->state != DISPATCH_STATE_PAUSED) {
+            if (task->assigned_to) {
+                free(task->assigned_to);
+                task->assigned_to = NULL;
+            }
+            if (task->state == DISPATCH_STATE_PROPOSED ||
+                task->state == DISPATCH_STATE_READY ||
+                task->state == DISPATCH_STATE_BLOCKED) {
+                if (task->started_by) {
+                    free(task->started_by);
+                    task->started_by = NULL;
+                }
+                task->started_at = 0;
+            }
+        }
+
         if (task->state == DISPATCH_STATE_DONE ||
             task->state == DISPATCH_STATE_DOING ||
             task->state == DISPATCH_STATE_REVIEW ||
