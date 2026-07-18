@@ -117,13 +117,28 @@ int cmd_start(int argc, char **argv) {
     DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task) {
         locked_board_close(&locked);
-        fprintf(stderr, "Could not start %s\n", task_id);
+        fprintf(stderr, "No task with id %s\n", task_id);
         return 1;
     }
     DispatchWorkspace *workspace = task_workspace(board, task_id, 0);
     if (workspace && strcmp(workspace->actor, actor) != 0) {
         fprintf(stderr, "Workspace for %s belongs to %s\n", task_id,
                 workspace->actor);
+        locked_board_close(&locked);
+        return 1;
+    }
+    DispatchState effective = dispatch_task_effective_state(board, task);
+    if (effective != DISPATCH_STATE_READY) {
+        fprintf(stderr, "Cannot start %s: task is %s, not ready\n", task_id,
+                dispatch_state_name(effective));
+        locked_board_close(&locked);
+        return 1;
+    }
+    if (task->assigned_to && task->assigned_to[0] != '\0') {
+        fprintf(stderr,
+                "Cannot start %s: already assigned to %s (use 'dispatch "
+                "unassign %s --actor <name>' to clear it)\n",
+                task_id, task->assigned_to, task_id);
         locked_board_close(&locked);
         return 1;
     }

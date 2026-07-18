@@ -492,13 +492,13 @@ assert_contains "DE-02"
 assert_contains "blocked_by: DE-01"
 
 expect_fail "$BIN" start DE-02 --actor codex
-assert_contains "Could not start DE-02"
+assert_contains "Cannot start DE-02: task is blocked, not ready"
 
 expect_ok "$BIN" start DE-01 --actor codex
 assert_contains "Started DE-01"
 
 expect_fail "$BIN" start DE-01 --actor other-agent
-assert_contains "Could not start DE-01"
+assert_contains "Cannot start DE-01: task is doing, not ready"
 
 expect_ok "$BIN" show DE-01
 assert_contains "State: doing"
