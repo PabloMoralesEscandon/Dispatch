@@ -90,3 +90,22 @@ dispatch start <TASK-ID> --actor <owner>
 task) where waiting for a full normalize pass is not desired. Task history
 and recorded commits are preserved in both paths; recovery never deletes or
 recreates tasks.
+
+## Worked Example: The RF-01 Recovery
+
+RF-01 was the original zombie: `dispatch ready RF-01` was run while the task
+was `doing`, leaving it `ready` but still assigned, and `start` refused it
+with only a generic message. After the fixes above landed, the recovery was:
+
+```text
+$ dispatch doctor
+[warn] task RF-01 is ready but still assigned to claude-problem-solver
+       fix: repair it with dispatch normalize
+$ dispatch unassign RF-01 --actor claude-problem-solver
+Unassigned RF-01 from claude-problem-solver (ready)
+$ dispatch start RF-01 --actor claude-problem-solver
+Started RF-01
+```
+
+The task kept its full history (including an `unassigned` entry recording
+the repair) and its previously recorded commit, and completed normally.
