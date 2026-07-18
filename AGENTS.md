@@ -73,8 +73,11 @@ dispatch start <TASK-ID> --actor <agent-id>
 dispatch finish <TASK-ID> --actor <agent-id>
 dispatch review <TASK-ID> --actor <user-or-reviewer-id>
 dispatch unassign <TASK-ID> --actor <name>
-dispatch group add <name> --prefix <PREFIX>
+dispatch group add <name> --prefix <PREFIX> [--description <text>]
 dispatch group ready <group> --actor <name> [--no-review]
+dispatch group edit <prefix> --description <text>
+dispatch group list
+dispatch group show <prefix>
 dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
@@ -250,6 +253,21 @@ When the user asks an agent to plan work, create Dispatch tasks through the CLI.
 Use groups, meaningful titles, dependencies, and review gates for checkpoints.
 Use `dispatch list` to inspect dependency sequences.
 
+Reuse existing groups first. Start every planning session by reviewing the
+recorded group scopes:
+
+```bash
+dispatch group list
+dispatch group show <prefix>
+```
+
+If an existing group's scope covers the planned work, add the tasks there. A
+task's group must match that group's recorded scope, and creating a
+near-duplicate of an existing group is a planning mistake. Create a new group
+only when no recorded scope fits, and give it a `--description` at creation so
+the next planner can reuse it. If a group you extend has no recorded scope
+yet, record one with `dispatch group edit <prefix> --description <text>`.
+
 Example user request:
 
 ```text
@@ -259,13 +277,22 @@ Plan the work to add JSON output support.
 Example agent flow:
 
 ```bash
-dispatch group add "Development" --prefix DE
+dispatch group list
+# DE   Development   3 open / 12 tasks   Core CLI development work
+# The Development scope covers JSON output work, so reuse it.
 dispatch task add DE "Design JSON output contract" --actor codex --description "Define the machine-readable output shape for list, ready, blocked, and show."
 dispatch task add DE "Implement JSON output flag" --actor codex --description "Add --json output for supported commands."
 dispatch task add DE "Test JSON output commands" --actor codex --description "Verify valid JSON and expected fields."
 dispatch dep add DE-01 DE-02  # DE-02 depends on DE-01
 dispatch dep add DE-02 DE-03  # DE-03 depends on DE-02
 dispatch ready DE-01 --actor user
+```
+
+Only when no existing scope fits, open a new group as the deliberate
+exception:
+
+```bash
+dispatch group add "Benchmarks" --prefix BM --description "Performance measurement and regression tracking"
 ```
 
 The first task is ready after user approval. The implementation and test tasks
