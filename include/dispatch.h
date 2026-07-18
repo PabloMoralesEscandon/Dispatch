@@ -43,6 +43,7 @@ typedef struct {
     char *id;
     char *name;
     char *prefix;
+    char *description; /* recorded scope: what work belongs in the group */
 } DispatchGroup;
 
 typedef struct {
@@ -160,6 +161,8 @@ DispatchWorkspace *dispatch_board_find_workspace(DispatchBoard *board,
 
 int dispatch_board_add_group(DispatchBoard *board, const char *name,
                              const char *prefix);
+int dispatch_group_set_description(DispatchGroup *group,
+                                   const char *description);
 int dispatch_group_prefix_is_valid(const char *prefix);
 DispatchTask *dispatch_board_add_task(DispatchBoard *board,
                                       const char *group_id,

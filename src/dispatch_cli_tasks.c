@@ -55,15 +55,19 @@ int cmd_repo(int argc, char **argv) {
 
 static int cmd_group_add(int argc, char **argv) {
     if (argc < 4) {
-        fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
+        fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX] "
+                        "[--description <text>]\n");
         return 1;
     }
 
     const char *name = argv[3];
     const char *prefix = NULL;
+    const char *description = NULL;
     for (int i = 4; i < argc; i++) {
         if (strcmp(argv[i], "--prefix") == 0 && (i + 1) < argc) {
             prefix = argv[++i];
+        } else if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
+            description = argv[++i];
         } else {
             fprintf(stderr, "Unknown group option: %s\n", argv[i]);
             return 1;
@@ -82,6 +86,8 @@ static int cmd_group_add(int argc, char **argv) {
     }
 
     DispatchGroup *group = dispatch_board_find_group(board, name);
+    if (description)
+        dispatch_group_set_description(group, description);
     if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
         return 1;
@@ -185,15 +191,64 @@ static int cmd_group_ready(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_group_edit(int argc, char **argv) {
+    if (argc != 6 || strcmp(argv[4], "--description") != 0) {
+        fprintf(stderr,
+                "Usage: dispatch group edit <prefix> --description <text>\n");
+        return 1;
+    }
+
+    const char *group_id = argv[3];
+    const char *description = argv[5];
+
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+    DispatchBoard *board = &locked.board;
+
+    DispatchGroup *group = dispatch_board_find_group(board, group_id);
+    if (!group) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No group with id, prefix, or name %s\n", group_id);
+        return 1;
+    }
+
+    dispatch_group_set_description(group, description);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        return 1;
+    }
+
+    printf("Updated group %s description\n", group->prefix);
+    DispatchLogField targets[] = {
+        {"group", group->id},
+    };
+    DispatchLogField context[] = {
+        {"description", description},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Updated group %s description",
+             group->prefix);
+    append_dispatch_log("user", "group", "edit", targets, 1, context, 1,
+                        message);
+    locked_board_close(&locked);
+    return 0;
+}
+
 int cmd_group(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "add") == 0)
         return cmd_group_add(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "ready") == 0)
         return cmd_group_ready(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "edit") == 0)
+        return cmd_group_edit(argc, argv);
 
-    fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX]\n");
+    fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX] "
+                    "[--description <text>]\n");
     fprintf(stderr,
             "       dispatch group ready <group> [--actor <name>] [--no-review]\n");
+    fprintf(stderr,
+            "       dispatch group edit <prefix> --description <text>\n");
     return 1;
 }
 
