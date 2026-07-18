@@ -123,12 +123,27 @@ static int cmd_init(int argc, char **argv) {
     return 0;
 }
 
+static int board_file_exists(void) {
+    FILE *file = fopen(DISPATCH_STORE_FILE, "r");
+    if (!file)
+        return 0;
+    fclose(file);
+    return 1;
+}
+
 int load_board_or_error(DispatchBoard *board) {
     char error[256] = {0};
     DispatchStoreLock lock = {0};
     if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
                                      sizeof(error))) {
         fprintf(stderr, "%s\n", error);
+        return 0;
+    }
+    if (!board_file_exists()) {
+        fprintf(stderr,
+                "No dispatch board in this directory; run dispatch init "
+                "<repo-path> or cd to the workflow directory\n");
+        dispatch_store_lock_release(&lock);
         return 0;
     }
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
@@ -157,6 +172,13 @@ int locked_board_load_or_error(LockedBoard *locked) {
         return 0;
     }
 
+    if (!board_file_exists()) {
+        fprintf(stderr,
+                "No dispatch board in this directory; run dispatch init "
+                "<repo-path> or cd to the workflow directory\n");
+        dispatch_store_lock_release(&locked->lock);
+        return 0;
+    }
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
                                   sizeof(error))) {
         fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,

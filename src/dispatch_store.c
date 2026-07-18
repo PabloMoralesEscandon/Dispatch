@@ -886,6 +886,16 @@ int dispatch_store_init_file(const char *path, const char *repo_path,
         return 1;
     }
 
+    /* Only init passes a repo path; every other caller must find an
+     * existing board rather than silently creating one in whatever
+     * directory the command happened to run from. */
+    if (!repo_path) {
+        set_error(error, error_size,
+                  "no dispatch board in this directory; run dispatch init "
+                  "<repo-path> or cd to the workflow directory");
+        return 0;
+    }
+
     DispatchBoard board;
     dispatch_board_init(&board, "Dispatch");
     dispatch_board_set_repo_path(&board, repo_path);

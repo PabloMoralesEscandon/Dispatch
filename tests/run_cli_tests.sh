@@ -1991,6 +1991,31 @@ assert_contains "RE   Requirements"
 assert_contains "DE   Development"
 assert_contains "VD   Validation Delivery"
 
+# FX-12: non-init commands never create a board file. Running them in a
+# directory with no dispatch.json fails with a pointer to init and leaves
+# the directory untouched (previously a stray empty board appeared).
+case_dir="$(make_case_dir no-board)"
+cd "$case_dir"
+
+expect_fail "$BIN" list
+assert_contains "No dispatch board in this directory; run dispatch init"
+expect_fail "$BIN" ready
+expect_fail "$BIN" start DE-01 --actor codex
+expect_fail "$BIN" normalize
+if [ -e dispatch.json ]; then
+    fail "a non-init command created dispatch.json"
+fi
+if [ -n "$(ls -A)" ]; then
+    fail "a non-init command left files behind: $(ls -A)"
+fi
+# init remains the sole creator.
+mkdir repo
+expect_ok "$BIN" init repo
+if [ ! -e dispatch.json ]; then
+    fail "dispatch init did not create dispatch.json"
+fi
+expect_ok "$BIN" list
+
 case_dir="$(make_case_dir ungated)"
 cd "$case_dir"
 mkdir repo
