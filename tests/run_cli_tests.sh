@@ -1400,6 +1400,51 @@ expect_fail "$BIN" workspace show DE-02
 assert_contains "No workspace for DE-02"
 expect_ok "$BIN" workspace show DE-01
 
+case_dir_old="$(make_case_dir workspace-repair-old)"
+case_dir_new="$TMP_ROOT/workspace-repair-new"
+cd "$case_dir_old"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Relocated
+expect_ok "$BIN" ready DE-01 --actor user
+expect_ok "$BIN" workspace create DE-01 --actor codex
+old_workspace_path="$case_dir_old/repo-agent-codex-DE-01"
+new_workspace_path="$case_dir_new/repo-agent-codex-DE-01"
+
+cd "$TMP_ROOT"
+mv "$case_dir_old" "$case_dir_new"
+cd "$case_dir_new"
+expect_ok "$BIN" repo set repo
+expect_ok "$BIN" workspace show DE-01
+assert_contains "Path: $old_workspace_path"
+assert_contains "Git worktree: missing"
+expect_ok "$BIN" doctor
+assert_contains "workspace DE-01 moved to $new_workspace_path"
+assert_contains "fix: dispatch workspace repair DE-01"
+expect_ok "$BIN" doctor --json
+assert_contains '"kind": "workspace_path_moved"'
+assert_contains '"subject": "DE-01"'
+assert_contains '"fix": "dispatch workspace repair DE-01"'
+expect_fail "$BIN" workspace repair Missing
+assert_contains "No workspace for Missing"
+expect_ok "$BIN" workspace repair DE-01
+assert_contains "Repaired workspace DE-01"
+assert_contains "old path: $old_workspace_path"
+assert_contains "path: $new_workspace_path"
+expect_ok "$BIN" workspace repair DE-01
+assert_contains "Workspace DE-01 is already anchored at $new_workspace_path"
+expect_ok "$BIN" workspace show DE-01
+assert_contains "Path: $new_workspace_path"
+assert_contains "Repo: $case_dir_new/repo"
+assert_contains "Git worktree: present"
+expect_ok "$BIN" doctor
+assert_contains "workspace DE-01 path exists"
+assert_not_contains "dispatch workspace repair DE-01"
+
 case_dir="$(make_case_dir completion-candidates)"
 cd "$case_dir"
 mkdir repo
@@ -2532,7 +2577,7 @@ cd "$case_dir"
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
 assert_contains "agent create/list/show/command/session/resume"
-assert_contains "workspace create/list/show/remove/prune"
+assert_contains "workspace create/list/show/remove/repair/prune"
 assert_contains "completion candidates"
 assert_not_contains "--json"
 assert_not_contains "clear"

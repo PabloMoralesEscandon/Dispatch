@@ -60,6 +60,7 @@ dispatch workspace create <TASK-ID> --actor <agent-id> [--repo <path>] [--dir <p
 dispatch workspace list
 dispatch workspace show <TASK-ID-or-workspace>
 dispatch workspace remove <TASK-ID-or-workspace> [--force]
+dispatch workspace repair <TASK-ID-or-workspace>
 dispatch workspace prune [--done] [--stale] [--dry-run]
 dispatch ready
 dispatch reviews

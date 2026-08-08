@@ -80,6 +80,9 @@ DispatchWorkspace *task_workspace(const DispatchBoard *board, const char *task_i
 int title_starts_with_dispatch_id(const char *title);
 char *trimmed_copy(const char *value);
 int workspace_covers_task(const DispatchWorkspace *workspace, const char *task_id);
+char *workspace_reanchored_path(const char *repo_path,
+                                const char *workspace_path);
+int workspace_git_worktree_present_at(const char *path);
 int write_agent_prompt(const char *path, const char *name, const char *runner, const char *model, const char *agent_dir, const char *scratch_dir, const char *decisions_dir);
 int write_agent_run_script(const char *path, const char *command);
 

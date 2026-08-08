@@ -15,6 +15,11 @@ static void print_workspace_prune_usage(void) {
             "Usage: dispatch workspace prune [--done] [--stale] [--dry-run]\n");
 }
 
+static void print_workspace_repair_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch workspace repair <task-id-or-workspace>\n");
+}
+
 static char *current_workflow_path(void) {
     char *path = getcwd(NULL, 0);
     if (!path) {
@@ -46,6 +51,25 @@ static char *path_dirname_copy(const char *path) {
 static const char *path_basename_view(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash ? slash + 1 : path;
+}
+
+char *workspace_reanchored_path(const char *repo_path,
+                                const char *workspace_path) {
+    if (!repo_path || repo_path[0] == '\0' || !workspace_path ||
+        workspace_path[0] == '\0') {
+        return NULL;
+    }
+
+    const char *workspace_name = path_basename_view(workspace_path);
+    if (workspace_name[0] == '\0' || strcmp(workspace_name, ".") == 0 ||
+        strcmp(workspace_name, "..") == 0) {
+        return NULL;
+    }
+
+    char *repo_parent = path_dirname_copy(repo_path);
+    char *path = join_path2(repo_parent, workspace_name);
+    free(repo_parent);
+    return path;
 }
 
 static char *resolve_future_path(const char *workflow_dir, const char *path) {
@@ -417,6 +441,13 @@ static int git_worktree_is_registered(const char *repo_path,
     return registered;
 }
 
+static int git_worktree_repair(const char *repo_path,
+                               const char *workspace_path) {
+    const char *argv[] = {"git", "-C", repo_path, "worktree", "repair",
+                          workspace_path, NULL};
+    return run_command_quiet(argv);
+}
+
 static int git_worktree_is_dirty(const char *workspace_path) {
     const char *argv[] = {"git", "-C", workspace_path, "status",
                           "--porcelain", NULL};
@@ -750,19 +781,23 @@ static int cmd_workspace_create(int argc, char **argv) {
     return 0;
 }
 
-static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
-    if (!workspace || !workspace->path || workspace->path[0] == '\0')
+int workspace_git_worktree_present_at(const char *path) {
+    if (!path || path[0] == '\0')
         return 0;
 
     struct stat info;
-    if (stat(workspace->path, &info) != 0 || !S_ISDIR(info.st_mode))
+    if (stat(path, &info) != 0 || !S_ISDIR(info.st_mode))
         return 0;
 
-    char *git_path = join_path2(workspace->path, ".git");
+    char *git_path = join_path2(path, ".git");
     int present = stat(git_path, &info) == 0 &&
                   (S_ISDIR(info.st_mode) || S_ISREG(info.st_mode));
     free(git_path);
     return present;
+}
+
+static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
+    return workspace && workspace_git_worktree_present_at(workspace->path);
 }
 
 static int cmd_workspace_list(int argc, char **argv) {
@@ -986,6 +1021,172 @@ static int cmd_workspace_remove(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_workspace_repair(int argc, char **argv) {
+    if (argc != 4) {
+        print_workspace_repair_usage();
+        return 1;
+    }
+
+    const char *target = argv[3];
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        return 1;
+
+    DispatchWorkspace *workspace = live_workspace_for_task(&locked.board,
+                                                           target);
+    if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
+        locked_board_close(&locked);
+        fprintf(stderr, "No workspace for %s\n", target);
+        return 1;
+    }
+
+    char *repo_path = dispatch_resolve_path(".", locked.board.repo_path);
+    if (!repo_path || !dispatch_path_is_git_repository(repo_path)) {
+        fprintf(stderr,
+                "Configured repository is not a git repository: %s\n",
+                locked.board.repo_path ? locked.board.repo_path : ".");
+        locked_board_close(&locked);
+        free(repo_path);
+        return 1;
+    }
+
+    char *workspace_path = workspace_reanchored_path(repo_path,
+                                                     workspace->path);
+    if (!workspace_path) {
+        locked_board_close(&locked);
+        fprintf(stderr, "Could not derive a repaired path for workspace %s\n",
+                workspace->id);
+        free(repo_path);
+        return 1;
+    }
+
+    char *workspace_id = cli_strdup(workspace->id);
+    char *old_path = cli_strdup(workspace->path);
+    char *old_repo_path = cli_strdup(workspace->repo_path);
+    int already_anchored = strcmp(old_path, workspace_path) == 0 &&
+                           strcmp(old_repo_path, repo_path) == 0;
+
+    for (size_t i = 0; i < locked.board.workspaces.count; i++) {
+        DispatchWorkspace *other = &locked.board.workspaces.items[i];
+        if (other == workspace || !workspace_record_is_live(other))
+            continue;
+        if (strcmp(other->path, workspace_path) == 0) {
+            locked_board_close(&locked);
+            fprintf(stderr, "Workspace path already reserved: %s\n",
+                    workspace_path);
+            free(workspace_id);
+            free(old_path);
+            free(old_repo_path);
+            free(repo_path);
+            free(workspace_path);
+            return 1;
+        }
+    }
+    locked_board_close(&locked);
+
+    if (!workspace_git_worktree_present_at(workspace_path)) {
+        fprintf(stderr, "No git worktree found at %s\n", workspace_path);
+        free(workspace_id);
+        free(old_path);
+        free(old_repo_path);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+
+    if (already_anchored) {
+        printf("Workspace %s is already anchored at %s\n", workspace_id,
+               workspace_path);
+        free(workspace_id);
+        free(old_path);
+        free(old_repo_path);
+        free(repo_path);
+        free(workspace_path);
+        return 0;
+    }
+
+    if (!git_worktree_repair(repo_path, workspace_path) ||
+        !git_worktree_is_registered(repo_path, workspace_path)) {
+        fprintf(stderr, "Could not repair git worktree at %s\n",
+                workspace_path);
+        free(workspace_id);
+        free(old_path);
+        free(old_repo_path);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+
+    if (!locked_board_load_or_error(&locked)) {
+        free(workspace_id);
+        free(old_path);
+        free(old_repo_path);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+    workspace = live_workspace_for_task(&locked.board, workspace_id);
+    char *current_repo = dispatch_resolve_path(".", locked.board.repo_path);
+    if (!workspace || strcmp(workspace->path, old_path) != 0 ||
+        strcmp(workspace->repo_path, old_repo_path) != 0 || !current_repo ||
+        strcmp(current_repo, repo_path) != 0) {
+        locked_board_close(&locked);
+        fprintf(stderr,
+                "Workspace %s changed while it was being repaired; retry\n",
+                workspace_id);
+        free(current_repo);
+        free(workspace_id);
+        free(old_path);
+        free(old_repo_path);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+    free(current_repo);
+
+    free(workspace->path);
+    workspace->path = cli_strdup(workspace_path);
+    free(workspace->repo_path);
+    workspace->repo_path = cli_strdup(repo_path);
+    workspace->updated_at = time(NULL);
+    if (!locked_board_save_or_error(&locked)) {
+        locked_board_close(&locked);
+        free(workspace_id);
+        free(old_path);
+        free(old_repo_path);
+        free(repo_path);
+        free(workspace_path);
+        return 1;
+    }
+    locked_board_close(&locked);
+
+    printf("Repaired workspace %s\n", workspace_id);
+    printf("  old path: %s\n", old_path);
+    printf("  path: %s\n", workspace_path);
+    printf("  repo: %s\n", repo_path);
+    DispatchLogField targets[] = {
+        {"task", workspace_id},
+        {"workspace", workspace_id},
+    };
+    DispatchLogField context[] = {
+        {"old_workspace_path", old_path},
+        {"workspace_path", workspace_path},
+        {"old_repo_path", old_repo_path},
+        {"repo_path", repo_path},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Repaired workspace %s", workspace_id);
+    append_dispatch_log("user", "workspace", "workspace_repair", targets, 2,
+                        context, 4, message);
+
+    free(workspace_id);
+    free(old_path);
+    free(old_repo_path);
+    free(repo_path);
+    free(workspace_path);
+    return 0;
+}
+
 typedef enum {
     PRUNE_CANDIDATE_DONE,
     PRUNE_CANDIDATE_STALE
@@ -1186,6 +1387,8 @@ int cmd_workspace(int argc, char **argv) {
         return cmd_workspace_show(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "remove") == 0)
         return cmd_workspace_remove(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "repair") == 0)
+        return cmd_workspace_repair(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "prune") == 0)
         return cmd_workspace_prune(argc, argv);
 
@@ -1194,6 +1397,8 @@ int cmd_workspace(int argc, char **argv) {
     fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
     fprintf(stderr,
             "       dispatch workspace remove <task-id-or-workspace> [--force]\n");
+    fprintf(stderr,
+            "       dispatch workspace repair <task-id-or-workspace>\n");
     fprintf(stderr,
             "       dispatch workspace prune [--done] [--stale] [--dry-run]\n");
     return 1;
