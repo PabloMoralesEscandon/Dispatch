@@ -15,6 +15,9 @@ if [ "$UPDATE_GOLDENS" = "1" ] && [ -n "$MUTATE_FRAME" ]; then
     exit 1
 fi
 
+# shellcheck source=tests/utf8_locale.sh
+. "$ROOT/tests/utf8_locale.sh"
+
 normalize_frame() {
     sed -E \
         -e "s|$TMP_ROOT|<tmp>|g" \
@@ -75,5 +78,33 @@ capture_frame task-form task-form
 capture_frame agent-form agent-form
 capture_frame group-form group-form
 capture_frame help board "?"
+
+# FX-19: a separate fixture for non-ASCII content, so the accented frames can
+# grow without churning every frame above. An accented row sits next to a
+# plain one to make column drift visible in the diff, and the descriptions are
+# long enough to wrap.
+ACCENTED="$TMP_ROOT/accented"
+mkdir -p "$ACCENTED/repo"
+git -C "$ACCENTED/repo" init -q
+git -C "$ACCENTED/repo" config user.name "Golden Tests"
+git -C "$ACCENTED/repo" config user.email "golden@example.com"
+printf 'fixture\n' >"$ACCENTED/repo/fixture.txt"
+git -C "$ACCENTED/repo" add fixture.txt
+git -C "$ACCENTED/repo" commit -qm "Golden fixture"
+
+cd "$ACCENTED"
+"$BIN" init repo >/dev/null
+"$BIN" group add "Traducción" --prefix TR >/dev/null
+"$BIN" task add TR "Revisión de traducción acentuada" \
+    --description "Una descripción larga con acentos que debería envolver sobre varias líneas sin partir ningún carácter multibyte por la mitad." >/dev/null
+"$BIN" task add TR "Plain ASCII row for alignment" \
+    --description "An unaccented row whose columns must line up with the accented one above." >/dev/null
+"$BIN" ready TR-01 --actor user >/dev/null
+
+capture_frame accented-board board
+capture_frame accented-task board i
+# Only the accented bytes are safe to type here: the headless key path routes
+# every ASCII letter to its own board shortcut before the search buffer.
+capture_frame accented-search board "/ó"
 
 printf 'PASS: TUI golden frames\n'

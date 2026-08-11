@@ -18,6 +18,7 @@ const char *sources[] = {
     "src/dispatch_exec.c",
     "src/dispatch_json.c",
     "src/dispatch_store.c",
+    "src/dispatch_utf8.c",
     "src/dispatch_tui.c",
     "src/dispatch_tui_external.c",
     "src/dispatch_tui_actions.c",
@@ -135,7 +136,10 @@ int main(int argc, char **argv) {
         nob_cmd_append(&link_cmd, obj_path(sources[i]));
     }
 
-    nob_cmd_append(&link_cmd, "-ljansson", "-lncurses", "-o",
+    /* Link the wide-character ncurses explicitly: -lncurses resolves to the
+     * narrow library on some distributions, which silently drops multibyte
+     * input and wide-character rendering. */
+    nob_cmd_append(&link_cmd, "-ljansson", "-lncursesw", "-o",
                    BUILD_FOLDER "dispatch");
 
     if (!cmd_run(&link_cmd))

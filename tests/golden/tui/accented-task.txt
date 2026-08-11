@@ -1,0 +1,31 @@
+Frame: task 100x30
+ DISPATCH   Task                                                         actor:user  board:Dispatch
+
+  TR-01  Revisión de traducción acentuada                                                    ready
+  ------------------------------------------------------------------------------------------------
+
+  Description    Una descripción larga con acentos que debería envolver sobre varias líneas sin part
+                 ir ningún carácter multibyte por la mitad.
+
+Details
+  Group          TR
+  Review gate    required
+  Assigned       -
+  Started by     -
+  Completed by   -
+
+Dependencies
+  Depends on     -
+  Blocks         -
+  Commits        -
+
+History
+  - created by user
+  - ready by user
+
+
+
+
+
+
+ Inspecting task  q/Esc back   e edit   m move   >/< deps   d diff   x/X delete   L logs   PgUp/PgDn

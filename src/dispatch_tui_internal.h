@@ -7,8 +7,18 @@
 
 #include "dispatch_tui.h"
 
+/* Ask ncurses for the wide-character API (cchar_t, in_wch, getcchar) so the
+ * headless renderer can read back what a real terminal shows. This is the
+ * targeted alternative the ncurses header documents; _XOPEN_SOURCE_EXTENDED
+ * would achieve the same but also switches glibc out of its default feature
+ * set for every translation unit that includes this header. */
+#ifndef NCURSES_WIDECHAR
+#define NCURSES_WIDECHAR 1
+#endif
+
 #include <ncurses.h>
 #include <ctype.h>
+#include <locale.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +33,7 @@
 #include "dispatch.h"
 #include "dispatch_exec.h"
 #include "dispatch_store.h"
+#include "dispatch_utf8.h"
 
 typedef enum {
     TUI_SCREEN_BOARD,
@@ -215,6 +226,11 @@ enum {
     TUI_COL_ACTION = 12,
 };
 
+/* Byte capacity a cell_text buffer needs to hold `columns` display columns.
+ * A column can carry a four-byte UTF-8 character, so sizing by column count
+ * alone truncates accented values. */
+#define TUI_CELL_BYTES(columns) ((size_t)(columns) * 4 + 1)
+
 /* Column start positions derived from the widths above: the marker column
  * has no trailing space, every later column is separated by one space. */
 enum {
@@ -306,6 +322,18 @@ void tui_style_row_on(int row_index, int selected);
 void tui_style_title_off(void);
 
 void tui_style_title_on(void);
+
+/* True when a getch() result is a byte that belongs in a text edit buffer:
+ * printable ASCII, or any byte of a UTF-8 multibyte sequence. */
+int tui_key_is_text_byte(int ch);
+
+/* Appends one text byte to a NUL-terminated edit buffer. Returns 1 when the
+ * byte was stored, 0 when it is not text or the buffer is full. */
+int tui_text_append_byte(char *buffer, size_t buffer_size, int ch);
+
+/* Removes the last whole character from an edit buffer, so backspace on an
+ * accented character does not leave a dangling lead byte behind. */
+void tui_text_backspace(char *buffer);
 
 int tui_task_is_visible(const DispatchTui *tui,
                                const DispatchTask *task);

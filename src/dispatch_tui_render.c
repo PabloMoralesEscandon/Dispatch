@@ -36,17 +36,27 @@ static void draw_group_header(DispatchTui *tui, int y, int cols,
 static void draw_task_row(DispatchTui *tui, int y, int cols,
                           const DispatchTask *task, int visible_index);
 
+/* mvaddnstr counts bytes, not display columns, so a column limit has to be
+ * converted into the byte length of the widest prefix that fits. Passing the
+ * column count straight through cuts accented text short and can slice a
+ * multibyte character in half. */
+static int column_limit_bytes(const char *text, int width) {
+    return (int)dispatch_utf8_take_columns(text, (size_t)width, NULL);
+}
+
 void draw_truncated(int y, int x, int width, const char *text) {
     if (width <= 0)
         return;
-    mvaddnstr(y, x, text ? text : "", width);
+    const char *value = text ? text : "";
+    mvaddnstr(y, x, value, column_limit_bytes(value, width));
 }
 
 static void draw_padded(int y, int x, int width, const char *text) {
     if (width <= 0)
         return;
+    const char *value = text ? text : "";
     mvhline(y, x, ' ', width);
-    mvaddnstr(y, x, text ? text : "", width);
+    mvaddnstr(y, x, value, column_limit_bytes(value, width));
 }
 
 static const char *tui_view_name(DispatchTuiScreen screen) {
@@ -592,25 +602,48 @@ static void tui_render_help(DispatchTuiScreen screen) {
 
 
 
-/* Write value into a fixed-width column slot: space-padded to exactly width,
- * truncated with a trailing ".." when it does not fit. */
+/* Write value into a fixed-width column slot: space-padded to exactly width
+ * display columns, truncated with a trailing ".." when it does not fit.
+ * Padding and truncation are measured in columns rather than bytes so an
+ * accented value lines up with its neighbours. Size out with
+ * TUI_CELL_BYTES(width); a smaller buffer still stays in bounds but may pad
+ * short. */
 void cell_text(char *out, size_t out_size, const char *value,
                       int width) {
     if (out_size == 0)
         return;
-    if (width <= 0 || (size_t)width >= out_size) {
-        out[0] = '\0';
+    out[0] = '\0';
+    if (width <= 0 || (size_t)width >= out_size)
         return;
-    }
+
     const char *text = value ? value : "";
-    size_t len = strlen(text);
-    if (len <= (size_t)width) {
-        snprintf(out, out_size, "%-*s", width, text);
-    } else if (width > 2) {
-        snprintf(out, out_size, "%.*s..", width - 2, text);
-    } else {
-        snprintf(out, out_size, "%.*s", width, text);
+    size_t keep = (size_t)width;
+    const char *ellipsis = "";
+    if (dispatch_utf8_width(text) > keep && width > 2) {
+        keep = (size_t)width - 2;
+        ellipsis = "..";
     }
+    size_t ellipsis_len = strlen(ellipsis);
+
+    size_t used = 0;
+    size_t bytes = dispatch_utf8_take_columns(text, keep, &used);
+    /* Drop whole trailing characters until the text, its ellipsis and a
+     * terminator fit the caller's buffer. */
+    while (bytes > 0 && bytes + ellipsis_len + 1 > out_size) {
+        size_t back = dispatch_utf8_prev_char_bytes(text, bytes);
+        bytes -= back;
+        used -= dispatch_utf8_width_n(text + bytes, back);
+    }
+
+    memcpy(out, text, bytes);
+    memcpy(out + bytes, ellipsis, ellipsis_len);
+    size_t length = bytes + ellipsis_len;
+
+    size_t pad = (size_t)width - used - ellipsis_len;
+    if (length + pad + 1 > out_size)
+        pad = out_size - 1 - length;
+    memset(out + length, ' ', pad);
+    out[length + pad] = '\0';
 }
 
 /* Column header for the list views: accent, bold, drawn over a full-width row
@@ -631,11 +664,11 @@ static void draw_list_header(int y, int cols, const char *text) {
  * tests can assert that over-length values stay inside their columns. */
 void format_agent_row(char *out, size_t out_size,
                              const DispatchAgent *agent, int selected) {
-    char name[TUI_COL_NAME + 1];
-    char runner[TUI_COL_RUNNER + 1];
-    char status[TUI_COL_AGENT_STATUS + 1];
-    char session[TUI_COL_SESSION + 1];
-    char task[TUI_COL_TASK + 1];
+    char name[TUI_CELL_BYTES(TUI_COL_NAME)];
+    char runner[TUI_CELL_BYTES(TUI_COL_RUNNER)];
+    char status[TUI_CELL_BYTES(TUI_COL_AGENT_STATUS)];
+    char session[TUI_CELL_BYTES(TUI_COL_SESSION)];
+    char task[TUI_CELL_BYTES(TUI_COL_TASK)];
     cell_text(name, sizeof(name), agent->name, TUI_COL_NAME);
     cell_text(runner, sizeof(runner), agent->runner, TUI_COL_RUNNER);
     cell_text(status, sizeof(status), agent->archived ? "archived" : "enabled",
@@ -735,12 +768,12 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
         char branchpath[1100];
         snprintf(branchpath, sizeof(branchpath), "%s  %s", workspace->branch,
                  workspace->path);
-        char task_cell[TUI_COL_TASK + 1];
-        char state_cell[TUI_COL_STATE + 1];
-        char ws_cell[TUI_COL_WS_STATE + 1];
-        char actor_cell[TUI_COL_NAME + 1];
-        char dirty_cell[TUI_COL_FLAG + 1];
-        char git_cell[TUI_COL_GIT + 1];
+        char task_cell[TUI_CELL_BYTES(TUI_COL_TASK)];
+        char state_cell[TUI_CELL_BYTES(TUI_COL_STATE)];
+        char ws_cell[TUI_CELL_BYTES(TUI_COL_WS_STATE)];
+        char actor_cell[TUI_CELL_BYTES(TUI_COL_NAME)];
+        char dirty_cell[TUI_CELL_BYTES(TUI_COL_FLAG)];
+        char git_cell[TUI_CELL_BYTES(TUI_COL_GIT)];
         cell_text(task_cell, sizeof(task_cell), workspace->task_id,
                   TUI_COL_TASK);
         cell_text(state_cell, sizeof(state_cell), task_state, TUI_COL_STATE);
@@ -844,10 +877,10 @@ static void draw_log_rows(DispatchTui *tui, int start_y, int rows, int cols) {
         snprintf(rest, sizeof(rest), "%s%s%s", target, target[0] ? "  " : "",
                  message);
         int selected = visible_index == tui->selected_log;
-        char time_cell[TUI_COL_TIME + 1];
-        char actor_cell[TUI_COL_LOG_ACTOR + 1];
-        char command_cell[TUI_COL_COMMAND + 1];
-        char action_cell[TUI_COL_ACTION + 1];
+        char time_cell[TUI_CELL_BYTES(TUI_COL_TIME)];
+        char actor_cell[TUI_CELL_BYTES(TUI_COL_LOG_ACTOR)];
+        char command_cell[TUI_CELL_BYTES(TUI_COL_COMMAND)];
+        char action_cell[TUI_CELL_BYTES(TUI_COL_ACTION)];
         cell_text(time_cell, sizeof(time_cell), time, TUI_COL_TIME);
         cell_text(actor_cell, sizeof(actor_cell), actor, TUI_COL_LOG_ACTOR);
         cell_text(command_cell, sizeof(command_cell), command,
@@ -950,10 +983,20 @@ int description_rows(const char *text, int width, int row, char *out,
         size_t seg = nl ? (size_t)(nl - p) : strlen(p);
         size_t off = 0;
         do {
-            size_t len =
-                seg - off > (size_t)width ? (size_t)width : seg - off;
+            /* Slice by display columns on character boundaries: wrapping at a
+             * fixed byte offset both under-fills accented lines and splits
+             * multibyte sequences across two rows. */
+            size_t len = dispatch_utf8_take_columns_n(p + off, seg - off,
+                                                      (size_t)width, NULL);
+            /* A single character wider than the column budget would otherwise
+             * take nothing and spin forever; give it a row of its own. */
+            if (len == 0 && off < seg)
+                len = dispatch_utf8_char_bytes(p + off);
             if (out && count == row) {
                 size_t copy = len < out_size - 1 ? len : out_size - 1;
+                /* Never let the row buffer end mid-character. */
+                while (copy > 0 && ((unsigned char)p[off + copy] & 0xC0) == 0x80)
+                    copy--;
                 memcpy(out, p + off, copy);
                 out[copy] = '\0';
             }
@@ -1272,8 +1315,8 @@ static void draw_task_row(DispatchTui *tui, int y, int cols,
     DispatchState state = dispatch_task_effective_state(&tui->board, task);
     int selected = visible_index == tui->selected_task;
 
-    char id_cell[TUI_COL_TASK + 1];
-    char state_cell[TUI_COL_STATE + 1];
+    char id_cell[TUI_CELL_BYTES(TUI_COL_TASK)];
+    char state_cell[TUI_CELL_BYTES(TUI_COL_STATE)];
     cell_text(id_cell, sizeof(id_cell), task->id, TUI_COL_TASK);
     cell_text(state_cell, sizeof(state_cell), dispatch_state_name(state),
               TUI_COL_STATE);
