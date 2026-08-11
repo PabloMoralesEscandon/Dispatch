@@ -303,6 +303,7 @@ dispatch workspace create <task-id> --actor <agent-id> [--repo <path>] [--dir <p
 dispatch workspace list
 dispatch workspace show <task-id-or-workspace>
 dispatch workspace remove <task-id-or-workspace> [--force]
+dispatch workspace repair <task-id-or-workspace>
 dispatch workspace prune [--done] [--stale] [--dry-run]
 ```
 
@@ -317,7 +318,9 @@ removes a recorded Git worktree and clears its record, refusing doing tasks,
 dirty worktrees, and non-worktree paths unless the operation is explicitly safe.
 `workspace prune --done` cleans up clean workspaces for done tasks, and
 `workspace prune --stale` clears stale creating records with no matching
-worktree. Use `--dry-run` to preview prune actions.
+worktree. Use `--dry-run` to preview prune actions. If the workflow directory
+and its worktrees move together, `doctor` identifies relocated worktrees and
+`workspace repair <id>` updates the recorded repository and worktree paths.
 
 ### TUI
 

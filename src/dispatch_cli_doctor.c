@@ -170,6 +170,8 @@ int cmd_doctor(int argc, char **argv) {
     doctor_check_completion(&warnings, "bash");
     doctor_check_completion(&warnings, "zsh");
 
+    char *current_repo_path = dispatch_resolve_path(".", board.repo_path);
+
     for (size_t i = 0; i < board.agents.count; i++) {
         DispatchAgent *agent = &board.agents.items[i];
         char message[512];
@@ -211,11 +213,32 @@ int cmd_doctor(int argc, char **argv) {
                  workspace->id);
         if (path_exists(workspace->path))
             doctor_ok(message);
-        else
+        else {
+            char *reanchored_path = workspace_reanchored_path(
+                current_repo_path, workspace->path);
+            if (reanchored_path &&
+                workspace_git_worktree_present_at(reanchored_path)) {
+                snprintf(message, sizeof(message),
+                         "workspace %s moved to %s", workspace->id,
+                         reanchored_path);
+                char fix[256];
+                snprintf(fix, sizeof(fix),
+                         "dispatch workspace repair %s", workspace->id);
+                doctor_warn(&warnings, "workspace_path_moved",
+                            workspace->id, message, fix);
+                free(reanchored_path);
+                continue;
+            }
+            snprintf(message, sizeof(message),
+                     "workspace %s path is missing: %s", workspace->id,
+                     workspace->path);
             doctor_warn(&warnings, "workspace_path_missing",
                         workspace->id, message,
                         "run dispatch workspace show <id> and prune stale records if needed");
+            free(reanchored_path);
+        }
     }
+    free(current_repo_path);
 
     /* Orphaned workspaces: active records whose task no longer exists. */
     size_t orphaned = 0;

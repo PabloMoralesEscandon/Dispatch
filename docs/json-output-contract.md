@@ -259,7 +259,7 @@ The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
 `workflow_entry_unexpected_type`, `completion_home_unset`,
 `completion_missing`, `agent_prompt_missing`,
 `agent_run_script_not_executable`, `missing_current_task`,
-`workspace_path_missing`, `orphaned_workspace`, `missing_commits`,
+`workspace_path_missing`, `workspace_path_moved`, `orphaned_workspace`, `missing_commits`,
 `dep_self`, `dep_missing_reference`, `dep_duplicate`,
 `assignment_state_mismatch`, and `start_provenance_mismatch`. Kinds shared
 with status warnings (`missing_commits`, `missing_current_task`,
