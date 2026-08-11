@@ -312,22 +312,17 @@ void tui_handle_key(DispatchTui *tui, int ch) {
     case KEY_BACKSPACE:
     case 127:
     case '\b':
-        if (tui->search_active && strlen(tui->search) > 0) {
-            tui->search[strlen(tui->search) - 1] = '\0';
+        if (tui->search_active && tui->search[0]) {
+            tui_text_backspace(tui->search);
             tui->selected_task = 0;
             tui->task_top = 0;
         }
         break;
     default:
-        if (tui->search_active && ch >= 0 && ch < 256 &&
-            isprint((unsigned char)ch)) {
-            size_t len = strlen(tui->search);
-            if (len + 1 < sizeof(tui->search)) {
-                tui->search[len] = (char)ch;
-                tui->search[len + 1] = '\0';
-                tui->selected_task = 0;
-                tui->task_top = 0;
-            }
+        if (tui->search_active &&
+            tui_text_append_byte(tui->search, sizeof(tui->search), ch)) {
+            tui->selected_task = 0;
+            tui->task_top = 0;
         }
         break;
     }

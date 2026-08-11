@@ -82,6 +82,39 @@ void tui_set_status(DispatchTui *tui, const char *message) {
     snprintf(tui->status, sizeof(tui->status), "%s", message ? message : "");
 }
 
+int tui_key_is_text_byte(int ch) {
+    /* Anything outside a single byte is a KEY_* code, not text. */
+    if (ch < 0 || ch > 255)
+        return 0;
+    unsigned char byte = (unsigned char)ch;
+    /* getch() hands back a multibyte character one byte at a time, and
+     * isprint() rejects every byte at or above 0x80 regardless of locale.
+     * Accept those as sequence bytes; control bytes and DEL stay out. */
+    if (byte >= 0x80)
+        return 1;
+    return isprint(byte) ? 1 : 0;
+}
+
+int tui_text_append_byte(char *buffer, size_t buffer_size, int ch) {
+    if (!buffer || buffer_size == 0 || !tui_key_is_text_byte(ch))
+        return 0;
+    size_t len = strlen(buffer);
+    if (len + 1 >= buffer_size)
+        return 0;
+    buffer[len] = (char)ch;
+    buffer[len + 1] = '\0';
+    return 1;
+}
+
+void tui_text_backspace(char *buffer) {
+    if (!buffer)
+        return;
+    size_t len = strlen(buffer);
+    size_t back = dispatch_utf8_prev_char_bytes(buffer, len);
+    if (back > 0)
+        buffer[len - back] = '\0';
+}
+
 void tui_init(DispatchTui *tui) {
     memset(tui, 0, sizeof(*tui));
     tui->filter = TUI_FILTER_NOT_DONE;
@@ -806,23 +839,16 @@ int handle_search_key(DispatchTui *tui, int ch) {
         return 1;
     }
     if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
-        size_t len = strlen(tui->search);
-        if (len > 0) {
-            tui->search[len - 1] = '\0';
+        if (tui->search[0]) {
+            tui_text_backspace(tui->search);
             tui->selected_task = 0;
             tui->task_top = 0;
         }
         return 1;
     }
-    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch)) {
-        size_t len = strlen(tui->search);
-        if (len + 1 < sizeof(tui->search)) {
-            tui->search[len] = (char)ch;
-            tui->search[len + 1] = '\0';
-            tui->selected_task = 0;
-            tui->task_top = 0;
-        }
-        return 1;
+    if (tui_text_append_byte(tui->search, sizeof(tui->search), ch)) {
+        tui->selected_task = 0;
+        tui->task_top = 0;
     }
     return 1;
 }

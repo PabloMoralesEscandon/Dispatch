@@ -24,6 +24,7 @@
 #include "dispatch.h"
 #include "dispatch_exec.h"
 #include "dispatch_store.h"
+#include "dispatch_utf8.h"
 
 typedef enum {
     TUI_SCREEN_BOARD,
@@ -307,6 +308,18 @@ void tui_style_row_on(int row_index, int selected);
 void tui_style_title_off(void);
 
 void tui_style_title_on(void);
+
+/* True when a getch() result is a byte that belongs in a text edit buffer:
+ * printable ASCII, or any byte of a UTF-8 multibyte sequence. */
+int tui_key_is_text_byte(int ch);
+
+/* Appends one text byte to a NUL-terminated edit buffer. Returns 1 when the
+ * byte was stored, 0 when it is not text or the buffer is full. */
+int tui_text_append_byte(char *buffer, size_t buffer_size, int ch);
+
+/* Removes the last whole character from an edit buffer, so backspace on an
+ * accented character does not leave a dangling lead byte behind. */
+void tui_text_backspace(char *buffer);
 
 int tui_task_is_visible(const DispatchTui *tui,
                                const DispatchTask *task);

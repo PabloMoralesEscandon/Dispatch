@@ -337,6 +337,15 @@ assert_contains "Name: bot"
 assert_contains "Field: 2"
 assert_contains "Submit: yes"
 
+# FX-16: form fields accept multibyte characters, and backspace removes a
+# whole character rather than leaving half a UTF-8 sequence behind.
+expect_ok "$BIN" tui --agent-form-keys-smoke 'revisión'
+assert_contains "Name: revisión"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'revisión\b'
+assert_contains "Name: revisió"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'revisión\b\b'
+assert_contains "Name: revisi"
+
 expect_ok "$BIN" agent resume claude-a
 assert_contains "claude --session-id '"
 assert_contains "\"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
@@ -2298,6 +2307,12 @@ expect_ok "$BIN" tui --search-smoke rsfvanwl
 assert_contains "Search active: yes"
 assert_contains "Search: rsfvanwl"
 assert_contains "Screen: board"
+# FX-16: accented text reaches the search buffer, and backspace deletes the
+# whole character it typed instead of one byte of it.
+expect_ok "$BIN" tui --search-smoke 'café'
+assert_contains "Search: café"
+expect_ok "$BIN" tui --search-smoke "café$(printf '\177')"
+assert_contains "Search: caf"
 case_dir="$(make_case_dir tui-refresh)"
 cd "$case_dir"
 mkdir repo

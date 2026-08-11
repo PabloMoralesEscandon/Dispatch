@@ -52,23 +52,14 @@ int handle_prompt_line_key(char *buffer, size_t buffer_size, int ch,
         return 1;
     }
     if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
-        size_t len = strlen(buffer);
-        if (len > 0)
-            buffer[len - 1] = '\0';
+        tui_text_backspace(buffer);
         return 1;
     }
     if (ch == 21) {
         buffer[0] = '\0';
         return 1;
     }
-    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch)) {
-        size_t len = strlen(buffer);
-        if (len + 1 < buffer_size) {
-            buffer[len] = (char)ch;
-            buffer[len + 1] = '\0';
-        }
-        return 1;
-    }
+    tui_text_append_byte(buffer, buffer_size, ch);
     return 1;
 }
 
@@ -336,7 +327,9 @@ static void task_form_move_cursor(const TuiTaskForm *form, int rows, int cols,
     int inner_width = width - 4;
     if (inner_width <= 0)
         return;
-    size_t len = strlen(buffer);
+    /* Place the cursor by display columns, not bytes, or it drifts right of
+     * the text once an accented character is typed. */
+    size_t len = dispatch_utf8_width(buffer);
     int max_pos = inner_width * (height - 2) - 1;
     int pos = (int)(len > (size_t)max_pos ? (size_t)max_pos : len);
     int cursor_y = y + 2 + pos / inner_width;
@@ -456,21 +449,15 @@ static int handle_task_form_key(TuiTaskForm *form, int ch, int *submit,
     task_form_buffer(form, form->active_field, &buffer, &buffer_size);
     if (!buffer || buffer_size == 0)
         return 1;
-    size_t len = strlen(buffer);
     if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
-        if (len > 0)
-            buffer[len - 1] = '\0';
+        tui_text_backspace(buffer);
         return 1;
     }
     if (ch == 21) {
         buffer[0] = '\0';
         return 1;
     }
-    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
-        len + 1 < buffer_size) {
-        buffer[len] = (char)ch;
-        buffer[len + 1] = '\0';
-    }
+    tui_text_append_byte(buffer, buffer_size, ch);
     return 1;
 }
 
@@ -709,7 +696,7 @@ static void render_task_edit_form(DispatchTui *tui,
     int y = form->active_field == TUI_TASK_EDIT_TITLE ? 3 : 7;
     int inner_width = width - 4;
     if (inner_width > 0) {
-        size_t len = strlen(buffer);
+        size_t len = dispatch_utf8_width(buffer);
         int max_pos = inner_width * (height - 2) - 1;
         int pos = (int)(len > (size_t)max_pos ? (size_t)max_pos : len);
         move(y + 2 + pos / inner_width, left + 2 + pos % inner_width);
@@ -741,17 +728,12 @@ static void handle_task_edit_form_key(TuiTaskEditForm *form, int ch,
     char *buffer = NULL;
     size_t buffer_size = 0;
     task_edit_form_buffer(form, &buffer, &buffer_size);
-    size_t len = strlen(buffer);
-    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
-        if (len > 0)
-            buffer[len - 1] = '\0';
-    } else if (ch == 21) {
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b')
+        tui_text_backspace(buffer);
+    else if (ch == 21)
         buffer[0] = '\0';
-    } else if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
-               len + 1 < buffer_size) {
-        buffer[len] = (char)ch;
-        buffer[len + 1] = '\0';
-    }
+    else
+        tui_text_append_byte(buffer, buffer_size, ch);
 }
 
 int task_edit_form_submit(const char *task_id,
@@ -989,21 +971,15 @@ int handle_agent_form_key(TuiAgentForm *form, int ch, int *submit,
     agent_form_buffer(form, form->active_field, &buffer, &buffer_size);
     if (!buffer || buffer_size == 0)
         return 1;
-    size_t len = strlen(buffer);
     if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
-        if (len > 0)
-            buffer[len - 1] = '\0';
+        tui_text_backspace(buffer);
         return 1;
     }
     if (ch == 21) {
         buffer[0] = '\0';
         return 1;
     }
-    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
-        len + 1 < buffer_size) {
-        buffer[len] = (char)ch;
-        buffer[len + 1] = '\0';
-    }
+    tui_text_append_byte(buffer, buffer_size, ch);
     return 1;
 }
 
@@ -1173,21 +1149,15 @@ static int handle_group_form_key(TuiGroupForm *form, int ch, int *submit,
     group_form_buffer(form, form->active_field, &buffer, &buffer_size);
     if (!buffer || buffer_size == 0)
         return 1;
-    size_t len = strlen(buffer);
     if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
-        if (len > 0)
-            buffer[len - 1] = '\0';
+        tui_text_backspace(buffer);
         return 1;
     }
     if (ch == 21) {
         buffer[0] = '\0';
         return 1;
     }
-    if (ch >= 0 && ch < 256 && isprint((unsigned char)ch) &&
-        len + 1 < buffer_size) {
-        buffer[len] = (char)ch;
-        buffer[len + 1] = '\0';
-    }
+    tui_text_append_byte(buffer, buffer_size, ch);
     return 1;
 }
 
