@@ -9,6 +9,7 @@
 
 #include <ncurses.h>
 #include <ctype.h>
+#include <locale.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>

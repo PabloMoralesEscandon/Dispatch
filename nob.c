@@ -135,7 +135,10 @@ int main(int argc, char **argv) {
         nob_cmd_append(&link_cmd, obj_path(sources[i]));
     }
 
-    nob_cmd_append(&link_cmd, "-ljansson", "-lncurses", "-o",
+    /* Link the wide-character ncurses explicitly: -lncurses resolves to the
+     * narrow library on some distributions, which silently drops multibyte
+     * input and wide-character rendering. */
+    nob_cmd_append(&link_cmd, "-ljansson", "-lncursesw", "-o",
                    BUILD_FOLDER "dispatch");
 
     if (!cmd_run(&link_cmd))

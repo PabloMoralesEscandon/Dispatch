@@ -1174,6 +1174,11 @@ static int tui_render_smoke(const char *screen_arg, int cols, int rows,
         return 1;
     }
 
+    /* Match the interactive path: the virtual screen must decode multibyte
+     * text the same way a real terminal does, or golden frames silently
+     * disagree with what users see. */
+    setlocale(LC_ALL, "");
+
     DispatchTui tui;
     tui_init(&tui);
     if (!parse_screen_name(screen_arg, &tui.screen)) {

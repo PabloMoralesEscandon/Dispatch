@@ -339,6 +339,11 @@ int tui_run(void) {
     tui_init(&tui);
     tui_load_board(&tui);
 
+    /* Adopt the user's locale before ncurses starts so multibyte input is
+     * decoded and wide characters render; without this ncurses stays in the
+     * C locale and treats every UTF-8 byte as a separate character. */
+    setlocale(LC_ALL, "");
+
     initscr();
     set_escdelay(TUI_ESCAPE_DELAY_MS);
     cbreak();
