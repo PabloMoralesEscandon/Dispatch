@@ -57,7 +57,8 @@ static int tui_selection_smoke(const char *filter_name_arg,
 static const char *screen_name(DispatchTuiScreen screen);
 static int parse_screen_name(const char *name, DispatchTuiScreen *screen);
 static void tui_render_headless_screen(DispatchTui *tui);
-static char tui_headless_cell_char(chtype cell);
+static char tui_headless_acs_char(wchar_t ch);
+static int tui_headless_cell_text(int y, int x, char *out, size_t out_size);
 static int tui_capture_headless_frame(int rows, int cols);
 static int tui_render_smoke(const char *screen_arg, int cols, int rows,
                             const char *keys);
@@ -1131,32 +1132,92 @@ static void tui_render_headless_screen(DispatchTui *tui) {
     }
 }
 
-static char tui_headless_cell_char(chtype cell) {
-    unsigned char ch = (unsigned char)(cell & A_CHARTEXT);
-    if (cell & A_ALTCHARSET) {
-        switch (ch) {
-        case 'q':
-            return '-';
-        case 'x':
-            return '|';
-        default:
-            return '+';
-        }
+/* Line-drawing glyphs are captured as their ASCII stand-ins so frames stay
+ * diffable in a plain editor. */
+static char tui_headless_acs_char(wchar_t ch) {
+    switch (ch) {
+    case L'q':
+        return '-';
+    case L'x':
+        return '|';
+    default:
+        return '+';
     }
-    return ch >= 32 && ch <= 126 ? (char)ch : ' ';
+}
+
+/* Read one screen cell as UTF-8 text and report the columns it occupies.
+ * Reading through the wide-character API is what lets an accented or
+ * double-width character survive into the frame; the narrow chtype view
+ * carries only the low byte, which is why golden frames used to show a space
+ * wherever a real terminal shows an accent. */
+static int tui_headless_cell_text(int y, int x, char *out, size_t out_size) {
+    cchar_t cell;
+    wchar_t chars[CCHARW_MAX + 1] = {0};
+    attr_t attrs = 0;
+    short pair = 0;
+
+    out[0] = '\0';
+    if (mvin_wch(y, x, &cell) == ERR ||
+        getcchar(&cell, chars, &attrs, &pair, NULL) == ERR) {
+        snprintf(out, out_size, " ");
+        return 1;
+    }
+
+    if (attrs & A_ALTCHARSET) {
+        out[0] = tui_headless_acs_char(chars[0]);
+        out[1] = '\0';
+        return 1;
+    }
+
+    /* A cell holds a base character plus any combining marks that attach to
+     * it, so every code point in the cell belongs in the frame. */
+    size_t used = 0;
+    for (int i = 0; i < CCHARW_MAX && chars[i]; i++) {
+        char encoded[DISPATCH_UTF8_MAX_BYTES];
+        size_t length = dispatch_utf8_encode((uint32_t)chars[i], encoded);
+        if (length == 0 || used + length + 1 > out_size)
+            break;
+        memcpy(out + used, encoded, length);
+        used += length;
+    }
+    out[used] = '\0';
+
+    size_t columns = dispatch_utf8_width(out);
+    if (columns == 0) {
+        /* Empty or non-advancing cell: keep the column so later text on the
+         * row stays at its real position. */
+        snprintf(out, out_size, " ");
+        return 1;
+    }
+    return (int)columns;
 }
 
 static int tui_capture_headless_frame(int rows, int cols) {
-    char *line = malloc((size_t)cols + 1);
+    /* Each column can carry a base character and its combining marks, so a
+     * row needs far more bytes than it has columns. */
+    size_t line_size = (size_t)cols * CCHARW_MAX * DISPATCH_UTF8_MAX_BYTES + 1;
+    char *line = malloc(line_size);
     if (!line) {
         fprintf(stderr, "Out of memory capturing TUI frame\n");
         return 0;
     }
 
     for (int y = 0; y < rows; y++) {
-        for (int x = 0; x < cols; x++)
-            line[x] = tui_headless_cell_char(mvinch(y, x));
-        int length = cols;
+        size_t length = 0;
+        for (int x = 0; x < cols;) {
+            char cell[CCHARW_MAX * DISPATCH_UTF8_MAX_BYTES + 1];
+            int columns = tui_headless_cell_text(y, x, cell, sizeof(cell));
+            size_t cell_len = strlen(cell);
+            if (length + cell_len + 1 > line_size)
+                break;
+            memcpy(line + length, cell, cell_len);
+            length += cell_len;
+            /* A double-width character owns the next cell too; ncurses
+             * reports the same character there, so skip past it. */
+            x += columns;
+        }
+        /* Trailing blanks are trimmed by byte: a space is never part of a
+         * multibyte sequence, so this cannot cut one short. */
         while (length > 0 && line[length - 1] == ' ')
             length--;
         line[length] = '\0';

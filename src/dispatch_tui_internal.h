@@ -7,6 +7,15 @@
 
 #include "dispatch_tui.h"
 
+/* Ask ncurses for the wide-character API (cchar_t, in_wch, getcchar) so the
+ * headless renderer can read back what a real terminal shows. This is the
+ * targeted alternative the ncurses header documents; _XOPEN_SOURCE_EXTENDED
+ * would achieve the same but also switches glibc out of its default feature
+ * set for every translation unit that includes this header. */
+#ifndef NCURSES_WIDECHAR
+#define NCURSES_WIDECHAR 1
+#endif
+
 #include <ncurses.h>
 #include <ctype.h>
 #include <locale.h>

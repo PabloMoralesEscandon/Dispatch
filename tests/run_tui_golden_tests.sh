@@ -15,6 +15,9 @@ if [ "$UPDATE_GOLDENS" = "1" ] && [ -n "$MUTATE_FRAME" ]; then
     exit 1
 fi
 
+# shellcheck source=tests/utf8_locale.sh
+. "$ROOT/tests/utf8_locale.sh"
+
 normalize_frame() {
     sed -E \
         -e "s|$TMP_ROOT|<tmp>|g" \

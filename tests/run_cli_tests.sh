@@ -8,6 +8,9 @@ RUN_OUTPUT=""
 RUN_STATUS=0
 ESC=$'\033'
 
+# shellcheck source=tests/utf8_locale.sh
+. "$ROOT/tests/utf8_locale.sh"
+
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 fail() {
@@ -1643,6 +1646,19 @@ fi
 
 expect_fail "$BIN" completion fish extra
 assert_contains "Usage: dispatch completion candidates"
+
+# FX-18: the headless renderer captures multibyte cells instead of blanking
+# every byte outside ASCII, so a frame reproduces what a real terminal shows.
+expect_ok "$BIN" task add DE "Revisión acentuada"
+expect_ok "$BIN" tui --render-smoke board 80 24
+assert_contains "Revisión acentuada"
+# A double-width character owns two screen cells; the capture must emit it
+# once rather than repeating it for the cell it continues into.
+expect_ok "$BIN" task add DE "Ancho 世界 fin"
+expect_ok "$BIN" tui --render-smoke board 80 24
+assert_contains "Ancho 世界 fin"
+assert_not_contains "世世"
+assert_not_contains "界界"
 
 case_dir="$(make_case_dir workspace-sequence)"
 cd "$case_dir"

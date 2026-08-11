@@ -233,6 +233,36 @@ size_t dispatch_utf8_prev_char_bytes(const char *text, size_t offset) {
     return 1;
 }
 
+size_t dispatch_utf8_encode(uint32_t codepoint, char *out) {
+    unsigned char *p = (unsigned char *)out;
+
+    if (!out)
+        return 0;
+    if (codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+        return 0;
+
+    if (codepoint < 0x80) {
+        p[0] = (unsigned char)codepoint;
+        return 1;
+    }
+    if (codepoint < 0x800) {
+        p[0] = (unsigned char)(0xC0 | (codepoint >> 6));
+        p[1] = (unsigned char)(0x80 | (codepoint & 0x3F));
+        return 2;
+    }
+    if (codepoint < 0x10000) {
+        p[0] = (unsigned char)(0xE0 | (codepoint >> 12));
+        p[1] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3F));
+        p[2] = (unsigned char)(0x80 | (codepoint & 0x3F));
+        return 3;
+    }
+    p[0] = (unsigned char)(0xF0 | (codepoint >> 18));
+    p[1] = (unsigned char)(0x80 | ((codepoint >> 12) & 0x3F));
+    p[2] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3F));
+    p[3] = (unsigned char)(0x80 | (codepoint & 0x3F));
+    return 4;
+}
+
 size_t dispatch_utf8_take_columns_n(const char *text, size_t bytes,
                                     size_t columns, size_t *used_columns) {
     size_t used = 0;

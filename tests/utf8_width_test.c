@@ -189,6 +189,46 @@ static void test_take_columns_n(void) {
     expect("take_n split byte limit used", used, 4);
 }
 
+static void test_encode(void) {
+    char buf[DISPATCH_UTF8_MAX_BYTES + 1];
+    size_t n;
+
+    n = dispatch_utf8_encode(0x41, buf);
+    buf[n] = '\0';
+    expect("encode ascii bytes", n, 1);
+    if (strcmp(buf, "A") != 0)
+        fail("encode ascii value", (size_t)buf[0], 0x41);
+
+    n = dispatch_utf8_encode(0xE9, buf);
+    buf[n] = '\0';
+    expect("encode two byte", n, 2);
+    if (strcmp(buf, "\xc3\xa9") != 0)
+        fail("encode two byte value", 0, 0);
+
+    n = dispatch_utf8_encode(0x4E16, buf);
+    buf[n] = '\0';
+    expect("encode three byte", n, 3);
+    if (strcmp(buf, "\xe4\xb8\x96") != 0)
+        fail("encode three byte value", 0, 0);
+
+    n = dispatch_utf8_encode(0x1F680, buf);
+    buf[n] = '\0';
+    expect("encode four byte", n, 4);
+    if (strcmp(buf, "\xf0\x9f\x9a\x80") != 0)
+        fail("encode four byte value", 0, 0);
+
+    /* Values with no encoding are refused rather than producing bytes that
+     * would not decode back. */
+    expect("encode surrogate", dispatch_utf8_encode(0xD800, buf), 0);
+    expect("encode out of range", dispatch_utf8_encode(0x110000, buf), 0);
+
+    /* Encoding then measuring round-trips through the decoder. */
+    n = dispatch_utf8_encode(0x4E16, buf);
+    buf[n] = '\0';
+    expect("encode round trip width", dispatch_utf8_width(buf), 2);
+    expect("encode round trip bytes", dispatch_utf8_char_bytes(buf), 3);
+}
+
 int main(void) {
     test_width_ascii();
     test_width_accented();
@@ -200,6 +240,7 @@ int main(void) {
     test_take_columns();
     test_take_columns_n();
     test_take_columns_never_splits();
+    test_encode();
 
     if (failures) {
         fprintf(stderr, "utf8_width_test: %d failure(s)\n", failures);

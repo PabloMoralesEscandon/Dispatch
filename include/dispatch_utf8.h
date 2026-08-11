@@ -2,6 +2,7 @@
 #define DISPATCH_UTF8_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* Display-width and slicing helpers for UTF-8 text.
  *
@@ -44,5 +45,13 @@ size_t dispatch_utf8_take_columns(const char *text, size_t columns,
  * at a newline, say — where the terminator is not where the segment ends. */
 size_t dispatch_utf8_take_columns_n(const char *text, size_t bytes,
                                     size_t columns, size_t *used_columns);
+
+/* Encodes one code point as UTF-8 into `out`, which must have room for
+ * DISPATCH_UTF8_MAX_BYTES. Returns the bytes written, or 0 for surrogates and
+ * values above U+10FFFF, which have no encoding. Does not NUL-terminate. */
+size_t dispatch_utf8_encode(uint32_t codepoint, char *out);
+
+/* Longest UTF-8 encoding of a single code point. */
+#define DISPATCH_UTF8_MAX_BYTES 4
 
 #endif
