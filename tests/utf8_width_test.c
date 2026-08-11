@@ -164,6 +164,31 @@ static void test_take_columns_never_splits(void) {
     }
 }
 
+static void test_take_columns_n(void) {
+    /* Wrapping stops at the segment end even though the buffer continues,
+     * so a newline is never swallowed into the preceding row. */
+    const char *text = "caf\xc3\xa9\nnext";
+    size_t used = 0;
+    size_t seg = 5; /* "café" in bytes, up to but not including the newline */
+
+    expect("take_n whole segment",
+           dispatch_utf8_take_columns_n(text, seg, 10, &used), 5);
+    expect("take_n whole segment used", used, 4);
+    expect("take_n exact fit",
+           dispatch_utf8_take_columns_n(text, seg, 4, &used), 5);
+    expect("take_n short",
+           dispatch_utf8_take_columns_n(text, seg, 3, &used), 3);
+    expect("take_n short used", used, 3);
+
+    /* A byte limit landing inside a character leaves an incomplete sequence,
+     * which decodes as one replacement column per byte rather than being
+     * dropped. Callers slice on segment boundaries, so this only guarantees
+     * the function stays total on a mid-character limit. */
+    expect("take_n split byte limit",
+           dispatch_utf8_take_columns_n(text, 4, 10, &used), 4);
+    expect("take_n split byte limit used", used, 4);
+}
+
 int main(void) {
     test_width_ascii();
     test_width_accented();
@@ -173,6 +198,7 @@ int main(void) {
     test_char_bytes();
     test_prev_char_bytes();
     test_take_columns();
+    test_take_columns_n();
     test_take_columns_never_splits();
 
     if (failures) {

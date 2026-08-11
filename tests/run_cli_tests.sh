@@ -2425,6 +2425,17 @@ expect_ok "$BIN" tui --cell-smoke 8 exactly8
 assert_contains "Cell: [exactly8]"
 expect_ok "$BIN" tui --cell-smoke 8 averylongvalue
 assert_contains "Cell: [averyl..]"
+# FX-17: cells pad and truncate by display columns, so an accented value
+# occupies exactly its column and does not shift the columns after it.
+expect_ok "$BIN" tui --cell-smoke 8 'revisión'
+assert_contains "Cell: [revisión]"
+expect_ok "$BIN" tui --cell-smoke 10 'café'
+assert_contains "Cell: [café      ]"
+expect_ok "$BIN" tui --cell-smoke 8 'revisiónes'
+assert_contains "Cell: [revisi..]"
+# Truncation lands on a character boundary rather than mid-sequence.
+expect_ok "$BIN" tui --cell-smoke 8 'revisió0000'
+assert_contains "Cell: [revisi..]"
 # A max-width agent name fills its column without shifting later columns.
 expect_ok "$BIN" agent create --name abcdefghijklmnopqrstuvwx --runner codex --no-run-script
 expect_ok "$BIN" tui --agent-row-smoke abcdefghijklmnopqrstuvwx
@@ -2505,6 +2516,19 @@ expect_ok "$BIN" task add DE Short --description "Tiny."
 expect_ok "$BIN" tui --desc-wrap-smoke DE-02 80 5 0
 assert_contains "Total: 1"
 assert_contains "Line: [Tiny.]"
+# FX-17: wrapping counts display columns, so an accented line carries as many
+# characters as a plain one and never splits a multibyte sequence at the wrap.
+expect_ok "$BIN" task add DE Accented --description "aaaaaaaaaaaaaaaaaaáz"
+expect_ok "$BIN" tui --desc-wrap-smoke DE-03 20 3 0
+assert_contains "Line: [aaaaaaaaaaaaaaaaaaáz]"
+run_total="$(printf '%s\n' "$RUN_OUTPUT" | sed -n 's/^Total: //p')"
+if [ "$run_total" -ne 1 ]; then
+    fail "expected 20 accented columns to wrap into 1 row, got $run_total"
+fi
+# One column narrower splits before the accented character, not inside it.
+expect_ok "$BIN" tui --desc-wrap-smoke DE-03 19 3 0
+assert_contains "Line: [aaaaaaaaaaaaaaaaaaá]"
+assert_contains "Line: [z]"
 
 # FX-03: init resolves repo_path to an absolute path, rejects missing paths,
 # and `dispatch repo set` repairs the stored path without recreating the board.

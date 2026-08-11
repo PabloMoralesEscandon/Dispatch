@@ -39,4 +39,10 @@ size_t dispatch_utf8_prev_char_bytes(const char *text, size_t offset);
 size_t dispatch_utf8_take_columns(const char *text, size_t columns,
                                   size_t *used_columns);
 
+/* As dispatch_utf8_take_columns, but never looks past the first `bytes` bytes.
+ * Use this to slice one segment of a larger buffer — wrapping a line that ends
+ * at a newline, say — where the terminator is not where the segment ends. */
+size_t dispatch_utf8_take_columns_n(const char *text, size_t bytes,
+                                    size_t columns, size_t *used_columns);
+
 #endif

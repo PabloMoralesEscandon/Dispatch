@@ -233,8 +233,8 @@ size_t dispatch_utf8_prev_char_bytes(const char *text, size_t offset) {
     return 1;
 }
 
-size_t dispatch_utf8_take_columns(const char *text, size_t columns,
-                                  size_t *used_columns) {
+size_t dispatch_utf8_take_columns_n(const char *text, size_t bytes,
+                                    size_t columns, size_t *used_columns) {
     size_t used = 0;
     size_t offset = 0;
 
@@ -244,9 +244,9 @@ size_t dispatch_utf8_take_columns(const char *text, size_t columns,
         return 0;
     }
 
-    while (text[offset]) {
+    while (offset < bytes && text[offset]) {
         uint32_t cp;
-        size_t length = decode_char(text + offset, 4, &cp);
+        size_t length = decode_char(text + offset, bytes - offset, &cp);
         size_t width = codepoint_width(cp);
         if (used + width > columns)
             break;
@@ -257,4 +257,13 @@ size_t dispatch_utf8_take_columns(const char *text, size_t columns,
     if (used_columns)
         *used_columns = used;
     return offset;
+}
+
+size_t dispatch_utf8_take_columns(const char *text, size_t columns,
+                                  size_t *used_columns) {
+    size_t bytes = 0;
+    if (text)
+        while (text[bytes])
+            bytes++;
+    return dispatch_utf8_take_columns_n(text, bytes, columns, used_columns);
 }

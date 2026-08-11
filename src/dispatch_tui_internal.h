@@ -217,6 +217,11 @@ enum {
     TUI_COL_ACTION = 12,
 };
 
+/* Byte capacity a cell_text buffer needs to hold `columns` display columns.
+ * A column can carry a four-byte UTF-8 character, so sizing by column count
+ * alone truncates accented values. */
+#define TUI_CELL_BYTES(columns) ((size_t)(columns) * 4 + 1)
+
 /* Column start positions derived from the widths above: the marker column
  * has no trailing space, every later column is separated by one space. */
 enum {
