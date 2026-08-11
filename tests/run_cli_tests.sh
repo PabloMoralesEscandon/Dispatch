@@ -135,6 +135,11 @@ cc $TEST_CFLAGS -Iinclude tests/workspace_naming_test.c src/dispatch.c \
     -o "$TMP_ROOT/workspace_naming_test"
 "$TMP_ROOT/workspace_naming_test" "$TMP_ROOT/workspace-naming" >/dev/null
 
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/utf8_width_test.c src/dispatch_utf8.c \
+    -o "$TMP_ROOT/utf8_width_test"
+"$TMP_ROOT/utf8_width_test" >/dev/null
+
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
 
