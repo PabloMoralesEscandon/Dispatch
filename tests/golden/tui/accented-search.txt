@@ -1,0 +1,31 @@
+Frame: board 100x30
+ DISPATCH   Board                                                        actor:user  board:Dispatch
+
+Tasks  1 ready   0 doing   0 review   0 blocked   1 proposed   0 done
+
+Repo <tmp>/accented/repo    2 tasks (1 shown)    1 groups    0 agents    0
+View   not-done   search ó_
+
+   TR  Traducción   1
+ >TR-01    ready    Revisión de traducción acentuada                                       review
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Search                         : palette   Tab/a agents   w workspaces   n task   + group   ? help

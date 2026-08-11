@@ -2660,6 +2660,84 @@ assert_contains "${ESC}[2;37mdepends_on:DE-02,DE-03${ESC}[0m"
 expect_ok env FORCE_COLOR=1 NO_COLOR=1 "$BIN" list DE
 assert_not_contains "${ESC}["
 
+# FX-19: non-ASCII titles and descriptions survive a full round trip through
+# the CLI, and an accented row keeps the same column layout as a plain one.
+case_dir="$(make_case_dir utf8-round-trip)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add "Traducción" --prefix TR
+accented_title="Revisión de traducción acentuada"
+accented_desc="Descripción con acentos: ñ, á, é, í, ó, ú, ü."
+expect_ok "$BIN" task add TR "$accented_title" --description "$accented_desc"
+assert_contains "Added task TR-01"
+# Deliberately the same 32 display columns as the accented title, but fewer
+# bytes: the two rows must render identically apart from the title text.
+plain_title="Plain ASCII row for alignment ok"
+expect_ok "$BIN" task add TR "$plain_title"
+# ${#var} counts characters under a UTF-8 locale, so measure bytes explicitly.
+accented_bytes="$(printf '%s' "$accented_title" | wc -c)"
+plain_bytes="$(printf '%s' "$plain_title" | wc -c)"
+if [ "${#accented_title}" -ne "${#plain_title}" ]; then
+    fail "fixture titles must be the same display width"
+fi
+if [ "$accented_bytes" -le "$plain_bytes" ]; then
+    fail "accented title should occupy more bytes than the equal-width plain title"
+fi
+
+# add -> list -> show all return the bytes that went in.
+expect_ok "$BIN" list
+assert_contains "$accented_title"
+expect_ok "$BIN" show TR-01
+assert_contains "Title: $accented_title"
+assert_contains "$accented_desc"
+
+# JSON output carries the same text, neither mangled nor escaped away.
+expect_ok "$BIN" show TR-01 --json
+assert_json \
+    schema_version integer 1 \
+    command string show \
+    "tasks.0.id" string TR-01 \
+    "tasks.0.title" string "$accented_title" \
+    "tasks.0.description" string "$accented_desc"
+expect_ok "$BIN" list --json
+assert_json "tasks.0.title" string "$accented_title"
+
+# The group name round-trips too, prefix and all.
+expect_ok "$BIN" group show TR
+assert_contains "Traducción"
+
+# The accented title occupies more bytes than columns, so a byte-based layout
+# would shift this row. With both titles the same display width, the rows must
+# match byte for byte on either side of the title.
+expect_ok "$BIN" tui --render-smoke board 100 30
+accented_row="$(printf '%s\n' "$RUN_OUTPUT" | grep -F "$accented_title")"
+plain_row="$(printf '%s\n' "$RUN_OUTPUT" | grep -F "$plain_title")"
+if [ -z "$accented_row" ] || [ -z "$plain_row" ]; then
+    fail "expected both task rows in the rendered frame"
+fi
+accented_prefix="${accented_row%%"$accented_title"*}"
+plain_prefix="${plain_row%%"$plain_title"*}"
+# The prefixes differ only in the task id and selection marker, which are
+# fixed-width, so their byte lengths must match.
+if [ "${#accented_prefix}" -ne "${#plain_prefix}" ]; then
+    fail "accented and plain titles start at different columns"
+fi
+if [ "${accented_row##*"$accented_title"}" != "${plain_row##*"$plain_title"}" ]; then
+    fail "accented row padded differently from the equal-width plain row"
+fi
+
+# A description whose wrap point falls inside a multibyte sequence: "á" is the
+# eighth character but spans bytes 7 and 8, so wrapping at byte 8 would split
+# it. The row must carry the whole character instead.
+expect_ok "$BIN" task add TR Wrap --description "aaaaaaaábbbbbbbb"
+expect_ok "$BIN" tui --desc-wrap-smoke TR-03 8 4 0
+assert_contains "Total: 2"
+assert_contains "Line: [aaaaaaaá]"
+assert_contains "Line: [bbbbbbbb]"
+
+cd "$ROOT"
+
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
 assert_contains "PASS: TUI golden frames"
 

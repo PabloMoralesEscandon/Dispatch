@@ -1,0 +1,31 @@
+Frame: board 100x30
+ DISPATCH   Board                                                        actor:user  board:Dispatch
+
+Tasks  1 ready   0 doing   0 review   0 blocked   1 proposed   0 done
+
+Repo <tmp>/accented/repo    2 tasks (2 shown)    1 groups    0 agents    0
+View   not-done    1-7/R filter   G group   A actor   / search   c clear
+
+   TR  Traducción   2
+ >TR-01    ready    Revisión de traducción acentuada                                       review
+  TR-02    proposed Plain ASCII row for alignment                                          review
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Ready                          : palette   Tab/a agents   w workspaces   n task   + group   ? help
