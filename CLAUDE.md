@@ -50,7 +50,7 @@ if working from another directory.
 
 ```bash
 dispatch init repo
-dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]
+dispatch agent create --name <name> --runner codex|claude|opencode [--model <name>] [--no-run-script] [--print-command]
 dispatch agent list [--all]
 dispatch agent show <name>
 dispatch agent archive <name>
@@ -308,6 +308,7 @@ material:
 ```bash
 dispatch agent create --name codex-server --runner codex --print-command
 dispatch agent create --name claude-frontend --runner claude
+dispatch agent create --name opencode-backend --runner opencode
 dispatch agent command codex-server --print-command
 ```
 
@@ -334,7 +335,7 @@ task sequence:
 
 ```bash
 dispatch workspace create SE-01 --actor codex-server
-dispatch workspace create BE-01 --actor codex-backend
+dispatch workspace create BE-01 --actor opencode-backend
 dispatch workspace create FE-01 --actor claude-frontend
 ```
 

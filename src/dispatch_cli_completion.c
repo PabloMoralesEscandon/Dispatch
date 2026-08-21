@@ -7,12 +7,13 @@ static void print_completion_candidate_kinds(void) {
     puts("groups");
     puts("agents");
     puts("workspaces");
+    puts("runners");
 }
 
 static void print_completion_usage(void) {
     fprintf(stderr,
             "Usage: dispatch completion candidates "
-            "commands|candidate-kinds|tasks|groups|agents|workspaces\n");
+            "commands|candidate-kinds|tasks|groups|agents|workspaces|runners\n");
     fprintf(stderr, "       dispatch completion bash\n");
     fprintf(stderr, "       dispatch completion fish\n");
     fprintf(stderr, "       dispatch completion zsh\n");
@@ -34,6 +35,16 @@ static int cmd_completion_candidates(int argc, char **argv) {
 
     if (strcmp(kind, "candidate-kinds") == 0) {
         print_completion_candidate_kinds();
+        return 0;
+    }
+
+    /* Runner names come from the agent runner table, not the board, so they
+     * complete outside a workflow directory too. */
+    if (strcmp(kind, "runners") == 0) {
+        size_t count = 0;
+        const char *const *runners = dispatch_agent_runners(&count);
+        for (size_t i = 0; i < count; i++)
+            puts(runners[i]);
         return 0;
     }
 
@@ -132,6 +143,10 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "}\n"
         "\n"
         "_dispatch_agent_command() {\n"
+        "  if [[ ${words[CURRENT-1]} == --runner ]]; then\n"
+        "    _dispatch_compadd_candidates runners\n"
+        "    return\n"
+        "  fi\n"
         "  if (( CURRENT == 3 )); then\n"
         "    compadd -- create list show command session resume archive restore\n"
         "  elif [[ ${words[3]} == show || ${words[3]} == command || ${words[3]} == session || ${words[3]} == resume || ${words[3]} == archive || ${words[3]} == restore ]] && "
@@ -235,6 +250,11 @@ static int cmd_completion_bash(int argc, char **argv) {
         "\n"
         "  if (( COMP_CWORD == 1 )); then\n"
         "    _dispatch_complete_candidates commands\n"
+        "    return\n"
+        "  fi\n"
+        "\n"
+        "  if [[ $cmd == agent && $prev == --runner ]]; then\n"
+        "    _dispatch_complete_candidates runners\n"
         "    return\n"
         "  fi\n"
         "\n"
@@ -459,7 +479,8 @@ static int cmd_completion_fish(int argc, char **argv) {
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
         "__fish_seen_subcommand_from create' -l name\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
-        "__fish_seen_subcommand_from create' -l runner\n"
+        "__fish_seen_subcommand_from create' -l runner -r -a "
+        "'(__dispatch_candidates runners)'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "
         "__fish_seen_subcommand_from create' -l model\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from agent; and "

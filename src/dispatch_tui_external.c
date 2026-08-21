@@ -322,43 +322,31 @@ char *agent_run_command_text(DispatchBoard *board,
             return codex_agent_resume_command_for(agent, workspace);
         if (strcmp(agent->runner, "claude") == 0)
             return claude_agent_resume_command_for(agent, workspace, 0);
+        if (strcmp(agent->runner, "opencode") == 0)
+            return opencode_agent_resume_command_for(agent, workspace);
     }
 
     if (agent->run_script_path && agent->run_script_path[0])
         return strdup(agent->run_script_path);
 
-    char *prompt_q = tui_shell_quote(agent->prompt_path ? agent->prompt_path : "");
-    char *model_q = agent->model && agent->model[0]
-                        ? tui_shell_quote(agent->model)
-                        : NULL;
-    const char *format;
-    if (strcmp(agent->runner, "codex") == 0) {
-        format = model_q ? "codex --model %s \"$(cat %s)\""
-                         : "codex \"$(cat %s)\"";
-    } else if (strcmp(agent->runner, "claude") == 0) {
-        format = "claude \"$(cat %s)\"";
-    } else {
-        format = "%s \"$(cat %s)\"";
+    /* Known runners share the start command `agent create` writes into
+     * run.sh, so a copied command matches the generated script. */
+    if (dispatch_agent_runner_is_valid(agent->runner)) {
+        return agent_command_for(agent->runner, agent->model,
+                                 agent->prompt_path ? agent->prompt_path : "");
     }
 
-    size_t size = strlen(format) + strlen(prompt_q) +
-                  (model_q ? strlen(model_q) : strlen(agent->runner)) + 1;
+    char *prompt_q = tui_shell_quote(agent->prompt_path ? agent->prompt_path : "");
+    const char *format = "%s \"$(cat %s)\"";
+    size_t size = strlen(format) + strlen(prompt_q) + strlen(agent->runner) + 1;
     char *command = malloc(size);
     if (!command) {
         fprintf(stderr, "Out of memory\n");
         exit(1);
     }
-    if (strcmp(agent->runner, "codex") == 0 && model_q)
-        snprintf(command, size, format, model_q, prompt_q);
-    else if (strcmp(agent->runner, "codex") == 0)
-        snprintf(command, size, format, prompt_q);
-    else if (strcmp(agent->runner, "claude") == 0)
-        snprintf(command, size, format, prompt_q);
-    else
-        snprintf(command, size, format, agent->runner, prompt_q);
+    snprintf(command, size, format, agent->runner, prompt_q);
 
     free(prompt_q);
-    free(model_q);
     return command;
 }
 

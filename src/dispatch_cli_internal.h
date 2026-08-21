@@ -34,7 +34,6 @@ typedef struct {
 
 extern const DispatchCliCommand commands[];
 
-char *agent_command_for(const char *runner, const char *model, const char *prompt_path);
 char *agent_prompt_path_for(const char *agent_dir, const char *name);
 void append_dispatch_log(const char *actor, const char *command, const char *action, const DispatchLogField *targets, size_t target_count, const DispatchLogField *context, size_t context_count, const char *message);
 const char *bool_string(int value);

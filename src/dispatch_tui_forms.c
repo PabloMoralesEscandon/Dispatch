@@ -26,7 +26,7 @@ static void render_task_edit_form(DispatchTui *tui,
 static void handle_task_edit_form_key(TuiTaskEditForm *form, int ch,
                                       int *submit, int *cancel);
 static void agent_form_ensure_runner(TuiAgentForm *form);
-static void agent_form_toggle_runner(TuiAgentForm *form);
+static void agent_form_cycle_runner(TuiAgentForm *form);
 static void agent_form_buffer(TuiAgentForm *form, int field, char **buffer,
                               size_t *buffer_size);
 static void agent_form_move_cursor(const TuiAgentForm *form, int rows, int cols,
@@ -832,10 +832,10 @@ static void agent_form_ensure_runner(TuiAgentForm *form) {
         snprintf(form->runner, sizeof(form->runner), "codex");
 }
 
-static void agent_form_toggle_runner(TuiAgentForm *form) {
+static void agent_form_cycle_runner(TuiAgentForm *form) {
     agent_form_ensure_runner(form);
     snprintf(form->runner, sizeof(form->runner), "%s",
-             strcmp(form->runner, "codex") == 0 ? "claude" : "codex");
+             dispatch_agent_runner_next(form->runner));
 }
 
 static void agent_form_buffer(TuiAgentForm *form, int field, char **buffer,
@@ -960,8 +960,10 @@ int handle_agent_form_key(TuiAgentForm *form, int ch, int *submit,
             snprintf(form->runner, sizeof(form->runner), "codex");
         } else if (ch == 'l' || ch == 'L') {
             snprintf(form->runner, sizeof(form->runner), "claude");
+        } else if (ch == 'o' || ch == 'O') {
+            snprintf(form->runner, sizeof(form->runner), "opencode");
         } else if (ch == ' ') {
-            agent_form_toggle_runner(form);
+            agent_form_cycle_runner(form);
         }
         return 1;
     }

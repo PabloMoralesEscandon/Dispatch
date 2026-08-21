@@ -200,7 +200,7 @@ expect_fail "$BIN" agent create --name bad/name --runner codex
 assert_contains "Agent name must be 1-24 characters of letters, digits, '-' or '_'"
 
 expect_fail "$BIN" agent create --name codex-a --runner unknown
-assert_contains "Agent runner must be codex or claude"
+assert_contains "Agent runner must be one of codex|claude|opencode"
 
 expect_ok "$BIN" agent create --name codex-a --runner codex --model gpt-test --print-command
 assert_contains "Created agent codex-a (codex)"
@@ -301,6 +301,63 @@ assert_contains "Updated 1 agent prompt"
 assert_file_contains .dispatch/agents/claude-run/run.sh "exec claude \"\$(cat '.dispatch/agents/claude-run/claude-run-PROMPT.md')\""
 assert_file_not_contains .dispatch/agents/claude-run/run.sh "--prompt-file"
 
+# OC-01: opencode is a first-class runner. Its prompt travels in --prompt
+# because opencode reads the first positional argument as the project
+# directory.
+expect_ok "$BIN" agent create --name oc-a --runner opencode --model anthropic/oc-test --print-command
+assert_contains "Created agent oc-a (opencode)"
+assert_contains "prompt: .dispatch/agents/oc-a/oc-a-PROMPT.md"
+assert_contains "run script: .dispatch/agents/oc-a/run.sh"
+assert_contains "command: opencode --model anthropic/oc-test --prompt \"\$(cat '.dispatch/agents/oc-a/oc-a-PROMPT.md')\""
+expect_ok "$BIN" agent command oc-a
+assert_contains "opencode --model anthropic/oc-test --prompt \"\$(cat '.dispatch/agents/oc-a/oc-a-PROMPT.md')\""
+assert_file_contains .dispatch/agents/oc-a/run.sh "exec opencode --model anthropic/oc-test --prompt \"\$(cat '.dispatch/agents/oc-a/oc-a-PROMPT.md')\""
+if [ ! -x .dispatch/agents/oc-a/run.sh ]; then
+    fail "opencode agent run script was not created executable"
+fi
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@"\n' > fake-bin/opencode
+chmod +x fake-bin/opencode
+PATH="$case_dir/fake-bin:$PATH" expect_ok .dispatch/agents/oc-a/run.sh
+assert_contains "# Dispatch Agent: oc-a"
+assert_file_contains .dispatch/agents/oc-a/oc-a-PROMPT.md "- Runner: \`opencode\`"
+
+expect_ok "$BIN" agent show oc-a
+assert_contains "Runner: opencode"
+assert_contains "Session ID: -"
+
+# Without a recorded session, opencode continues its own last session.
+expect_ok "$BIN" agent resume oc-a
+assert_contains "opencode --model 'anthropic/oc-test' --continue"
+expect_ok "$BIN" tui --agent-run-command-smoke oc-a
+assert_contains ".dispatch/agents/oc-a/run.sh"
+
+expect_ok "$BIN" agent session oc-a --session-id " ses_oc_1  "
+assert_contains "Updated agent session oc-a"
+expect_ok "$BIN" agent resume oc-a
+assert_contains "opencode --model 'anthropic/oc-test' --session 'ses_oc_1'"
+expect_ok "$BIN" tui --agent-run-command-smoke oc-a
+assert_contains "opencode --model 'anthropic/oc-test' --session 'ses_oc_1'"
+expect_ok "$BIN" tui --agent-inspect-smoke oc-a
+assert_contains "Session source: manual metadata"
+expect_ok "$BIN" agent session oc-a --clear-session
+
+# An opencode run script is repaired the same way the other runners' are.
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'cd "$(dirname "$0")/../../.."' 'exec opencode --prompt-file ".dispatch/agents/oc-a/oc-a-PROMPT.md"' > .dispatch/agents/oc-a/run.sh
+chmod +x .dispatch/agents/oc-a/run.sh
+expect_ok "$BIN" normalize
+assert_contains "Updated 1 agent prompt"
+assert_file_contains .dispatch/agents/oc-a/run.sh "exec opencode --model anthropic/oc-test --prompt \"\$(cat '.dispatch/agents/oc-a/oc-a-PROMPT.md')\""
+assert_file_not_contains .dispatch/agents/oc-a/run.sh "--prompt-file"
+
+expect_ok "$BIN" agent archive oc-a
+assert_contains "Archived agent oc-a"
+expect_ok "$BIN" agent list
+assert_not_contains "oc-a"
+expect_ok "$BIN" agent list --all
+assert_contains "oc-a"
+expect_ok "$BIN" agent restore oc-a
+assert_contains "Restored agent oc-a"
+
 expect_ok "$BIN" tui --agent-form-submit-smoke tui-codex codex gpt-form
 assert_contains "Created agent tui-codex (codex)"
 expect_ok "$BIN" agent show tui-codex
@@ -335,10 +392,30 @@ if [ ! -x .dispatch/agents/tui-claude/run.sh ]; then
     fail "TUI-created agent run script was not created executable"
 fi
 # TX-02: the model field is now the last field; Enter there submits.
+expect_ok "$BIN" tui --agent-form-submit-smoke tui-oc opencode -
+assert_contains "Created agent tui-oc (opencode)"
+expect_ok "$BIN" agent show tui-oc
+assert_contains "Runner: opencode"
+assert_file_contains .dispatch/agents/tui-oc/run.sh "exec opencode --prompt \"\$(cat '.dispatch/agents/tui-oc/tui-oc-PROMPT.md')\""
+
 expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\t\t\n'
 assert_contains "Name: bot"
 assert_contains "Field: 2"
 assert_contains "Submit: yes"
+
+# OC-01: Space cycles through every runner, and c/l/o pick one directly.
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\t\s'
+assert_contains "Runner: claude"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\t\s\s'
+assert_contains "Runner: opencode"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\t\s\s\s'
+assert_contains "Runner: codex"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\to'
+assert_contains "Runner: opencode"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\tol'
+assert_contains "Runner: claude"
+expect_ok "$BIN" tui --agent-form-keys-smoke 'bot\tolc'
+assert_contains "Runner: codex"
 
 # FX-16: form fields accept multibyte characters, and backspace removes a
 # whole character rather than leaving half a UTF-8 sequence behind.
@@ -1494,7 +1571,7 @@ assert_contains "Agent: codex-a"
 assert_contains "Session ID: tui-session"
 assert_contains "Current task: DE-01"
 assert_contains "Last workspace: DE-01"
-assert_contains "Codex session: manual metadata"
+assert_contains "Session source: manual metadata"
 
 expect_ok "$BIN" tui --agent-session-smoke codex-a tui-session-2 DE-01 DE-01
 assert_contains "Updated agent session codex-a"
@@ -1633,6 +1710,7 @@ assert_line "tasks"
 assert_line "groups"
 assert_line "agents"
 assert_line "workspaces"
+assert_line "runners"
 
 expect_ok "$BIN" completion candidates tasks
 assert_line "DE-01"
@@ -1648,6 +1726,11 @@ assert_line "codex-a"
 expect_ok "$BIN" completion candidates workspaces
 assert_line "DE-01"
 
+expect_ok "$BIN" completion candidates runners
+assert_line "codex"
+assert_line "claude"
+assert_line "opencode"
+
 expect_fail "$BIN" completion candidates unknown
 assert_contains "Usage: dispatch completion candidates"
 
@@ -1657,6 +1740,7 @@ assert_contains "subcommands=(candidates bash fish zsh install)"
 assert_contains 'dispatch completion candidates "$1"'
 assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
+assert_contains "_dispatch_compadd_candidates runners"
 
 expect_fail "$BIN" completion zsh extra
 assert_contains "Usage: dispatch completion candidates"
@@ -1669,6 +1753,7 @@ assert_contains "all \$(_dispatch_candidate_values groups)"
 assert_contains "_dispatch_complete_candidates tasks"
 assert_contains "--actor --no-review"
 assert_contains "--description --actor --no-review"
+assert_contains "_dispatch_complete_candidates runners"
 
 expect_fail "$BIN" completion bash extra
 assert_contains "Usage: dispatch completion candidates"
@@ -1681,6 +1766,7 @@ assert_contains "command \$cmd completion candidates \$argv[1]"
 assert_contains "candidates bash fish zsh install"
 assert_contains "all (__dispatch_candidates groups)"
 assert_contains "(__dispatch_candidates tasks)"
+assert_contains "-l runner -r -a '(__dispatch_candidates runners)'"
 assert_contains "(__dispatch_candidates workspaces)"
 
 if command -v fish >/dev/null 2>&1; then

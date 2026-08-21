@@ -132,6 +132,7 @@ dispatch completion candidates tasks
 dispatch completion candidates groups
 dispatch completion candidates agents
 dispatch completion candidates workspaces
+dispatch completion candidates runners
 ```
 
 Run completions from the workflow directory that contains the board, or make
@@ -223,7 +224,7 @@ completion installation, generated agent prompt/run files, and workspace paths.
 ### Completion
 
 ```bash
-dispatch completion candidates commands|candidate-kinds|tasks|groups|agents|workspaces
+dispatch completion candidates commands|candidate-kinds|tasks|groups|agents|workspaces|runners
 dispatch completion bash
 dispatch completion zsh
 dispatch completion fish
@@ -232,7 +233,9 @@ dispatch completion install fish|bash|zsh
 
 `completion candidates` prints line-separated values for shell completion.
 Generated shell scripts use those candidate commands for board-specific task,
-group, agent, and workspace values.
+group, agent, and workspace values, and for the fixed runner names offered
+after `agent create --runner`. The `runners` kind reads the built-in runner
+table instead of the board, so it also answers outside a workflow directory.
 `completion install <shell>` writes the generated completion script to the
 shell-specific user directory, checks whether `dispatch` is on `PATH`, and
 prints the reload command.
@@ -240,7 +243,7 @@ prints the reload command.
 ### Agents
 
 ```bash
-dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]
+dispatch agent create --name <name> --runner codex|claude|opencode [--model <name>] [--no-run-script] [--print-command]
 dispatch agent list [--all]
 dispatch agent show <name>
 dispatch agent archive <name>
@@ -255,10 +258,14 @@ dispatch agent resume <name> [--print-command]
 `.dispatch/agents/<name>/<name>-PROMPT.md`; it contains only agent-specific
 identity, actor usage, runner metadata, and local scratch/decision paths. It
 does not copy `AGENTS.md`, because agents are launched from the workflow
-directory and receive those repository instructions normally. The optional
-`run.sh` starts the selected runner from the workflow directory. Agent
-directories are for prompt material, scratch notes, and local decisions; task
-state remains in Dispatch and product changes belong in task worktrees.
+directory and receive those repository instructions normally: `init` writes
+both `AGENTS.md` and `CLAUDE.md` there, and Codex and opencode read the former
+while Claude Code reads the latter. The optional `run.sh` starts the selected
+runner from the workflow directory: `codex` and `claude` take the prompt as a
+positional argument, and `opencode` takes it in `--prompt`, because its first
+positional argument is the project directory. Agent directories are for prompt
+material, scratch notes, and local decisions; task state remains in Dispatch
+and product changes belong in task worktrees.
 
 `agent archive <name>` hides an inactive agent from the default `agent list`
 without deleting its record or history. Use `agent list --all` to include
@@ -272,12 +279,12 @@ recent workspace used by that agent. Session IDs are trimmed before saving.
 These fields are shown by `agent show` and are used by runner-specific resume
 commands.
 
-Codex session IDs are manual metadata. The Codex CLI creates its own session ID
-when an interactive session starts, so Dispatch cannot assign one ahead of time.
-After the user knows the Codex session ID, record it with:
+Codex and opencode session IDs are manual metadata. Both CLIs create their own
+session ID when an interactive session starts, so Dispatch cannot assign one
+ahead of time. After the user knows the session ID, record it with:
 
 ```bash
-dispatch agent session frontend --session-id <codex-session-id>
+dispatch agent session frontend --session-id <runner-session-id>
 dispatch agent show frontend
 dispatch agent session frontend --clear-session
 ```
@@ -285,16 +292,18 @@ dispatch agent session frontend --clear-session
 The same command can record the active task and workspace:
 
 ```bash
-dispatch agent session frontend --session-id <codex-session-id> --current-task FE-01 --last-workspace FE-01
+dispatch agent session frontend --session-id <runner-session-id> --current-task FE-01 --last-workspace FE-01
 ```
 
 `agent resume` prints a runner-specific shell command for continuing an agent.
 Codex agents use the stored session ID when present. Without one, Dispatch emits
 a `codex resume --last` command scoped to the agent's remembered workspace when
-`last_workspace` is set. Claude agents use `claude --resume` when a session ID
-is stored. If no Claude session ID exists yet, Dispatch generates a UUID, stores
-it on the agent, prints a `claude --session-id` startup command, and writes the
-same command to `.dispatch/agents/<name>/resume.sh`.
+`last_workspace` is set. opencode agents use `opencode --session <id>` when a
+session ID is stored and `opencode --continue` otherwise, with the remembered
+workspace passed as the project directory. Claude agents use `claude --resume`
+when a session ID is stored. If no Claude session ID exists yet, Dispatch
+generates a UUID, stores it on the agent, prints a `claude --session-id` startup
+command, and writes the same command to `.dispatch/agents/<name>/resume.sh`.
 
 ### Workspaces
 
@@ -371,6 +380,8 @@ field: on the Group field it lists existing groups (typing still creates a new
 group), and on the Depends field it lists not-done tasks, excluding done tasks
 and dependencies already selected. Inside the picker, `Up`/`Down` (or `j`/`k`)
 move, `Enter` selects, and `Esc` cancels; reopen it to add more dependencies.
+In the agent creation form, the Runner field takes `Space` to cycle through
+`codex`, `claude`, and `opencode`, or `c`, `l`, and `o` to pick one directly.
 Bottom-line prompt forms, including group creation, can be cancelled with `Esc`.
 Dispatch shortens ncurses' default Escape-key delay so cancellation should feel
 immediate while arrow keys remain usable.
@@ -707,11 +718,11 @@ area:
 
 ```bash
 dispatch agent create --name codex-server --runner codex
-dispatch agent create --name codex-backend --runner codex
+dispatch agent create --name opencode-backend --runner opencode
 dispatch agent create --name claude-frontend --runner claude
 
 dispatch workspace create SE-01 --actor codex-server
-dispatch workspace create BE-01 --actor codex-backend
+dispatch workspace create BE-01 --actor opencode-backend
 dispatch workspace create FE-01 --actor claude-frontend
 ```
 

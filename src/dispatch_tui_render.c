@@ -179,7 +179,7 @@ const char *tui_footer_hints(DispatchTuiScreen screen) {
     case TUI_SCREEN_AGENTS:
         return "Enter/i inspect   n create   y run   A all/enabled   z archive";
     case TUI_SCREEN_AGENT_FORM:
-        return "Enter next/save   Tab move   Space toggle   Esc cancel";
+        return "Enter next/save   Tab move   Space cycle runner   Esc cancel";
     case TUI_SCREEN_TASK_FORM:
         return "Enter next/save   Tab move   ^O options   Space review   Esc cancel";
     case TUI_SCREEN_GROUP_FORM:
@@ -446,7 +446,8 @@ static const HelpItem help_agent_form_items[] = {
     {NULL, "New agent"},
     {"Enter", "next / save"},
     {"Tab", "move field"},
-    {"Space", "toggle runner"},
+    {"Space", "cycle runner"},
+    {"c/l/o", "codex / claude / opencode"},
     {"Esc", "cancel"},
 };
 
@@ -1202,8 +1203,9 @@ static void draw_agent_inspector(DispatchTui *tui, int rows, int cols) {
     y = draw_field(y, rows, cols, "Session ID", agent->session_id);
     y = draw_field(y, rows, cols, "Current task", agent->current_task);
     y = draw_field(y, rows, cols, "Last workspace", agent->last_workspace);
-    if (strcmp(agent->runner, "codex") == 0)
-        y = draw_field(y, rows, cols, "Codex", "manual; use dispatch agent session");
+    if (dispatch_agent_runner_session_is_manual(agent->runner))
+        y = draw_field(y, rows, cols, "Session source",
+                       "manual; use dispatch agent session");
     y++;
 
     y = draw_section(y, rows, cols, "Recent completed tasks");

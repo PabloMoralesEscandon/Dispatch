@@ -412,8 +412,8 @@ static int tui_agent_inspect_smoke(const char *name) {
     printf("Current task: %s\n", agent->current_task ? agent->current_task : "-");
     printf("Last workspace: %s\n",
            agent->last_workspace ? agent->last_workspace : "-");
-    if (strcmp(agent->runner, "codex") == 0)
-        printf("Codex session: manual metadata\n");
+    if (dispatch_agent_runner_session_is_manual(agent->runner))
+        printf("Session source: manual metadata\n");
 
     dispatch_board_free(&board);
     return 0;
@@ -1580,7 +1580,8 @@ static void print_tui_help(void) {
     puts("  --task-form-options-smoke groups|deps [deps|-]");
     puts("  --task-form-deps-add-smoke <deps|-> <task-id>");
     puts("  --agent-form-keys-smoke <keys>  exercise agent form key handling");
-    puts("  --agent-form-submit-smoke <name> codex|claude <model|->");
+    puts("  --agent-form-submit-smoke <name> " DISPATCH_AGENT_RUNNER_CHOICES
+         " <model|->");
     puts("  --prompt-cancel-smoke");
     puts("  --escdelay-smoke");
     puts("  --dependency-smoke add|remove <dependency-id> <dependent-id>");

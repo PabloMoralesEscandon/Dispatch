@@ -231,17 +231,32 @@ extern const char dispatch_template_claude_md[];
 /* Maximum group name length shown in board group headers. */
 #define DISPATCH_GROUP_NAME_MAX 48
 
+/* Runner choices as they appear in usage text. Keep in sync with the runner
+ * table in dispatch_cli_agent.c. */
+#define DISPATCH_AGENT_RUNNER_CHOICES "codex|claude|opencode"
+
 int dispatch_agent_name_is_valid(const char *name);
 int dispatch_agent_runner_is_valid(const char *runner);
+/* Supported runner names, in the order the TUI agent form cycles them. */
+const char *const *dispatch_agent_runners(size_t *count);
+/* The next runner in cycle order; the first runner for an unknown name. */
+const char *dispatch_agent_runner_next(const char *runner);
+/* Non-zero when the runner mints its own session ID, so Dispatch can only
+ * record one after the fact. Zero when Dispatch assigns the ID up front. */
+int dispatch_agent_runner_session_is_manual(const char *runner);
 int dispatch_agent_create(const DispatchAgentCreateOptions *options,
                           DispatchAgentCreateResult *result, char *error,
                           size_t error_size);
 void dispatch_agent_create_result_free(DispatchAgentCreateResult *result);
+char *agent_command_for(const char *runner, const char *model,
+                        const char *prompt_path);
 char *codex_agent_resume_command_for(const DispatchAgent *agent,
                                      const DispatchWorkspace *workspace);
 char *claude_agent_resume_command_for(const DispatchAgent *agent,
                                       const DispatchWorkspace *workspace,
                                       int start_with_session_id);
+char *opencode_agent_resume_command_for(const DispatchAgent *agent,
+                                        const DispatchWorkspace *workspace);
 
 char *dispatch_next_task_id(const DispatchBoard *board, const char *group_id);
 

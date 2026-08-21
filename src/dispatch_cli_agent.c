@@ -13,9 +13,42 @@ int dispatch_agent_name_is_valid(const char *name) {
     return 1;
 }
 
+/* The supported runners, in the order the TUI agent form cycles them.
+ * DISPATCH_AGENT_RUNNER_CHOICES spells the same list for usage text. */
+static const char *const agent_runners[] = {"codex", "claude", "opencode"};
+
+const char *const *dispatch_agent_runners(size_t *count) {
+    if (count)
+        *count = sizeof(agent_runners) / sizeof(agent_runners[0]);
+    return agent_runners;
+}
+
 int dispatch_agent_runner_is_valid(const char *runner) {
-    return runner &&
-           (strcmp(runner, "codex") == 0 || strcmp(runner, "claude") == 0);
+    if (!runner)
+        return 0;
+    size_t count = 0;
+    const char *const *runners = dispatch_agent_runners(&count);
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(runner, runners[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+const char *dispatch_agent_runner_next(const char *runner) {
+    size_t count = 0;
+    const char *const *runners = dispatch_agent_runners(&count);
+    for (size_t i = 0; runner && i < count; i++) {
+        if (strcmp(runner, runners[i]) == 0)
+            return runners[(i + 1) % count];
+    }
+    return runners[0];
+}
+
+int dispatch_agent_runner_session_is_manual(const char *runner) {
+    /* Claude accepts a session ID chosen up front; Codex and opencode mint
+     * their own, so those IDs arrive through `dispatch agent session`. */
+    return !runner || strcmp(runner, "claude") != 0;
 }
 
 char *agent_command_for(const char *runner, const char *model,
@@ -24,19 +57,25 @@ char *agent_command_for(const char *runner, const char *model,
     const char *model_value = model && model[0] ? model : "";
     const char *format = NULL;
     if (strcmp(runner, "codex") == 0) {
-        format = "codex%s%s \"$(cat '%s')\"";
+        format = "codex%s%s \"$(cat %s)\"";
+    } else if (strcmp(runner, "opencode") == 0) {
+        /* opencode reads the first positional argument as the project
+         * directory, so the prompt travels in --prompt instead. */
+        format = "opencode%s%s --prompt \"$(cat %s)\"";
     } else {
-        format = "claude%s%s \"$(cat '%s')\"";
+        format = "claude%s%s \"$(cat %s)\"";
     }
 
+    char *prompt_q = shell_quote(prompt_path ? prompt_path : "");
     size_t size = strlen(format) + strlen(model_flag) + strlen(model_value) +
-                  strlen(prompt_path) + 1;
+                  strlen(prompt_q) + 1;
     char *command = malloc(size);
     if (!command) {
         fprintf(stderr, "Out of memory\n");
         exit(1);
     }
-    snprintf(command, size, format, model_flag, model_value, prompt_path);
+    snprintf(command, size, format, model_flag, model_value, prompt_q);
+    free(prompt_q);
     return command;
 }
 
@@ -73,6 +112,49 @@ char *codex_agent_resume_command_for(const DispatchAgent *agent,
         snprintf(command + out, size - out, " %s", session_q);
     else
         snprintf(command + out, size - out, " --last");
+
+    free(model_q);
+    free(workspace_q);
+    free(session_q);
+    return command;
+}
+
+char *opencode_agent_resume_command_for(const DispatchAgent *agent,
+                                        const DispatchWorkspace *workspace) {
+    char *model_q = agent->model && agent->model[0] ? shell_quote(agent->model) : NULL;
+    char *workspace_q = workspace && workspace->path && workspace->path[0]
+                            ? shell_quote(workspace->path)
+                            : NULL;
+    char *session_q = agent->session_id && agent->session_id[0]
+                          ? shell_quote(agent->session_id)
+                          : NULL;
+
+    size_t size = strlen("opencode") + 1;
+    if (workspace_q)
+        size += strlen(" ") + strlen(workspace_q);
+    if (model_q)
+        size += strlen(" --model ") + strlen(model_q);
+    size += session_q ? strlen(" --session ") + strlen(session_q)
+                      : strlen(" --continue");
+
+    char *command = malloc(size);
+    if (!command) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+
+    size_t out = 0;
+    out += snprintf(command + out, size - out, "opencode");
+    /* The project directory is opencode's positional argument, so the
+     * remembered workspace goes first and the flags follow it. */
+    if (workspace_q)
+        out += snprintf(command + out, size - out, " %s", workspace_q);
+    if (model_q)
+        out += snprintf(command + out, size - out, " --model %s", model_q);
+    if (session_q)
+        snprintf(command + out, size - out, " --session %s", session_q);
+    else
+        snprintf(command + out, size - out, " --continue");
 
     free(model_q);
     free(workspace_q);
@@ -293,7 +375,8 @@ int dispatch_agent_create(const DispatchAgentCreateOptions *options,
     }
     if (!dispatch_agent_runner_is_valid(runner)) {
         if (error && error_size > 0)
-            snprintf(error, error_size, "Agent runner must be codex or claude");
+            snprintf(error, error_size,
+                     "Agent runner must be one of " DISPATCH_AGENT_RUNNER_CHOICES);
         return 0;
     }
 
@@ -396,7 +479,7 @@ static int cmd_agent_create(int argc, char **argv) {
             print_command = 1;
         } else {
             fprintf(stderr,
-                    "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
+                    "Usage: dispatch agent create --name <name> --runner " DISPATCH_AGENT_RUNNER_CHOICES " [--model <name>] [--no-run-script] [--print-command]\n");
             return 1;
         }
     }
@@ -793,6 +876,8 @@ static int cmd_agent_resume(int argc, char **argv) {
     int generated_session = 0;
     if (strcmp(agent->runner, "codex") == 0) {
         command = codex_agent_resume_command_for(agent, workspace);
+    } else if (strcmp(agent->runner, "opencode") == 0) {
+        command = opencode_agent_resume_command_for(agent, workspace);
     } else if (strcmp(agent->runner, "claude") == 0) {
         if (!agent->session_id || !agent->session_id[0]) {
             char *uuid = generate_uuid_v4();
@@ -872,7 +957,7 @@ int cmd_agent(int argc, char **argv) {
         return cmd_agent_archive_restore(argc, argv);
 
     fprintf(stderr,
-            "Usage: dispatch agent create --name <name> --runner codex|claude [--model <name>] [--no-run-script] [--print-command]\n");
+            "Usage: dispatch agent create --name <name> --runner " DISPATCH_AGENT_RUNNER_CHOICES " [--model <name>] [--no-run-script] [--print-command]\n");
     fprintf(stderr, "       dispatch agent list [--all]\n");
     fprintf(stderr, "       dispatch agent show <name>\n");
     fprintf(stderr, "       dispatch agent archive <name>\n");

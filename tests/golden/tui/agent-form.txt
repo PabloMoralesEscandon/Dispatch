@@ -28,4 +28,4 @@ Frame: agent-form 100x30
 
 
 
- Fill agent fields                           Enter next/save   Tab move   Space toggle   Esc cancel
+ Fill agent fields                     Enter next/save   Tab move   Space cycle runner   Esc cancel
