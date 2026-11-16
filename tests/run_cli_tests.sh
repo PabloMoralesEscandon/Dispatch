@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/dispatch"
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-cli-tests.XXXXXX")"
+# Resolved, because Dispatch, getcwd and git report realpaths: on macOS the
+# default TMPDIR is under /var, a symlink to /private/var, and assertions that
+# compare a typed path with a reported one would fail there (ADR 0005).
+TMP_ROOT="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-cli-tests.XXXXXX")" && pwd -P)"
 RUN_OUTPUT=""
 RUN_STATUS=0
 ESC=$'\033'
