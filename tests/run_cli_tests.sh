@@ -143,6 +143,11 @@ cc $TEST_CFLAGS -Iinclude tests/utf8_width_test.c src/dispatch_utf8.c \
     -o "$TMP_ROOT/utf8_width_test"
 "$TMP_ROOT/utf8_width_test" >/dev/null
 
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/issue_ref_test.c src/dispatch_issue.c \
+    -o "$TMP_ROOT/issue_ref_test"
+"$TMP_ROOT/issue_ref_test" >/dev/null
+
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
 
