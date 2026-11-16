@@ -8,3 +8,4 @@ the old one.
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](0001-github-issue-links.md) | Link a GitHub issue to a task | Accepted |
+| [0002](0002-json-mutation-results.md) | JSON results for mutating commands | Accepted |

@@ -620,8 +620,9 @@ dispatch ready --json
 dispatch status --json
 ```
 
-`ready --json` is the read-only queue form. `--json` is not accepted with
-`ready <id>`, which changes workflow state.
+`ready --json` without a task ID is the read-only queue form; with task IDs,
+`ready <id>... --json` is a mutating command (see
+[JSON Results For Mutating Commands](#json-results-for-mutating-commands)).
 
 A successful JSON command writes one versioned JSON object and a trailing
 newline to stdout. It does not include headings, color escapes, empty-queue
@@ -687,6 +688,62 @@ Consumers should ignore unknown fields. Adding optional fields is compatible;
 removing a field or changing its type or meaning requires a new
 `schema_version`. The complete field definitions and command selection rules
 are in [the JSON output contract](docs/json-output-contract.md).
+
+### JSON Results For Mutating Commands
+
+These commands also accept `--json`, anywhere after the subcommand (or after
+the command name for commands without one):
+
+```text
+task add|edit|move|delete   group add|ready   dep add|remove
+ready <id>...   start   finish   review   unassign   commit add
+workspace create|remove|prune
+```
+
+On success they print the same envelope as the read commands (workspace
+commands use the `workspace list` envelope) plus a `result` object, so a tool
+learns the outcome without a second query:
+
+```bash
+dispatch finish DE-01 --actor codex --json
+```
+
+```json
+"result": {
+  "action": "finish",
+  "changed": true,
+  "task": "DE-01",
+  "previous_state": "doing",
+  "new_state": "done",
+  "targets": [{"task": "DE-01", "previous_state": "doing", "new_state": "done"}],
+  "newly_ready": ["DE-02"],
+  "review_required": false
+}
+```
+
+`task add --json` returns the generated ID in `result.task` and `tasks`.
+`changed` is `false` for successful no-ops, such as recording a commit that is
+already recorded. `newly_ready` lists every task that became ready.
+
+With `--json`, a failing mutation keeps its non-zero exit status, prints
+nothing on stdout, and prints a JSON error document on stderr:
+
+```json
+{
+  "schema_version": 1,
+  "command": "start",
+  "error": {
+    "code": "invalid_state",
+    "message": "Cannot start DE-02: task is blocked, not ready",
+    "task_id": "DE-02"
+  }
+}
+```
+
+Match on `error.code`; the message is human text and may change. The actions,
+extra fields, and the full list of error codes are in
+[the JSON output contract](docs/json-output-contract.md#mutation-results).
+Read commands keep reporting errors as text.
 
 ## Agent Workflow
 
