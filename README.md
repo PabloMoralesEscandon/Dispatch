@@ -465,8 +465,8 @@ yet.
 ### Tasks
 
 ```bash
-dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review]
-dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]
+dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review] [--issue <ref>]
+dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]
 dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
 dispatch show <id> [--json]
@@ -484,6 +484,35 @@ safely complete and unblock the next task without human acceptance.
 ID, group, workflow state, dependencies, commit references, or prior history.
 The edit is appended to task history using the supplied `--actor`, which
 defaults to `user`. Pass an empty description to clear it.
+
+#### Linked GitHub issues
+
+A task can link one GitHub issue, so planned work stays traceable to where it
+is tracked. Link it when adding the task with `task add --issue <ref>`, change
+it with `task edit <id> --issue <ref>`, and remove it with
+`task edit <id> --clear-issue`. Dispatch stores the link canonically as
+`owner/repo#number` and accepts these forms:
+
+```text
+123                                        bare number
+#123                                       bare number
+acme/widgets#123                           canonical form
+https://github.com/acme/widgets/issues/123 issue URL
+```
+
+A bare number resolves against the GitHub `origin` remote of the board's
+repository, read locally with `git remote get-url origin`. Linking never makes
+a network call or runs `gh`, so Dispatch does not check that the issue exists.
+Malformed refs, pull request URLs, non-GitHub URLs, and bare numbers on a repo
+without a GitHub `origin` are rejected without changing the board.
+
+Linking a different issue replaces the current one. Each change appends an
+`issue_link` or `issue_unlink` entry to task history and `dispatch.log`, with
+the ref in the history note and in the log record's `context.issue`. Several
+tasks may link the same issue; `status` warns about it so accidental
+duplicates are easy to spot. `show` prints the linked issue and its URL, `list`
+adds `issue:#123` to the task line, and JSON task objects carry an `issue`
+object (see [JSON Output](#json-output)).
 
 `task move` changes the task's group while preserving its ID, workflow state,
 dependencies, commit references, workspace associations, agent session links,

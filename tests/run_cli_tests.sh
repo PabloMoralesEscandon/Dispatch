@@ -968,7 +968,7 @@ expect_ok "$BIN" ready DE-01 --actor user --no-review
 expect_ok "$BIN" ready DE-02 --actor user
 
 expect_fail "$BIN" task edit DE-02
-assert_contains "Task edit requires --title, --description, or both"
+assert_contains "Task edit requires --title, --description, --issue, or --clear-issue"
 expect_fail "$BIN" task edit missing --title Updated
 assert_contains "No task with id missing"
 expect_fail "$BIN" task edit DE-02 --title ""
@@ -2871,6 +2871,88 @@ expect_ok "$BIN" tui --desc-wrap-smoke TR-03 8 4 0
 assert_contains "Total: 2"
 assert_contains "Line: [aaaaaaaá]"
 assert_contains "Line: [bbbbbbbb]"
+
+# GH-1: a task links at most one GitHub issue, stored as owner/repo#number.
+# Refs are validated locally; a bare number resolves against the board repo's
+# origin remote with a local git call, never the network.
+case_dir="$(make_case_dir issue-links)"
+cd "$case_dir"
+git init -q repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+
+expect_fail "$BIN" task add DE "Needs origin" --issue 12
+assert_contains "Cannot resolve issue #12: the board repo has no origin remote; use owner/repo#12"
+git -C repo remote add origin https://gitlab.com/acme/widgets.git
+expect_fail "$BIN" task add DE "Needs GitHub" --issue '#12'
+assert_contains "Cannot resolve issue #12: origin remote https://gitlab.com/acme/widgets.git is not a GitHub repository; use owner/repo#12"
+git -C repo remote set-url origin git@github.com:acme/widgets.git
+
+for bad_ref in 'acme#1' 'acme/widgets' 'acme/widgets#0' '#12abc' \
+    'https://github.com/acme/widgets/pull/3' \
+    'https://gitlab.com/acme/widgets/issues/3'; do
+    expect_fail "$BIN" task add DE "Bad ref" --issue "$bad_ref"
+    assert_contains "Invalid issue reference '$bad_ref'"
+done
+expect_fail "$BIN" task add DE "Missing value" --issue
+assert_contains "Unknown task option: --issue"
+# Rejected refs add no task and write no log record.
+expect_ok "$BIN" list
+assert_contains "(no tasks)"
+assert_file_not_contains dispatch.log '"issue_link"'
+
+# Linking never shells out to gh.
+mkdir -p fake-bin
+printf '#!/usr/bin/env bash\ntouch "%s/gh-was-called"\nexit 1\n' "$case_dir" > fake-bin/gh
+chmod +x fake-bin/gh
+PATH="$case_dir/fake-bin:$PATH" expect_ok "$BIN" task add DE "Bare number" --issue 12
+assert_line "Added task DE-01"
+assert_line "Linked DE-01 to acme/widgets#12"
+if [ -e gh-was-called ]; then
+    fail "linking an issue called gh"
+fi
+expect_ok "$BIN" task add DE "Hash number" --issue '#13' --actor codex
+assert_line "Linked DE-02 to acme/widgets#13"
+expect_ok "$BIN" task add DE "Issue URL" --issue https://github.com/Other-Org/thing.js/issues/7/
+assert_line "Linked DE-03 to Other-Org/thing.js#7"
+expect_ok "$BIN" task add DE "Canonical ref" --issue acme/widgets#12
+assert_line "Linked DE-04 to acme/widgets#12"
+expect_ok "$BIN" task add DE "No issue"
+assert_not_contains "Linked"
+
+expect_ok "$BIN" task edit DE-05 --issue 20 --actor codex
+assert_line "Linked DE-05 to acme/widgets#20"
+assert_not_contains "Edited task"
+expect_ok "$BIN" task edit DE-05 --issue acme/widgets#20
+assert_line "Task DE-05 is already linked to acme/widgets#20"
+expect_ok "$BIN" task edit DE-05 --issue 21 --title "Relinked"
+assert_line "Edited task DE-05"
+assert_line "Unlinked acme/widgets#20 from DE-05"
+assert_line "Linked DE-05 to acme/widgets#21"
+expect_ok "$BIN" task edit DE-05 --clear-issue --actor codex
+assert_line "Unlinked acme/widgets#21 from DE-05"
+expect_ok "$BIN" task edit DE-05 --clear-issue
+assert_line "Task DE-05 has no linked issue"
+expect_fail "$BIN" task edit DE-05 --issue 1 --clear-issue
+assert_contains "Use either --issue or --clear-issue, not both"
+expect_fail "$BIN" task edit DE-05 --issue nope
+assert_contains "Invalid issue reference 'nope'"
+expect_fail "$BIN" task edit DE-99 --issue 1
+assert_contains "No task with id DE-99"
+expect_fail "$BIN" task edit DE-05
+assert_contains "Task edit requires --title, --description, --issue, or --clear-issue"
+
+expect_ok "$BIN" show DE-05
+assert_line "  issue_link by codex: acme/widgets#20"
+assert_line "  issue_unlink by user: acme/widgets#20"
+assert_line "  issue_link by user: acme/widgets#21"
+assert_line "  issue_unlink by codex: acme/widgets#21"
+assert_file_contains dispatch.log '"actor":"user","command":"task","action":"issue_link","outcome":"success","message":"Linked DE-01 to acme/widgets#12","targets":{"task":"DE-01"},"context":{"issue":"acme/widgets#12"}'
+assert_file_contains dispatch.log '"actor":"codex","command":"task","action":"issue_unlink","outcome":"success","message":"Unlinked acme/widgets#21 from DE-05","targets":{"task":"DE-05"},"context":{"issue":"acme/widgets#21"}'
+if [ "$(grep -c '"action":"issue_link"' dispatch.log)" -ne 6 ] ||
+    [ "$(grep -c '"action":"issue_unlink"' dispatch.log)" -ne 2 ]; then
+    fail "expected 6 issue_link and 2 issue_unlink log records"
+fi
 
 cd "$ROOT"
 
