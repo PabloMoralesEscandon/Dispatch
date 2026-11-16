@@ -19,6 +19,7 @@ const char *sources[] = {
     "src/dispatch_exec.c",
     "src/dispatch_issue.c",
     "src/dispatch_json.c",
+    "src/dispatch_log.c",
     "src/dispatch_store.c",
     "src/dispatch_utf8.c",
     "src/dispatch_tui.c",
