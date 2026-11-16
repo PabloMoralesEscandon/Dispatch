@@ -30,6 +30,13 @@ int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
                                   const char *command,
                                   const DispatchWorkspace *only);
 
+/* Writes the agent envelope. When only is non-NULL, emits just that agent
+ * (archived or not); otherwise every agent, skipping archived ones unless
+ * include_archived is set. */
+int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
+                              const char *command, const DispatchAgent *only,
+                              int include_archived);
+
 /* Presentation state of every task, captured before a mutation so the
  * result can report previous states and newly ready tasks. */
 typedef struct {

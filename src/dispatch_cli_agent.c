@@ -513,18 +513,26 @@ static int cmd_agent_create(int argc, char **argv) {
 }
 
 static int cmd_agent_list(int argc, char **argv) {
-    (void)argv;
+    int json_output = 0;
     int include_archived = 0;
-    if (argc == 4 && strcmp(argv[3], "--all") == 0)
+    int args_ok = dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output);
+    if (args_ok && argc == 4 && strcmp(argv[3], "--all") == 0)
         include_archived = 1;
-    else if (argc != 3) {
-        fprintf(stderr, "Usage: dispatch agent list [--all]\n");
+    else if (!args_ok || argc != 3) {
+        fprintf(stderr, "Usage: dispatch agent list [--all] [--json]\n");
         return 1;
     }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    if (json_output) {
+        int ok = dispatch_json_emit_agents(stdout, &board, "agent list", NULL,
+                                           include_archived);
+        dispatch_board_free(&board);
+        return ok ? 0 : 1;
+    }
 
     if (board.agents.count == 0) {
         printf("(no agents)\n");
@@ -549,8 +557,10 @@ static int cmd_agent_list(int argc, char **argv) {
 }
 
 static int cmd_agent_show(int argc, char **argv) {
-    if (argc != 4) {
-        fprintf(stderr, "Usage: dispatch agent show <name>\n");
+    int json_output = 0;
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
+        argc != 4) {
+        fprintf(stderr, "Usage: dispatch agent show <name> [--json]\n");
         return 1;
     }
 
@@ -563,6 +573,13 @@ static int cmd_agent_show(int argc, char **argv) {
         dispatch_board_free(&board);
         fprintf(stderr, "No agent named %s\n", argv[3]);
         return 1;
+    }
+
+    if (json_output) {
+        int ok = dispatch_json_emit_agents(stdout, &board, "agent show", agent,
+                                           0);
+        dispatch_board_free(&board);
+        return ok ? 0 : 1;
     }
 
     printf("Name: %s\n", agent->name);
@@ -958,8 +975,8 @@ int cmd_agent(int argc, char **argv) {
 
     fprintf(stderr,
             "Usage: dispatch agent create --name <name> --runner " DISPATCH_AGENT_RUNNER_CHOICES " [--model <name>] [--no-run-script] [--print-command]\n");
-    fprintf(stderr, "       dispatch agent list [--all]\n");
-    fprintf(stderr, "       dispatch agent show <name>\n");
+    fprintf(stderr, "       dispatch agent list [--all] [--json]\n");
+    fprintf(stderr, "       dispatch agent show <name> [--json]\n");
     fprintf(stderr, "       dispatch agent archive <name>\n");
     fprintf(stderr, "       dispatch agent restore <name>\n");
     fprintf(stderr, "       dispatch agent command <name> [--print-command]\n");
