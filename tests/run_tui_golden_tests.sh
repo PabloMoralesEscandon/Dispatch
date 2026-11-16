@@ -47,7 +47,9 @@ capture_frame() {
         normalize_frame >"$actual"
 
     if [ "$MUTATE_FRAME" = "$name" ]; then
-        sed -i '2s/DISPATCH/DISPATCH-MUTATED/' "$actual"
+        # Not sed -i: GNU and BSD sed disagree on its argument.
+        sed '2s/DISPATCH/DISPATCH-MUTATED/' "$actual" >"$actual.mutated"
+        mv "$actual.mutated" "$actual"
     fi
 
     if [ "$UPDATE_GOLDENS" = "1" ]; then
