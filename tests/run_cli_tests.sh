@@ -2642,6 +2642,9 @@ fi
 assert_file_contains AGENTS.md "# Dispatch Agent Instructions"
 assert_file_contains AGENTS.md "Never read \`dispatch.json\` directly."
 assert_file_contains CLAUDE.md "# Dispatch Agent Instructions"
+# GH-1: agents on new boards learn to link GitHub issues.
+assert_file_contains AGENTS.md "[--no-review] [--issue <ref>]"
+assert_file_contains CLAUDE.md "dispatch task edit <TASK-ID> --issue <ref>|--clear-issue"
 expect_ok "$BIN" doctor
 assert_contains "AGENTS.md found in workflow directory"
 # Re-init with an existing board must not scaffold or recreate files.
