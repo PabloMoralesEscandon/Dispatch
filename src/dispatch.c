@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -709,6 +710,21 @@ int dispatch_task_unlink_issue(DispatchTask *task, const char *actor) {
                                           previous);
     free(previous);
     return ok;
+}
+
+const DispatchTask *
+dispatch_board_earlier_task_with_issue(const DispatchBoard *board,
+                                       const DispatchTask *task) {
+    if (!board || !task || !task->issue)
+        return NULL;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *candidate = &board->tasks.items[i];
+        if (candidate == task)
+            return NULL;
+        if (candidate->issue && strcasecmp(candidate->issue, task->issue) == 0)
+            return candidate;
+    }
+    return NULL;
 }
 
 const char *dispatch_state_name(DispatchState state) {

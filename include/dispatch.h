@@ -191,6 +191,11 @@ int dispatch_task_link_issue(DispatchTask *task, const char *issue,
 /* Clears the linked issue and records an issue_unlink history entry noting
  * the removed ref. Returns 0 when the task has no issue. */
 int dispatch_task_unlink_issue(DispatchTask *task, const char *actor);
+/* The first task before `task` in board order that links the same issue
+ * (compared case-insensitively, as GitHub does), or NULL. */
+const DispatchTask *
+dispatch_board_earlier_task_with_issue(const DispatchBoard *board,
+                                       const DispatchTask *task);
 
 const char *dispatch_state_name(DispatchState state);
 int dispatch_state_from_name(const char *name, DispatchState *state);

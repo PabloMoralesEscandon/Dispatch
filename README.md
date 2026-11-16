@@ -217,7 +217,8 @@ another process updates it.
 
 `status` prints a compact board overview: task counts by state, ready and review
 queues, blocked count, enabled/archived agent counts, workspace counts, and
-warnings such as completed tasks without recorded commits.
+warnings such as completed tasks without recorded commits or several tasks
+linking the same GitHub issue.
 `doctor` checks board readability, repository layout, PATH/symlink setup,
 completion installation, generated agent prompt/run files, and workspace paths.
 
@@ -529,7 +530,8 @@ the group prints a single `(done)` marker instead of every completed task row.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name. Use `list all` to include
 completed tasks, optionally scoped to a group with `list all <group>`.
-Tasks with recorded commits show a `commits:N` summary on their task line.
+Tasks with recorded commits show a `commits:N` summary on their task line, and
+tasks with a linked issue show `issue:#N`.
 
 When stdout is a terminal, `list` uses ANSI color to distinguish group headings,
 task IDs, states, and metadata. Set `FORCE_COLOR=1` to force color in captured
@@ -668,10 +670,14 @@ the state shown by the CLI after dependencies are evaluated; `stored_state` is
 the persisted lifecycle state. Unset actor, workspace, and timestamp fields are
 JSON `null`.
 
+Task objects also carry `issue`: `null`, or the linked GitHub issue as
+`{"repo": "acme/widgets", "number": 12, "url": "https://github.com/acme/widgets/issues/12"}`.
+
 Only `status` populates `warnings`. Warning objects contain a stable `code`, a
 human-readable `message`, and nullable `task_id` and `agent` fields. Version 1
-reports missing commits, assignment/state mismatches, and agent sessions that
-reference missing tasks.
+reports missing commits, assignment/state mismatches, agent sessions that
+reference missing tasks, and tasks that link the same issue as an earlier
+task.
 
 Consumers should ignore unknown fields. Adding optional fields is compatible;
 removing a field or changing its type or meaning requires a new

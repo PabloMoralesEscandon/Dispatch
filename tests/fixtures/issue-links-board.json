@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "workspace": {
+    "repo_path": "repo"
+  },
+  "board": {
+    "name": "Dispatch",
+    "groups": [
+      {
+        "id": "GH",
+        "name": "Issue Links",
+        "prefix": "GH",
+        "description": "Tasks traced to GitHub issues"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "GH-01",
+        "title": "Linked to the board repo",
+        "description": "Issue in the same repository as the board.",
+        "group": "GH",
+        "state": "ready",
+        "depends_on": [],
+        "commits": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "issue": "acme/widgets#12",
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": [
+          {
+            "actor": "user",
+            "action": "issue_link",
+            "note": "acme/widgets#12",
+            "timestamp": null
+          }
+        ]
+      },
+      {
+        "id": "GH-02",
+        "title": "Linked to another repo",
+        "description": "Issue tracked outside the board repository.",
+        "group": "GH",
+        "state": "blocked",
+        "depends_on": ["GH-01"],
+        "commits": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "issue": "Other-Org/thing.js#7",
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "GH-03",
+        "title": "Same issue as GH-01",
+        "description": "A second task tracking the first task's issue.",
+        "group": "GH",
+        "state": "ready",
+        "depends_on": [],
+        "commits": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "issue": "ACME/widgets#12",
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "GH-04",
+        "title": "Explicitly unlinked",
+        "description": "Stored issue is null.",
+        "group": "GH",
+        "state": "ready",
+        "depends_on": [],
+        "commits": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "issue": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      },
+      {
+        "id": "GH-05",
+        "title": "No issue field",
+        "description": "Written before tasks could link issues.",
+        "group": "GH",
+        "state": "ready",
+        "depends_on": [],
+        "commits": [],
+        "requires_review": true,
+        "assigned_to": null,
+        "started_by": null,
+        "completed_by": null,
+        "created_at": null,
+        "started_at": null,
+        "completed_at": null,
+        "updated_at": null,
+        "history": []
+      }
+    ]
+  }
+}

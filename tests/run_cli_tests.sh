@@ -2954,6 +2954,96 @@ if [ "$(grep -c '"action":"issue_link"' dispatch.log)" -ne 6 ] ||
     fail "expected 6 issue_link and 2 issue_unlink log records"
 fi
 
+# show prints the linked issue and its URL; list adds issue:#N to the line.
+expect_ok "$BIN" show DE-01
+assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12)"
+expect_ok "$BIN" show DE-05
+assert_line "Issue: -"
+expect_ok "$BIN" list
+assert_line "  DE-01    proposed   Bare number  issue:#12"
+assert_line "  DE-03    proposed   Issue URL  issue:#7"
+assert_line "  DE-05    proposed   Relinked"
+
+# JSON task objects carry a nullable issue object; schema_version stays 1.
+expect_ok "$BIN" show DE-03 --json
+assert_json \
+    schema_version integer 1 \
+    tasks.0.issue object - \
+    tasks.0.issue.repo string Other-Org/thing.js \
+    tasks.0.issue.number integer 7 \
+    tasks.0.issue.url string https://github.com/Other-Org/thing.js/issues/7
+expect_ok "$BIN" show DE-05 --json
+assert_json tasks.0.issue null -
+
+# Two tasks may link the same issue, and status warns about it.
+expect_ok "$BIN" status
+assert_line "  DE-04 links acme/widgets#12, also linked to DE-01"
+expect_ok "$BIN" status --json
+assert_json \
+    warnings array_length 1 \
+    warnings.0.code string duplicate_issue \
+    warnings.0.message string "DE-04 links acme/widgets#12, also linked to DE-01" \
+    warnings.0.task_id string DE-04 \
+    warnings.0.agent null -
+
+# A fixture board with linked issues: stored null and a missing field both
+# mean "no issue", and duplicates compare case-insensitively like GitHub.
+case_dir="$(make_case_dir issue-fixture)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/issue-links-board.json" dispatch.json
+expect_ok "$BIN" list GH
+assert_line "  GH-01    ready      Linked to the board repo  issue:#12"
+assert_line "  GH-02    blocked    Linked to another repo  depends_on:GH-01  issue:#7"
+assert_line "  GH-04    ready      Explicitly unlinked"
+assert_line "  GH-05    ready      No issue field"
+expect_ok "$BIN" show GH-02
+assert_line "Issue: Other-Org/thing.js#7 (https://github.com/Other-Org/thing.js/issues/7)"
+expect_ok "$BIN" list --json
+assert_json \
+    tasks.0.issue.repo string acme/widgets \
+    tasks.0.issue.number integer 12 \
+    tasks.0.issue.url string https://github.com/acme/widgets/issues/12 \
+    tasks.1.issue.repo string Other-Org/thing.js \
+    tasks.3.issue null - \
+    tasks.4.issue null -
+expect_ok "$BIN" status
+assert_line "  GH-03 links ACME/widgets#12, also linked to GH-01"
+expect_ok "$BIN" normalize
+expect_ok "$BIN" show GH-01
+assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12)"
+assert_line "  issue_link by user: acme/widgets#12"
+expect_ok "$BIN" task edit GH-05 --issue Other-Org/thing.js#8
+assert_line "Linked GH-05 to Other-Org/thing.js#8"
+expect_ok "$BIN" show GH-05 --json
+assert_json tasks.0.issue.number integer 8
+expect_ok "$BIN" task edit GH-05 --clear-issue
+expect_ok "$BIN" show GH-05 --json
+assert_json tasks.0.issue null -
+
+# A stored issue that is not a canonical ref is rejected on load.
+sed 's|"Other-Org/thing.js#7"|"Other-Org/thing.js/7"|' \
+    "$ROOT/tests/fixtures/issue-links-board.json" > dispatch.json
+expect_fail "$BIN" list
+assert_contains "task issue must be owner/repo#number"
+
+# Boards written before issue links load unchanged, and normalize does not
+# add an issue field to them.
+case_dir="$(make_case_dir issue-legacy-board)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/dependency-board.json" dispatch.json
+expect_ok "$BIN" list all
+legacy_list="$RUN_OUTPUT"
+expect_ok "$BIN" normalize
+assert_file_not_contains dispatch.json '"issue"'
+expect_ok "$BIN" list all
+if [ "$RUN_OUTPUT" != "$legacy_list" ]; then
+    fail "normalize changed how a board without issue links lists"
+fi
+expect_ok "$BIN" show DE-01
+assert_line "Issue: -"
+expect_ok "$BIN" show DE-01 --json
+assert_json tasks.0.issue null -
+
 cd "$ROOT"
 
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
