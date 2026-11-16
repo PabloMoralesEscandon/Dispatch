@@ -1278,6 +1278,80 @@ assert_json \
     result.newly_ready.0 string DE-06
 expect_json_error task_not_found "$BIN" task delete DE-05 --json
 
+# workspace create/remove/prune use the workspace envelope.
+expect_json_ok "$BIN" workspace create DE-06 --actor json-agent --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace create" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-06 \
+    workspaces.0.task_id string DE-06 \
+    workspaces.0.actor string json-agent \
+    workspaces.0.state string active \
+    result.action string workspace_create \
+    result.changed boolean true \
+    result.workspace string DE-06 \
+    result.task string DE-06 \
+    result.previous_state string ready \
+    result.new_state string ready \
+    result.newly_ready array_length 0
+expect_json_error workspace_exists "$BIN" workspace create DE-06 \
+    --actor json-agent --json
+expect_json_error task_not_found "$BIN" workspace create Missing \
+    --actor json-agent --json
+expect_json_error usage "$BIN" workspace create DE-06 --json
+
+expect_json_ok "$BIN" workspace remove DE-06 --json
+assert_json \
+    command string "workspace remove" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-06 \
+    workspaces.0.state string removed \
+    result.action string workspace_remove \
+    result.changed boolean true \
+    result.workspace string DE-06 \
+    result.force boolean false \
+    result.task string DE-06
+expect_json_error workspace_not_found "$BIN" workspace remove DE-06 --json
+expect_json_error usage "$BIN" workspace remove --json
+
+# workspace prune: dry run, a dirty skip, then the real removal.
+expect_ok "$BIN" task add DE Prunable --no-review
+expect_ok "$BIN" ready DE-07 --actor user --no-review
+expect_ok "$BIN" workspace create DE-07 --actor json-agent
+expect_ok "$BIN" start DE-07 --actor json-agent
+expect_ok "$BIN" finish DE-07 --actor json-agent
+expect_json_ok "$BIN" workspace prune --done --dry-run --json
+assert_json \
+    command string "workspace prune" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-07 \
+    workspaces.0.state string active \
+    result.action string workspace_prune \
+    result.changed boolean false \
+    result.dry_run boolean true \
+    result.task null - \
+    result.skipped array_length 0
+prune_path="$("$BIN" workspace show DE-07 | sed -n 's/^Path: //p')"
+printf 'dirty\n' > "$prune_path/dirty.txt"
+expect_json_ok "$BIN" workspace prune --done --json
+assert_json \
+    workspaces array_length 0 \
+    result.changed boolean false \
+    result.dry_run boolean false \
+    result.skipped array_length 1 \
+    result.skipped.0.workspace string DE-07 \
+    result.skipped.0.reason string dirty
+rm "$prune_path/dirty.txt"
+expect_json_ok "$BIN" workspace prune --done --json
+assert_json \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-07 \
+    workspaces.0.state string removed \
+    result.changed boolean true \
+    result.skipped array_length 0
+expect_json_error usage "$BIN" workspace prune --bogus --json
+
 # Out-of-scope subcommands keep rejecting --json as before.
 expect_fail "$BIN" task priority DE-01 5 --json
 assert_contains "Unknown task priority option: --json"
