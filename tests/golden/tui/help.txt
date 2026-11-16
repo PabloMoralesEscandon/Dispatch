@@ -3,7 +3,7 @@ Frame: board 100x30
                             +------------------------------------------+
 Tasks  1 ready   0 doing   0|       Dispatch  Keyboard Shortcuts       |
                             |                                          |
-Repo <path>   Navigation                              |   2 groups    1 agents    1
+Repo <tmp>/workflow/repo    |  Navigation                              | 1 workspaces
 View   not-done    1-7/R fil|  j / k       move selection              |
                             |  Enter / i   inspect task                |
    DE  Development  1       |  Tab         switch to agents            |
