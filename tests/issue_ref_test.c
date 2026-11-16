@@ -2,6 +2,7 @@
 
 #include "dispatch_issue.h"
 
+#include <locale.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -93,6 +94,9 @@ static void test_rejected_forms(void) {
         "acme/..#12",
         "acme/wid gets#12",
         "acme/widgets#12#13",
+        "acm\xc3\xa9/widgets#12",
+        "acme/widg\xc3\xa9ts#12",
+        "#\xd9\xa1",
         "https://github.com/acme/widgets/pull/12",
         "https://github.com/acme/widgets/issues",
         "https://github.com/acme/widgets/issues/12/comments",
@@ -167,6 +171,8 @@ static void test_remotes(void) {
 }
 
 int main(void) {
+    /* Parse under the same UTF-8 locale the CLI runs with. */
+    setlocale(LC_ALL, "");
     test_accepted_forms();
     test_rejected_forms();
     test_canonical_and_urls();

@@ -5,12 +5,20 @@
 #include <string.h>
 #include <strings.h>
 
+/* ASCII-only classification: <ctype.h> may accept bytes above 127 under a
+ * UTF-8 locale, and GitHub names are plain ASCII. */
+static int ascii_digit(unsigned char c) { return c >= '0' && c <= '9'; }
+
+static int ascii_alnum(unsigned char c) {
+    return ascii_digit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
 static int parse_number(const char *text, size_t len, long *number) {
     if (len == 0 || len > 9 || text[0] == '0')
         return 0;
     long value = 0;
     for (size_t i = 0; i < len; i++) {
-        if (!isdigit((unsigned char)text[i]))
+        if (!ascii_digit((unsigned char)text[i]))
             return 0;
         value = value * 10 + (text[i] - '0');
     }
@@ -28,7 +36,7 @@ static int owner_is_valid(const char *text, size_t len) {
         return 0;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
-        if (!isalnum(c) && c != '-')
+        if (!ascii_alnum(c) && c != '-')
             return 0;
     }
     return 1;
@@ -44,7 +52,7 @@ static int repo_is_valid(const char *text, size_t len) {
         return 0;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
-        if (!isalnum(c) && c != '.' && c != '_' && c != '-')
+        if (!ascii_alnum(c) && c != '.' && c != '_' && c != '-')
             return 0;
     }
     return 1;
@@ -173,7 +181,7 @@ DispatchIssueParse dispatch_issue_parse(const char *input,
         return DISPATCH_ISSUE_PARSE_INVALID;
 
     DispatchIssueRef parsed = {0};
-    if (text[0] == '#' || isdigit((unsigned char)text[0])) {
+    if (text[0] == '#' || ascii_digit((unsigned char)text[0])) {
         const char *digits = text[0] == '#' ? text + 1 : text;
         size_t digits_len = text[0] == '#' ? len - 1 : len;
         if (parse_number(digits, digits_len, &parsed.number)) {
