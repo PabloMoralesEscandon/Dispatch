@@ -459,10 +459,19 @@ static const struct {
     const char *subcommand;
     const char *json_name;
 } json_mutations[] = {
+    {"task", "add", "task add"},
+    {"task", "edit", "task edit"},
+    {"task", "move", "task move"},
+    {"task", "delete", "task delete"},
+    {"group", "add", "group add"},
+    {"group", "ready", "group ready"},
+    {"dep", "add", "dep add"},
+    {"dep", "remove", "dep remove"},
     {"start", NULL, "start"},
     {"finish", NULL, "finish"},
     {"review", NULL, "review"},
     {"unassign", NULL, "unassign"},
+    {"commit", "add", "commit add"},
 };
 
 /* Strips --json from a supported mutating command and enters JSON result
