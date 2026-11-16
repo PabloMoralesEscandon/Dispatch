@@ -200,6 +200,7 @@ dispatch init [repo-path]
 dispatch normalize
 dispatch status [--json]
 dispatch doctor
+dispatch log [--task <id>] [--actor <name>] [--agent <name>] [--workspace <id>] [--command <name>] [--action <name>] [--limit <n>] [--json]
 ```
 
 `init` creates `dispatch.json` if it does not already exist. Pass the repository
@@ -221,6 +222,7 @@ warnings such as completed tasks without recorded commits or several tasks
 linking the same GitHub issue.
 `doctor` checks board readability, repository layout, PATH/symlink setup,
 completion installation, generated agent prompt/run files, and workspace paths.
+`log` prints the `dispatch.log` audit trail; see [Dispatch Log](#dispatch-log).
 
 ### Completion
 
@@ -245,8 +247,8 @@ prints the reload command.
 
 ```bash
 dispatch agent create --name <name> --runner codex|claude|opencode [--model <name>] [--no-run-script] [--print-command]
-dispatch agent list [--all]
-dispatch agent show <name>
+dispatch agent list [--all] [--json]
+dispatch agent show <name> [--json]
 dispatch agent archive <name>
 dispatch agent restore <name>
 dispatch agent command <name> [--print-command]
@@ -311,8 +313,8 @@ command, and writes the same command to `.dispatch/agents/<name>/resume.sh`.
 ```bash
 dispatch workspace create <task-id> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
 dispatch workspace adopt <task-id> --actor <agent-id> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]
-dispatch workspace list
-dispatch workspace show <task-id-or-workspace>
+dispatch workspace list [--json]
+dispatch workspace show <task-id-or-workspace> [--json]
 dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]
 dispatch workspace repair <task-id-or-workspace>
 dispatch workspace prune [--done] [--stale] [--dry-run]
@@ -647,8 +649,9 @@ the same task. `finish` records the completing actor and moves the task to
 ## JSON Output
 
 The read commands `list`, `show`, `ready`, `blocked`, `reviews`, `proposed`,
-and `status` accept `--json`. The option may appear anywhere after the command
-name:
+`status`, `doctor`, `agent list`, `agent show`, `workspace list`,
+`workspace show`, and `log` accept `--json`. The option may appear anywhere
+after the command name (after the subcommand for `agent` and `workspace`):
 
 ```bash
 dispatch list --json
@@ -656,6 +659,9 @@ dispatch list all Development --json
 dispatch show --json DE-01
 dispatch ready --json
 dispatch status --json
+dispatch agent list --all --json
+dispatch workspace show DE-01 --json
+dispatch log --task DE-01 --limit 20 --json
 ```
 
 `ready --json` without a task ID is the read-only queue form; with task IDs,
@@ -668,7 +674,7 @@ hints, or other human text. Errors keep their existing non-zero exit status and
 text on stderr without writing a partial JSON document. Omitting `--json`
 retains the normal human-readable output.
 
-Every response uses the same top-level envelope:
+Every task response uses the same top-level envelope:
 
 ```json
 {
@@ -721,6 +727,27 @@ human-readable `message`, and nullable `task_id` and `agent` fields. Version 1
 reports missing commits, assignment/state mismatches, agent sessions that
 reference missing tasks, and tasks that link the same issue as an earlier
 task.
+
+Agent, workspace, and log responses keep `schema_version`, `command`,
+`board` (`name` and `repo_path`), `query`, and `summary`, and put their
+records in `agents`, `workspaces`, or `records`:
+
+```json
+{
+  "schema_version": 1,
+  "command": "agent list",
+  "board": {"name": "Dispatch", "repo_path": "repo"},
+  "query": {"name": null, "include_archived": false},
+  "summary": {"total": 2, "returned": 1, "enabled": 1, "archived": 1, "with_current_task": 1},
+  "agents": [{"name": "codex", "runner": "codex", "archived": false, "assigned_tasks": ["DE-02"], "workspaces": ["DE-02"]}]
+}
+```
+
+Agent objects carry the stored agent fields plus the tasks assigned to the
+agent and its live workspaces. Workspace records include `adopted` and
+`external_id` for worktrees recorded with `workspace adopt`. Log records are
+the stored `dispatch.log` records plus their `line` number; see
+[Dispatch Log](#dispatch-log).
 
 Consumers should ignore unknown fields. Adding optional fields is compatible;
 removing a field or changing its type or meaning requires a new
@@ -962,16 +989,29 @@ authoritative per-task lifecycle summary; `dispatch.log` is the broader command
 audit trail for successful dependency, group, task, lifecycle, agent, and
 workspace changes.
 
-Use normal line-oriented tools to inspect the log:
+Read the log with `dispatch log`, which prints one record per line, oldest
+first:
 
 ```bash
-tail -n 20 dispatch.log
+dispatch log --limit 20
+dispatch log --task DE-01
+dispatch log --agent codex --command finish --json
 ```
 
-Because each line is a standalone JSON object, JSON Lines-aware tools can filter
-or transform it without loading the board. For example, a reviewer can look for
-all lifecycle changes for a task by filtering records whose `targets.task`
-matches the task ID.
+`--task`, `--actor`, `--agent`, `--workspace`, `--command`, and `--action`
+filter on the same fields as the TUI logs view (`--agent` matches the
+record's target agent or its actor), but match exactly. Filters combine, and
+`--limit <n>` keeps the newest `n` matches. With `--json`, records come back
+in a `records` array with their line number in the file, and `summary`
+counts the total, matched, returned, and skipped lines. Blank lines are
+ignored; lines that are not valid version 1 records are skipped and reported
+as warnings, on stderr or in the JSON `warnings` array, without failing the
+command. The full rules are in
+[the JSON output contract](docs/json-output-contract.md#log-responses), and
+the design in [ADR 0004](docs/adr/0004-json-reads-agents-workspaces-log.md).
+
+Because each line is a standalone JSON object, JSON Lines-aware tools can also
+read the file directly without loading the board.
 
 Actor attribution follows the same rules as the workflow commands. User-facing
 approval and review commands that omit `--actor` record `user`. Agent ownership
