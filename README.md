@@ -1032,14 +1032,17 @@ tests/run_cli_tests.sh
 tests/run_tui_golden_tests.sh
 ```
 
-The test runner builds Dispatch, creates temporary boards under `/tmp`, and
-checks command behavior through the CLI.
+The test runner builds Dispatch, creates temporary boards under `$TMPDIR`
+(default `/tmp`), and checks command behavior through the CLI. Both scripts run
+the freshly built `./dispatch`, never one found on `PATH`.
 
 The CLI suite runs the TUI golden checks and verifies that a deliberately
 mutated frame is rejected. The standalone golden runner creates a deterministic
 workflow fixture and compares normalized `100x30` frames for the main views,
-forms, and help overlay. Refresh the committed frames after an intentional
-rendering change with:
+forms, and help overlay. Temp paths render as `<tmp>` before layout, so the
+committed frames match on Linux and macOS whatever the temp directory
+([ADR 0005](docs/adr/0005-portable-tui-goldens.md)). Refresh the committed
+frames after an intentional rendering change with:
 
 ```bash
 UPDATE_GOLDENS=1 tests/run_tui_golden_tests.sh
