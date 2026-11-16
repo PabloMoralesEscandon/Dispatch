@@ -118,6 +118,7 @@ static void task_free_fields(DispatchTask *task) {
     free(task->assigned_to);
     free(task->started_by);
     free(task->completed_by);
+    free(task->issue);
     history_free(&task->history);
 }
 
@@ -687,6 +688,27 @@ int dispatch_task_move_to_group(DispatchBoard *board, DispatchTask *task,
     snprintf(note, sizeof(note), "from %s to %s", task->group, group->id);
     replace_string(&task->group, group->id);
     return dispatch_task_append_history(task, actor, "moved", note);
+}
+
+int dispatch_task_link_issue(DispatchTask *task, const char *issue,
+                             const char *actor) {
+    if (!task || !issue || !issue[0])
+        return 0;
+    replace_string(&task->issue, issue);
+    task->updated_at = time(NULL);
+    return dispatch_task_append_history(task, actor, "issue_link", issue);
+}
+
+int dispatch_task_unlink_issue(DispatchTask *task, const char *actor) {
+    if (!task || !task->issue)
+        return 0;
+    char *previous = task->issue;
+    task->issue = NULL;
+    task->updated_at = time(NULL);
+    int ok = dispatch_task_append_history(task, actor, "issue_unlink",
+                                          previous);
+    free(previous);
+    return ok;
 }
 
 const char *dispatch_state_name(DispatchState state) {

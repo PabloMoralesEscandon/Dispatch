@@ -59,6 +59,9 @@ typedef struct {
     char *assigned_to;
     char *started_by;
     char *completed_by;
+    /* Linked GitHub issue, canonically "owner/repo#number"; NULL when the
+     * task has no issue. */
+    char *issue;
     time_t created_at;
     time_t started_at;
     time_t completed_at;
@@ -181,6 +184,13 @@ int dispatch_task_set_priority(DispatchTask *task, int priority,
                                const char *actor);
 int dispatch_task_move_to_group(DispatchBoard *board, DispatchTask *task,
                                 const char *group_id, const char *actor);
+/* Links a canonical issue ref and records an issue_link history entry. The
+ * caller unlinks any previous issue first. */
+int dispatch_task_link_issue(DispatchTask *task, const char *issue,
+                             const char *actor);
+/* Clears the linked issue and records an issue_unlink history entry noting
+ * the removed ref. Returns 0 when the task has no issue. */
+int dispatch_task_unlink_issue(DispatchTask *task, const char *actor);
 
 const char *dispatch_state_name(DispatchState state);
 int dispatch_state_from_name(const char *name, DispatchState *state);

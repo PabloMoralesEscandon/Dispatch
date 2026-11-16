@@ -118,18 +118,18 @@ if grep -En '(^|[^[:alnum:]_])(system|popen|pclose)[[:space:]]*\(' \
 fi
 
 # shellcheck disable=SC2086
-cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
+cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c src/dispatch_issue.c \
     -ljansson -o "$TMP_ROOT/lock_primitive_test"
 "$TMP_ROOT/lock_primitive_test" "$TMP_ROOT/dispatch.json" >/dev/null
 
 # shellcheck disable=SC2086
-cc $TEST_CFLAGS -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c \
+cc $TEST_CFLAGS -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c src/dispatch_issue.c \
     -ljansson -o "$TMP_ROOT/store_records_test"
 "$TMP_ROOT/store_records_test" "$TMP_ROOT/empty-records.json" \
     "$TMP_ROOT/populated-records.json" >/dev/null
 
 # shellcheck disable=SC2086
-cc $TEST_CFLAGS -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c \
+cc $TEST_CFLAGS -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c src/dispatch_issue.c \
     -ljansson -o "$TMP_ROOT/log_writer_test"
 "$TMP_ROOT/log_writer_test" "$TMP_ROOT/dispatch.log" >/dev/null
 

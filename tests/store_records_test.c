@@ -114,6 +114,12 @@ static int verify_populated_round_trip(const char *path) {
     dispatch_board_set_repo_path(&board, "repo");
     dispatch_board_add_group(&board, "Development", "DE");
     dispatch_board_add_task(&board, "DE", "Root", "");
+    DispatchTask *linked = dispatch_board_add_task(&board, "DE", "Linked", "");
+    if (!linked ||
+        !dispatch_task_link_issue(linked, "acme/widgets#12", "user")) {
+        dispatch_board_free(&board);
+        return fail("could not link an issue", "");
+    }
     add_agent_record(&board);
     add_workspace_record(&board);
 
@@ -130,6 +136,14 @@ static int verify_populated_round_trip(const char *path) {
     if (loaded.agents.count != 1 || loaded.workspaces.count != 1) {
         dispatch_board_free(&loaded);
         return fail("record counts did not round trip", "");
+    }
+
+    DispatchTask *root = dispatch_board_find_task(&loaded, "DE-01");
+    DispatchTask *loaded_linked = dispatch_board_find_task(&loaded, "DE-02");
+    if (!root || root->issue || !loaded_linked ||
+        assert_string(loaded_linked->issue, "acme/widgets#12", "task issue")) {
+        dispatch_board_free(&loaded);
+        return fail("task issue did not round trip", "");
     }
 
     DispatchAgent *agent = dispatch_board_find_agent(&loaded, "codex-server");
