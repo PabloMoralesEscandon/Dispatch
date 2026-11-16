@@ -1746,6 +1746,9 @@ assert_contains 'dispatch completion candidates "$1"'
 assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
 assert_contains "_dispatch_compadd_candidates runners"
+assert_contains "compadd -- add edit delete"
+assert_contains "add) compadd -- --description --actor --no-review --issue ;;"
+assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor ;;"
 
 expect_fail "$BIN" completion zsh extra
 assert_contains "Usage: dispatch completion candidates"
@@ -1760,6 +1763,22 @@ assert_contains "--actor --no-review"
 assert_contains "--description --actor --no-review"
 assert_contains "_dispatch_complete_candidates runners"
 
+# GH-1: task add and task edit complete the issue flags.
+"$BIN" completion bash > "$TMP_ROOT/dispatch-completion.bash"
+bash_complete() {
+    # shellcheck disable=SC2016
+    expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+        bash "$TMP_ROOT/dispatch-completion.bash" "$@"
+}
+bash_complete dispatch task add DE Title --i
+assert_line "--issue"
+bash_complete dispatch task edit DE-01 --
+assert_line "--title"
+assert_line "--issue"
+assert_line "--clear-issue"
+bash_complete dispatch task e
+assert_line "edit"
+
 expect_fail "$BIN" completion bash extra
 assert_contains "Usage: dispatch completion candidates"
 
@@ -1773,6 +1792,9 @@ assert_contains "all (__dispatch_candidates groups)"
 assert_contains "(__dispatch_candidates tasks)"
 assert_contains "-l runner -r -a '(__dispatch_candidates runners)'"
 assert_contains "(__dispatch_candidates workspaces)"
+assert_contains "__fish_seen_subcommand_from add' -l issue -r"
+assert_contains "__fish_seen_subcommand_from edit' -l issue -r"
+assert_contains "__fish_seen_subcommand_from edit' -l clear-issue"
 
 if command -v fish >/dev/null 2>&1; then
     "$BIN" completion fish > "$TMP_ROOT/dispatch-completion.fish"
