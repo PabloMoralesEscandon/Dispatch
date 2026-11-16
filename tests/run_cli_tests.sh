@@ -4066,9 +4066,10 @@ expect_ok "$BIN" completion fish
 assert_contains "__fish_seen_subcommand_from log' -l task -r -a '(__dispatch_candidates tasks)'"
 assert_contains "__fish_seen_subcommand_from list show' -l json"
 "$BIN" completion bash > "$TMP_ROOT/dispatch-log-completion.bash"
+# Value completion calls dispatch from PATH, so use the binary under test.
 log_complete() {
     # shellcheck disable=SC2016
-    expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    PATH="$(dirname "$BIN"):$PATH" expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
         bash "$TMP_ROOT/dispatch-log-completion.bash" "$@"
 }
 log_complete dispatch log --l
