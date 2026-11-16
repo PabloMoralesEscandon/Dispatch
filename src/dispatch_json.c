@@ -88,6 +88,9 @@ static json_t *workspace_json(const DispatchWorkspace *workspace) {
     json_object_set_new(
         object, "state",
         json_string(dispatch_workspace_state_name(workspace->state)));
+    json_object_set_new(object, "adopted", json_boolean(workspace->adopted));
+    json_object_set_new(object, "external_id",
+                        optional_string(workspace->external_id));
     return object;
 }
 
@@ -114,6 +117,9 @@ static json_t *workspace_record_json(const DispatchBoard *board,
                         string_list_json(&workspace->sequence_tasks));
     json_object_set_new(object, "review_gate",
                         optional_string(workspace->review_gate));
+    json_object_set_new(object, "adopted", json_boolean(workspace->adopted));
+    json_object_set_new(object, "external_id",
+                        optional_string(workspace->external_id));
     json_object_set_new(object, "created_at",
                         time_or_null(workspace->created_at));
     json_object_set_new(object, "updated_at",

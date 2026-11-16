@@ -112,6 +112,11 @@ typedef struct {
     DispatchWorkspaceState state;
     DispatchStringList sequence_tasks;
     char *review_gate;
+    /* Set by `workspace adopt`: the worktree was created outside Dispatch,
+     * so Dispatch never removes it unless asked (--delete-worktree). */
+    int adopted;
+    /* Optional "<tool>:<id>" mapping back to the external tool's record. */
+    char *external_id;
     time_t created_at;
     time_t updated_at;
 } DispatchWorkspace;
@@ -286,5 +291,9 @@ char *dispatch_resolve_path(const char *workflow_dir, const char *path);
 int dispatch_path_is_git_repository(const char *path);
 int dispatch_workspace_path_conflicts(const char *repo_path,
                                       const char *workspace_path);
+/* An external workspace ID is "<tool>:<id>": tool is 1-32 characters of
+ * [a-z0-9._-] starting with a letter or digit, id is 1-200 printable
+ * non-space ASCII characters. */
+int dispatch_external_id_is_valid(const char *value);
 
 #endif

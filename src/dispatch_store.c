@@ -308,6 +308,7 @@ static void workspace_free_fields(DispatchWorkspace *workspace) {
         free(workspace->sequence_tasks.items[i]);
     free(workspace->sequence_tasks.items);
     free(workspace->review_gate);
+    free(workspace->external_id);
 }
 
 static int append_loaded_task(DispatchBoard *board, const DispatchTask *task) {
@@ -460,6 +461,13 @@ static json_t *workspace_to_json(const DispatchWorkspace *workspace) {
                         string_list_to_json(&workspace->sequence_tasks));
     json_object_set_new(object, "review_gate",
                         json_optional_string(workspace->review_gate));
+    /* Written only when set, so boards without adopted workspaces keep
+     * their exact shape. */
+    if (workspace->adopted)
+        json_object_set_new(object, "adopted", json_true());
+    if (workspace->external_id)
+        json_object_set_new(object, "external_id",
+                            json_string(workspace->external_id));
     json_object_set_new(object, "created_at",
                         json_time_or_null(workspace->created_at));
     json_object_set_new(object, "updated_at",
@@ -836,6 +844,26 @@ static int load_workspaces(DispatchBoard *board, json_t *workspaces,
 
         const char *review_gate = json_string_or(value, "review_gate", NULL);
         workspace.review_gate = review_gate ? store_strdup(review_gate) : NULL;
+
+        json_t *adopted = json_object_get(value, "adopted");
+        if (adopted && !json_is_boolean(adopted)) {
+            set_error(error, error_size, "workspace.adopted must be a boolean");
+            workspace_free_fields(&workspace);
+            return 0;
+        }
+        workspace.adopted = adopted && json_is_true(adopted);
+        json_t *external_id = json_object_get(value, "external_id");
+        if (external_id && !json_is_null(external_id) &&
+            (!json_is_string(external_id) ||
+             !dispatch_external_id_is_valid(json_string_value(external_id)))) {
+            set_error(error, error_size, "invalid workspace.external_id");
+            workspace_free_fields(&workspace);
+            return 0;
+        }
+        workspace.external_id =
+            external_id && json_is_string(external_id)
+                ? store_strdup(json_string_value(external_id))
+                : NULL;
         workspace.created_at = json_time_or_zero(value, "created_at");
         workspace.updated_at = json_time_or_zero(value, "updated_at");
 

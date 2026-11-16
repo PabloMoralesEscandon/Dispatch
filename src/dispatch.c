@@ -144,6 +144,7 @@ static void workspace_free_fields(DispatchWorkspace *workspace) {
     free(workspace->repo_path);
     string_list_free(&workspace->sequence_tasks);
     free(workspace->review_gate);
+    free(workspace->external_id);
 }
 
 int dispatch_task_append_history(DispatchTask *task, const char *actor,
@@ -573,6 +574,35 @@ int dispatch_workspace_path_conflicts(const char *repo_path,
     free(repo);
     free(workspace);
     return conflicts;
+}
+
+int dispatch_external_id_is_valid(const char *value) {
+    if (!value)
+        return 0;
+    const char *colon = strchr(value, ':');
+    if (!colon)
+        return 0;
+
+    size_t tool_length = (size_t)(colon - value);
+    if (tool_length == 0 || tool_length > 32 ||
+        !isalnum((unsigned char)value[0]))
+        return 0;
+    for (size_t i = 0; i < tool_length; i++) {
+        unsigned char c = (unsigned char)value[i];
+        if (!(islower(c) || isdigit(c) || c == '.' || c == '_' || c == '-'))
+            return 0;
+    }
+
+    const char *id = colon + 1;
+    size_t id_length = strlen(id);
+    if (id_length == 0 || id_length > 200)
+        return 0;
+    for (size_t i = 0; i < id_length; i++) {
+        unsigned char c = (unsigned char)id[i];
+        if (c <= 0x20 || c >= 0x7f)
+            return 0;
+    }
+    return 1;
 }
 
 DispatchTask *dispatch_board_add_task(DispatchBoard *board,
