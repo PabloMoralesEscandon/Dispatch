@@ -90,6 +90,12 @@ typedef struct {
     off_t board_size;
     int show_help;
     int running;
+    /* Temp root that rendered paths show as "<tmp>", as given and resolved
+     * (the store keeps some paths as typed and some as realpaths). Only the
+     * headless render smoke sets them (from DISPATCH_TUI_SMOKE_TMP_ROOT), so
+     * golden frames do not depend on the machine's temp path. Display only:
+     * board data keeps the real paths. */
+    char smoke_tmp_roots[2][1024];
 } DispatchTui;
 
 typedef struct {

@@ -2328,6 +2328,20 @@ assert_contains "Dispatch  Keyboard Shortcuts"
 assert_contains "Navigation"
 expect_fail "$BIN" tui --render-smoke board 20 5
 assert_contains "Headless TUI dimensions must be"
+# ADR 0005: DISPATCH_TUI_SMOKE_TMP_ROOT swaps the root for <tmp> in rendered
+# paths, matching the given or the resolved spelling; it is display only.
+render_repo_real="$(cd repo && pwd -P)"
+expect_ok "$BIN" tui --render-smoke board 300 24
+assert_contains "Repo $render_repo_real    "
+DISPATCH_TUI_SMOKE_TMP_ROOT="$case_dir" expect_ok "$BIN" tui --render-smoke board 300 24
+assert_contains "Repo <tmp>/repo    "
+ln -s "$case_dir" "$TMP_ROOT/render-root-link"
+DISPATCH_TUI_SMOKE_TMP_ROOT="$TMP_ROOT/render-root-link" expect_ok "$BIN" tui --render-smoke board 300 24
+assert_contains "Repo <tmp>/repo    "
+DISPATCH_TUI_SMOKE_TMP_ROOT="$case_dir/re" expect_ok "$BIN" tui --render-smoke board 300 24
+assert_contains "Repo $render_repo_real    "
+expect_ok "$BIN" status
+assert_contains "$render_repo_real"
 DISPATCH_TUI_DEFAULT_SMOKE=1 expect_ok "$BIN"
 assert_contains "dispatch tui smoke ok:"
 assert_contains "2 tasks"

@@ -36,6 +36,27 @@ static void draw_group_header(DispatchTui *tui, int y, int cols,
 static void draw_task_row(DispatchTui *tui, int y, int cols,
                           const DispatchTask *task, int visible_index);
 
+/* A path as the TUI shows it. Normally the path itself; under the headless
+ * render smoke, a path inside one of tui->smoke_tmp_roots is shown as
+ * "<tmp>/...". This runs before layout, so golden frames truncate the same
+ * way whatever the machine's temp path is
+ * (docs/adr/0005-portable-tui-goldens.md). */
+static const char *display_path(const DispatchTui *tui, const char *path,
+                                char *buf, size_t size) {
+    if (!path)
+        return ".";
+    for (size_t i = 0; i < 2; i++) {
+        const char *root = tui->smoke_tmp_roots[i];
+        size_t root_len = strlen(root);
+        if (root_len == 0 || strncmp(path, root, root_len) != 0 ||
+            (path[root_len] != '/' && path[root_len] != '\0'))
+            continue;
+        snprintf(buf, size, "<tmp>%s", path + root_len);
+        return buf;
+    }
+    return path;
+}
+
 /* mvaddnstr counts bytes, not display columns, so a column limit has to be
  * converted into the byte length of the widest prefix that fits. Passing the
  * column count straight through cuts accented text short and can slice a
@@ -1157,7 +1178,8 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
         y = draw_section(y, rows, cols, "Workspace");
         y = draw_field(y, rows, cols, "Actor", workspace->actor);
         y = draw_field(y, rows, cols, "Branch", workspace->branch);
-        y = draw_field(y, rows, cols, "Path", workspace->path);
+        y = draw_field(y, rows, cols, "Path",
+                       display_path(tui, workspace->path, buf, sizeof(buf)));
     }
 
     y++;
@@ -1255,8 +1277,10 @@ static void draw_workspace_inspector(DispatchTui *tui, int rows, int cols) {
 
     y = draw_section(y, rows, cols, "Location");
     y = draw_field(y, rows, cols, "Actor", workspace->actor);
-    y = draw_field(y, rows, cols, "Repo", workspace->repo_path);
-    y = draw_field(y, rows, cols, "Path", workspace->path);
+    y = draw_field(y, rows, cols, "Repo",
+                   display_path(tui, workspace->repo_path, buf, sizeof(buf)));
+    y = draw_field(y, rows, cols, "Path",
+                   display_path(tui, workspace->path, buf, sizeof(buf)));
     y = draw_field(y, rows, cols, "Branch", workspace->branch);
     y++;
 
@@ -1460,9 +1484,10 @@ void tui_render(DispatchTui *tui) {
         draw_board_stats(tui, 2, cols);
 
         int visible = visible_task_count_for_tui(tui);
+        char repo[1024];
         snprintf(line, sizeof(line),
                  "Repo %s    %zu tasks (%d shown)    %zu groups    %zu agents    %zu workspaces",
-                 tui->board.repo_path ? tui->board.repo_path : ".",
+                 display_path(tui, tui->board.repo_path, repo, sizeof(repo)),
                  tui->board.tasks.count, visible, tui->board.groups.count,
                  tui->board.agents.count, tui->board.workspaces.count);
         if (tui_colors_enabled)

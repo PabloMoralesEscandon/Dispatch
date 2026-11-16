@@ -1259,6 +1259,26 @@ static int tui_capture_headless_frame(int rows, int cols) {
     return 1;
 }
 
+/* DISPATCH_TUI_SMOKE_TMP_ROOT names the temp directory a golden fixture lives
+ * in; the render then shows paths under it as "<tmp>/...". The swap has to
+ * happen before layout: normalizing the captured text afterwards cannot undo
+ * a truncation that already depended on the real path length. Both spellings
+ * of the root are matched, because the store keeps the repo as a realpath
+ * (/private/var/... on macOS for a TMPDIR under /var) but a workspace --dir
+ * as typed. "/" is ignored: it would turn every absolute path into <tmp>. */
+static void set_smoke_tmp_root(DispatchTui *tui) {
+    const char *root = getenv("DISPATCH_TUI_SMOKE_TMP_ROOT");
+    if (!root || root[0] == '\0' || strcmp(root, "/") == 0)
+        return;
+    snprintf(tui->smoke_tmp_roots[0], sizeof(tui->smoke_tmp_roots[0]), "%s",
+             root);
+    char *resolved = realpath(root, NULL);
+    if (resolved && strcmp(resolved, "/") != 0)
+        snprintf(tui->smoke_tmp_roots[1], sizeof(tui->smoke_tmp_roots[1]),
+                 "%s", resolved);
+    free(resolved);
+}
+
 static int tui_render_smoke(const char *screen_arg, int cols, int rows,
                             const char *keys) {
     if (cols < 40 || cols > 300 || rows < 10 || rows > 120) {
@@ -1282,6 +1302,7 @@ static int tui_render_smoke(const char *screen_arg, int cols, int rows,
         fprintf(stderr, "%s\n", tui.status);
         return 1;
     }
+    set_smoke_tmp_root(&tui);
 
     FILE *input = fopen("/dev/null", "r");
     FILE *output = tmpfile();
