@@ -5,9 +5,14 @@ static void print_workspace_create_usage(void) {
               "Usage: dispatch workspace create <task-id> --actor <name> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]\n");
 }
 
+static void print_workspace_adopt_usage(void) {
+    cli_error("usage", NULL,
+              "Usage: dispatch workspace adopt <task-id> --actor <name> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]\n");
+}
+
 static void print_workspace_remove_usage(void) {
     cli_error("usage", NULL,
-              "Usage: dispatch workspace remove <task-id-or-workspace> [--force]\n");
+              "Usage: dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]\n");
 }
 
 static void print_workspace_prune_usage(void) {
@@ -179,6 +184,7 @@ static void workspace_free_fields(DispatchWorkspace *workspace) {
         free(workspace->sequence_tasks.items[i]);
     free(workspace->sequence_tasks.items);
     free(workspace->review_gate);
+    free(workspace->external_id);
 }
 
 /* Deep copy of a workspace record, so JSON results can report records
@@ -193,6 +199,8 @@ static DispatchWorkspace workspace_clone(const DispatchWorkspace *workspace) {
     copy.repo_path = cli_strdup(workspace->repo_path);
     copy.review_gate =
         workspace->review_gate ? cli_strdup(workspace->review_gate) : NULL;
+    copy.external_id =
+        workspace->external_id ? cli_strdup(workspace->external_id) : NULL;
     memset(&copy.sequence_tasks, 0, sizeof(copy.sequence_tasks));
     for (size_t i = 0; i < workspace->sequence_tasks.count; i++)
         string_list_append_cli(&copy.sequence_tasks,
@@ -429,39 +437,71 @@ static int git_worktree_remove(const char *repo_path,
     return run_command_quiet(argv);
 }
 
-static int git_worktree_is_registered(const char *repo_path,
-                                      const char *workspace_path) {
-    size_t line_size = strlen("worktree ") + strlen(workspace_path) + 1;
-    char *line = malloc(line_size);
-    if (!line) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    }
-    snprintf(line, line_size, "worktree %s", workspace_path);
+static int worktree_paths_match(const char *listed, const char *path) {
+    if (strcmp(listed, path) == 0)
+        return 1;
+    char *listed_real = realpath(listed, NULL);
+    char *path_real = realpath(path, NULL);
+    int match = listed_real && path_real && strcmp(listed_real, path_real) == 0;
+    free(listed_real);
+    free(path_real);
+    return match;
+}
+
+/* Looks up workspace_path in `git worktree list --porcelain` for repo_path.
+ * Paths match textually or by realpath, so a record stored as a resolved
+ * path still matches git's spelling. On a match, *branch receives the
+ * checked-out branch name (refs/heads/ stripped), or NULL for a detached
+ * HEAD. Returns 0 when git fails, else 1 with *found set. */
+static int git_worktree_lookup(const char *repo_path,
+                               const char *workspace_path, int *found,
+                               char **branch) {
+    *found = 0;
+    if (branch)
+        *branch = NULL;
     const char *argv[] = {"git", "-C", repo_path, "worktree", "list",
                           "--porcelain", NULL};
     DispatchExecOptions options = {.stderr_mode = DISPATCH_EXEC_DEV_NULL};
     DispatchExecResult result;
     char *output = NULL;
-    int registered = 0;
-    if (dispatch_exec_capture(argv, &options, &output, NULL, &result) &&
-        dispatch_exec_result_success(&result)) {
-        const char *cursor = output;
-        while (*cursor) {
-            const char *end = strchr(cursor, '\n');
-            size_t length = end ? (size_t)(end - cursor) : strlen(cursor);
-            if (strlen(line) == length && strncmp(cursor, line, length) == 0) {
-                registered = 1;
+    if (!dispatch_exec_capture(argv, &options, &output, NULL, &result) ||
+        !dispatch_exec_result_success(&result)) {
+        free(output);
+        return 0;
+    }
+
+    int in_match = 0;
+    char *cursor = output ? output : "";
+    while (*cursor) {
+        char *end = strchr(cursor, '\n');
+        if (end)
+            *end = '\0';
+        if (strncmp(cursor, "worktree ", 9) == 0) {
+            if (in_match)
                 break;
-            }
-            if (!end)
-                break;
-            cursor = end + 1;
+            in_match = worktree_paths_match(cursor + 9, workspace_path);
+            if (in_match)
+                *found = 1;
+        } else if (in_match && branch &&
+                   strncmp(cursor, "branch ", 7) == 0) {
+            const char *ref = cursor + 7;
+            if (strncmp(ref, "refs/heads/", 11) == 0)
+                ref += 11;
+            *branch = cli_strdup(ref);
         }
+        if (!end)
+            break;
+        cursor = end + 1;
     }
     free(output);
-    free(line);
-    return registered;
+    return 1;
+}
+
+static int git_worktree_is_registered(const char *repo_path,
+                                      const char *workspace_path) {
+    int found = 0;
+    return git_worktree_lookup(repo_path, workspace_path, &found, NULL) &&
+           found;
 }
 
 static int git_worktree_repair(const char *repo_path,
@@ -836,6 +876,281 @@ static int cmd_workspace_create(int argc, char **argv) {
     return status;
 }
 
+static const DispatchWorkspace *
+live_workspace_with_external_id(const DispatchBoard *board,
+                                const char *external_id) {
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        const DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace_record_is_live(workspace) && workspace->external_id &&
+            strcmp(workspace->external_id, external_id) == 0) {
+            return workspace;
+        }
+    }
+    return NULL;
+}
+
+/* Records a git worktree that something other than Dispatch created (for
+ * example `orca worktree create`). Validates it like `workspace create`
+ * validates its own reservation, but never runs `git worktree add`; see
+ * docs/adr/0003-workspace-adopt.md. */
+static int cmd_workspace_adopt(int argc, char **argv) {
+    if (argc < 4) {
+        print_workspace_adopt_usage();
+        return 1;
+    }
+
+    const char *task_id = argv[3];
+    const char *actor = NULL;
+    const char *path_option = NULL;
+    const char *branch_option = NULL;
+    const char *external_option = NULL;
+    int sequence = 0;
+
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
+        } else if (strcmp(argv[i], "--path") == 0 && (i + 1) < argc) {
+            path_option = argv[++i];
+        } else if (strcmp(argv[i], "--branch") == 0 && (i + 1) < argc) {
+            branch_option = argv[++i];
+        } else if (strcmp(argv[i], "--external") == 0 && (i + 1) < argc) {
+            external_option = argv[++i];
+        } else if (strcmp(argv[i], "--sequence") == 0) {
+            sequence = 1;
+        } else {
+            print_workspace_adopt_usage();
+            return 1;
+        }
+    }
+
+    if (!actor || actor[0] == '\0' || !path_option || path_option[0] == '\0' ||
+        (branch_option && branch_option[0] == '\0')) {
+        print_workspace_adopt_usage();
+        return 1;
+    }
+    if (!dispatch_actor_label_is_valid(actor)) {
+        cli_error("invalid_actor", NULL,
+                  "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+        return 1;
+    }
+    if (external_option && !dispatch_external_id_is_valid(external_option)) {
+        cli_error("invalid_external_id", task_id,
+                  "External ID must be <tool>:<id>, with a lowercase tool name and no spaces: %s\n",
+                  external_option);
+        return 1;
+    }
+
+    char *workflow_dir = current_workflow_path();
+    if (!workflow_dir)
+        return 1;
+
+    int status = 1;
+    DispatchStringList sequence_tasks = {0};
+    char *review_gate = NULL;
+    char *repo_path = NULL;
+    char *workspace_path = NULL;
+    char *worktree_branch = NULL;
+    const char *branch = NULL;
+    int locked_open = 0;
+    LockedBoard locked;
+    if (!locked_board_load_or_error(&locked))
+        goto cleanup;
+    locked_open = 1;
+    DispatchBoard *board = &locked.board;
+
+    DispatchAgent *actor_agent = dispatch_board_find_agent(board, actor);
+    if (actor_agent && actor_agent->archived) {
+        cli_error("agent_archived", NULL,
+                  "Agent %s is archived; restore it first\n", actor);
+        goto cleanup;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(board, task_id);
+    if (!task) {
+        cli_error("task_not_found", task_id, "No task with id %s\n", task_id);
+        goto cleanup;
+    }
+    if (dispatch_task_effective_state(board, task) != DISPATCH_STATE_READY ||
+        task->assigned_to) {
+        cli_error(task->assigned_to ? "already_assigned" : "invalid_state",
+                  task_id, "Task %s must be ready and unassigned\n", task_id);
+        goto cleanup;
+    }
+    if (live_workspace_for_task(board, task_id)) {
+        cli_error("workspace_exists", task_id,
+                  "Workspace already exists for %s\n", task_id);
+        goto cleanup;
+    }
+    if (sequence &&
+        !build_workspace_sequence(board, task, &sequence_tasks, &review_gate))
+        goto cleanup;
+
+    const char *configured_repo = board->repo_path;
+    repo_path = dispatch_resolve_path(workflow_dir, configured_repo);
+    if (!repo_path || !dispatch_path_is_git_repository(repo_path)) {
+        cli_error("repo_not_git", task_id,
+                  "Configured repository is not a git repository: %s\n",
+                  configured_repo ? configured_repo : ".");
+        goto cleanup;
+    }
+
+    workspace_path = dispatch_resolve_path(workflow_dir, path_option);
+    struct stat info;
+    if (!workspace_path || stat(workspace_path, &info) != 0 ||
+        !S_ISDIR(info.st_mode)) {
+        cli_error("invalid_path", task_id,
+                  "Workspace path is not an existing directory: %s\n",
+                  path_option);
+        goto cleanup;
+    }
+    if (strcmp(repo_path, workspace_path) == 0) {
+        cli_error("workspace_conflict", task_id,
+                  "Workspace path must not equal repository path\n");
+        goto cleanup;
+    }
+    if (workspace_path_exists(board, workspace_path)) {
+        cli_error("workspace_conflict", task_id,
+                  "Workspace path already reserved: %s\n", workspace_path);
+        goto cleanup;
+    }
+
+    int registered = 0;
+    if (!git_worktree_lookup(repo_path, workspace_path, &registered,
+                             &worktree_branch)) {
+        cli_error("git_failed", task_id,
+                  "Could not list git worktrees of %s\n", repo_path);
+        goto cleanup;
+    }
+    if (!registered) {
+        cli_error("not_a_worktree", task_id,
+                  "Workspace path is not a git worktree of %s: %s\n",
+                  repo_path, workspace_path);
+        goto cleanup;
+    }
+
+    if (branch_option) {
+        if (worktree_branch && strcmp(worktree_branch, branch_option) != 0) {
+            cli_error("branch_mismatch", task_id,
+                      "Worktree %s has branch %s checked out, not %s\n",
+                      workspace_path, worktree_branch, branch_option);
+            goto cleanup;
+        }
+        branch = branch_option;
+    } else if (worktree_branch) {
+        branch = worktree_branch;
+    } else {
+        cli_error("branch_mismatch", task_id,
+                  "Worktree %s has a detached HEAD; pass --branch to name its branch\n",
+                  workspace_path);
+        goto cleanup;
+    }
+    if (workspace_branch_exists(board, branch)) {
+        cli_error("workspace_conflict", task_id,
+                  "Workspace branch already reserved: %s\n", branch);
+        goto cleanup;
+    }
+    if (external_option) {
+        const DispatchWorkspace *other =
+            live_workspace_with_external_id(board, external_option);
+        if (other) {
+            cli_error("workspace_conflict", task_id,
+                      "External ID %s is already recorded for workspace %s\n",
+                      external_option, other->id);
+            goto cleanup;
+        }
+    }
+
+    DispatchWorkspace *workspace = append_workspace_reservation(
+        board, task_id, actor, repo_path, workspace_path, branch,
+        sequence ? &sequence_tasks : NULL, review_gate);
+    workspace->state = DISPATCH_WORKSPACE_ACTIVE;
+    workspace->adopted = 1;
+    workspace->external_id =
+        external_option ? cli_strdup(external_option) : NULL;
+
+    size_t note_size = strlen(workspace_path) + strlen(branch) +
+                       (external_option ? strlen(external_option) : 0) + 64;
+    char *note = malloc(note_size);
+    if (!note) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    snprintf(note, note_size, "path=%s branch=%s%s%s", workspace_path, branch,
+             external_option ? " external=" : "",
+             external_option ? external_option : "");
+    dispatch_task_append_history(task, actor, "workspace_adopt", note);
+    free(note);
+
+    if (!locked_board_save_or_error(&locked))
+        goto cleanup;
+    locked_board_close(&locked);
+    locked_open = 0;
+
+    int json = cli_json();
+    if (!json) {
+        printf("Adopted workspace %s for %s\n", task_id, actor);
+        printf("  path: %s\n", workspace_path);
+        printf("  branch: %s\n", branch);
+        printf("  state: active\n");
+        if (external_option)
+            printf("  external: %s\n", external_option);
+        if (sequence) {
+            printf("  tasks:");
+            for (size_t i = 0; i < sequence_tasks.count; i++)
+                printf("%s%s", i == 0 ? " " : ",", sequence_tasks.items[i]);
+            printf("\n");
+            printf("  review gate: %s\n", review_gate ? review_gate : "-");
+        }
+    }
+
+    DispatchLogField targets[] = {
+        {"task", task_id},
+        {"workspace", task_id},
+    };
+    DispatchLogField context[] = {
+        {"workspace_path", workspace_path},
+        {"workspace_branch", branch},
+        {"repo_path", repo_path},
+        {"sequence", bool_string(sequence)},
+        {"external_id", external_option ? external_option : ""},
+    };
+    char message[256];
+    snprintf(message, sizeof(message), "Adopted workspace %s", task_id);
+    append_dispatch_log(actor, "workspace", "workspace_adopt", targets, 2,
+                        context, external_option ? 5 : 4, message);
+
+    status = 0;
+    if (json) {
+        DispatchBoard final_board;
+        if (!load_board_or_error(&final_board)) {
+            status = 1;
+        } else {
+            DispatchWorkspace *adopted =
+                dispatch_board_find_workspace(&final_board, task_id);
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("workspace_adopt");
+            dispatch_json_result_add_target(json_result, task_id);
+            dispatch_json_result_set_string(json_result, "workspace", task_id);
+            dispatch_json_result_set_string(json_result, "external_id",
+                                            external_option);
+            status = cli_json_emit_workspaces(&final_board, adopted,
+                                              adopted ? 1 : 0, json_result);
+            dispatch_board_free(&final_board);
+        }
+    }
+
+cleanup:
+    if (locked_open)
+        locked_board_close(&locked);
+    string_list_free_cli(&sequence_tasks);
+    free(review_gate);
+    free(repo_path);
+    free(workspace_path);
+    free(worktree_branch);
+    free(workflow_dir);
+    return status;
+}
+
 int workspace_git_worktree_present_at(const char *path) {
     if (!path || path[0] == '\0')
         return 0;
@@ -890,9 +1205,14 @@ static int cmd_workspace_list(int argc, char **argv) {
             task ? dispatch_state_name(dispatch_task_effective_state(&board,
                                                                      task))
                  : "missing";
-        printf("%-8s %-10s %-10s %-16s %s  %s\n", workspace->task_id,
+        printf("%-8s %-10s %-10s %-16s %s  %s", workspace->task_id,
                task_state, dispatch_workspace_state_name(workspace->state),
                workspace->actor, workspace->branch, workspace->path);
+        if (workspace->adopted)
+            printf("  [adopted%s%s]",
+                   workspace->external_id ? " " : "",
+                   workspace->external_id ? workspace->external_id : "");
+        printf("\n");
     }
 
     dispatch_board_free(&board);
@@ -940,6 +1260,11 @@ static int cmd_workspace_show(int argc, char **argv) {
     printf("Branch: %s\n", workspace->branch);
     printf("Path: %s\n", workspace->path);
     printf("Repo: %s\n", workspace->repo_path);
+    if (workspace->adopted) {
+        printf("Origin: adopted\n");
+        printf("External ID: %s\n",
+               workspace->external_id ? workspace->external_id : "-");
+    }
     if (workspace->sequence_tasks.count > 0) {
         printf("Sequence tasks:");
         for (size_t i = 0; i < workspace->sequence_tasks.count; i++)
@@ -957,16 +1282,20 @@ static int cmd_workspace_show(int argc, char **argv) {
 }
 
 static int cmd_workspace_remove(int argc, char **argv) {
-    if (argc < 4 || argc > 5) {
+    if (argc < 4 || argc > 6) {
         print_workspace_remove_usage();
         return 1;
     }
 
     const char *target = argv[3];
     int force = 0;
+    int delete_worktree_option = 0;
     for (int i = 4; i < argc; i++) {
-        if (strcmp(argv[i], "--force") == 0) {
+        if (strcmp(argv[i], "--force") == 0 && !force) {
             force = 1;
+        } else if (strcmp(argv[i], "--delete-worktree") == 0 &&
+                   !delete_worktree_option) {
+            delete_worktree_option = 1;
         } else {
             print_workspace_remove_usage();
             return 1;
@@ -999,12 +1328,17 @@ static int cmd_workspace_remove(int argc, char **argv) {
         return 1;
     }
 
+    /* An adopted worktree belongs to the tool that created it: removing the
+     * record leaves it on disk unless --delete-worktree asks otherwise. */
+    int adopted = workspace->adopted;
+    int delete_worktree = !adopted || delete_worktree_option;
     char *record_task_id = cli_strdup(workspace->task_id);
     char *repo_path = cli_strdup(workspace->repo_path);
     char *workspace_path = cli_strdup(workspace->path);
     locked_board_close(&locked);
 
-    if (!git_worktree_is_registered(repo_path, workspace_path)) {
+    if (delete_worktree &&
+        !git_worktree_is_registered(repo_path, workspace_path)) {
         cli_error("not_a_worktree", record_task_id,
                   "Workspace path is not a git worktree: %s\n",
                   workspace_path);
@@ -1014,7 +1348,7 @@ static int cmd_workspace_remove(int argc, char **argv) {
         return 1;
     }
 
-    if (!force && git_worktree_is_dirty(workspace_path)) {
+    if (delete_worktree && !force && git_worktree_is_dirty(workspace_path)) {
         cli_error("workspace_dirty", record_task_id,
                   "Workspace has uncommitted changes: %s\n", workspace_path);
         free(record_task_id);
@@ -1023,8 +1357,10 @@ static int cmd_workspace_remove(int argc, char **argv) {
         return 1;
     }
 
-    int removed = force ? git_worktree_remove_force(repo_path, workspace_path)
-                        : git_worktree_remove(repo_path, workspace_path);
+    int removed =
+        !delete_worktree ||
+        (force ? git_worktree_remove_force(repo_path, workspace_path)
+               : git_worktree_remove(repo_path, workspace_path));
     if (!removed) {
         cli_error("git_failed", record_task_id,
                   "Could not remove git worktree: %s\n", workspace_path);
@@ -1078,10 +1414,16 @@ static int cmd_workspace_remove(int argc, char **argv) {
         dispatch_json_result_set_string(json_result, "workspace",
                                         record_task_id);
         dispatch_json_result_set_bool(json_result, "force", force);
+        dispatch_json_result_set_bool(json_result, "worktree_deleted",
+                                      delete_worktree);
         status = cli_json_emit_workspaces(&locked.board, &removed_record,
                                           have_record ? 1 : 0, json_result);
-    } else {
+    } else if (delete_worktree) {
         printf("Removed workspace %s\n", record_task_id);
+        printf("  path: %s\n", workspace_path);
+    } else {
+        printf("Removed workspace record %s; adopted worktree kept\n",
+               record_task_id);
         printf("  path: %s\n", workspace_path);
     }
     if (have_record)
@@ -1095,11 +1437,16 @@ static int cmd_workspace_remove(int argc, char **argv) {
     DispatchLogField context[] = {
         {"workspace_path", workspace_path},
         {"force", bool_string(force)},
+        {"adopted", bool_string(adopted)},
+        {"worktree_deleted", bool_string(delete_worktree)},
     };
     char message[256];
-    snprintf(message, sizeof(message), "Removed workspace %s", record_task_id);
+    snprintf(message, sizeof(message),
+             delete_worktree ? "Removed workspace %s"
+                             : "Removed workspace record %s",
+             record_task_id);
     append_dispatch_log("user", "workspace", "workspace_remove", targets, 2,
-                        context, 2, message);
+                        context, adopted ? 4 : 2, message);
     free(record_task_id);
     free(repo_path);
     free(workspace_path);
@@ -1122,6 +1469,16 @@ static int cmd_workspace_repair(int argc, char **argv) {
     if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
         locked_board_close(&locked);
         fprintf(stderr, "No workspace for %s\n", target);
+        return 1;
+    }
+    if (workspace->adopted) {
+        /* Repair re-anchors a worktree at Dispatch's default location next
+         * to the repository, which an external tool's worktree need not
+         * follow. */
+        fprintf(stderr,
+                "Workspace %s was adopted; remove its record and adopt the worktree at its new path instead\n",
+                workspace->id);
+        locked_board_close(&locked);
         return 1;
     }
 
@@ -1274,7 +1631,10 @@ static int cmd_workspace_repair(int argc, char **argv) {
 
 typedef enum {
     PRUNE_CANDIDATE_DONE,
-    PRUNE_CANDIDATE_STALE
+    PRUNE_CANDIDATE_STALE,
+    /* Adopted records: only the record is pruned, never the worktree. */
+    PRUNE_CANDIDATE_ADOPTED_DONE,
+    PRUNE_CANDIDATE_ADOPTED_STALE
 } PruneCandidateKind;
 
 typedef struct {
@@ -1372,6 +1732,22 @@ static int cmd_workspace_prune(int argc, char **argv) {
         if (!workspace_record_is_live(workspace))
             continue;
 
+        if (workspace->adopted) {
+            /* The external tool owns the worktree. Its record is stale
+             * once the worktree directory is gone, whatever git still
+             * lists, and a done record is released without touching git. */
+            if (prune_stale &&
+                !workspace_git_worktree_present_at(workspace->path)) {
+                prune_candidates_append(&candidates, workspace,
+                                        PRUNE_CANDIDATE_ADOPTED_STALE);
+            } else if (prune_done &&
+                       workspace_all_tasks_done(&locked.board, workspace)) {
+                prune_candidates_append(&candidates, workspace,
+                                        PRUNE_CANDIDATE_ADOPTED_DONE);
+            }
+            continue;
+        }
+
         if (prune_stale &&
             workspace->state == DISPATCH_WORKSPACE_CREATING) {
             prune_candidates_append(&candidates, workspace,
@@ -1394,6 +1770,26 @@ static int cmd_workspace_prune(int argc, char **argv) {
     size_t skipped = 0;
     for (size_t i = 0; i < candidates.count; i++) {
         PruneCandidate *candidate = &candidates.items[i];
+        if (candidate->kind == PRUNE_CANDIDATE_ADOPTED_STALE ||
+            candidate->kind == PRUNE_CANDIDATE_ADOPTED_DONE) {
+            if (!json) {
+                if (candidate->kind == PRUNE_CANDIDATE_ADOPTED_STALE)
+                    printf("%s stale adopted workspace %s: worktree is gone\n",
+                           dry_run ? "Would prune" : "Pruned",
+                           candidate->task_id);
+                else
+                    printf("%s done workspace record %s; adopted worktree kept\n",
+                           dry_run ? "Would remove" : "Removed",
+                           candidate->task_id);
+            }
+            pruned++;
+            candidate->pruned = 1;
+            if (!dry_run)
+                string_list_append_cli(&records_to_remove,
+                                       candidate->task_id);
+            continue;
+        }
+
         int registered = git_worktree_is_registered(candidate->repo_path,
                                                     candidate->workspace_path);
 
@@ -1527,6 +1923,8 @@ static int cmd_workspace_prune(int argc, char **argv) {
 int cmd_workspace(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "create") == 0)
         return cmd_workspace_create(argc, argv);
+    if (argc >= 3 && strcmp(argv[2], "adopt") == 0)
+        return cmd_workspace_adopt(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "list") == 0)
         return cmd_workspace_list(argc, argv);
     if (argc >= 3 && strcmp(argv[2], "show") == 0)
@@ -1539,10 +1937,12 @@ int cmd_workspace(int argc, char **argv) {
         return cmd_workspace_prune(argc, argv);
 
     print_workspace_create_usage();
+    fprintf(stderr,
+            "       dispatch workspace adopt <task-id> --actor <name> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]\n");
     fprintf(stderr, "       dispatch workspace list\n");
     fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
     fprintf(stderr,
-            "       dispatch workspace remove <task-id-or-workspace> [--force]\n");
+            "       dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]\n");
     fprintf(stderr,
             "       dispatch workspace repair <task-id-or-workspace>\n");
     fprintf(stderr,

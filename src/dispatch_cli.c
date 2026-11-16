@@ -50,7 +50,7 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/list/show/remove/repair/prune,");
+    puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/adopt/list/show/remove/repair/prune,");
     puts("  group add/ready, task add/edit/move/delete, dep add/remove, commit add/list/show, completion candidates,");
     puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, tui, list, show, blocked");
 }
@@ -473,6 +473,7 @@ static const struct {
     {"unassign", NULL, "unassign"},
     {"commit", "add", "commit add"},
     {"workspace", "create", "workspace create"},
+    {"workspace", "adopt", "workspace adopt"},
     {"workspace", "remove", "workspace remove"},
     {"workspace", "prune", "workspace prune"},
 };

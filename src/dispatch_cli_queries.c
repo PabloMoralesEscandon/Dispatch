@@ -338,6 +338,10 @@ int cmd_show(int argc, char **argv) {
         printf("Workspace actor: %s\n", workspace->actor);
         printf("Workspace path: %s\n", workspace->path);
         printf("Workspace branch: %s\n", workspace->branch);
+        if (workspace->adopted)
+            printf("Workspace origin: adopted%s%s\n",
+                   workspace->external_id ? " " : "",
+                   workspace->external_id ? workspace->external_id : "");
     }
 
     printf("Depends on:");
