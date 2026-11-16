@@ -7,7 +7,7 @@ This document defines version 1 of the machine-readable output produced when
   `proposed`, `status`, `doctor`, `workspace list`, and `workspace show`;
 - the mutating commands `task add|edit|move|delete`, `group add|ready`,
   `dep add|remove`, `ready <id>`, `start`, `finish`, `review`, `unassign`,
-  `commit add`, and `workspace create|remove|prune`, described in
+  `commit add`, and `workspace create|adopt|remove|prune`, described in
   [Mutation results](#mutation-results).
 
 ## General rules
@@ -168,9 +168,14 @@ contains:
   "actor": "codex",
   "path": "/work/Dispatch-agent-codex-DE-02",
   "branch": "agent/codex/DE-02",
-  "state": "active"
+  "state": "active",
+  "adopted": false,
+  "external_id": null
 }
 ```
+
+`adopted` and `external_id` mean the same as in a
+[workspace record](#workspace-responses).
 
 Actor fields and unset timestamps are JSON `null`, not empty strings or `-`.
 Set timestamps are Unix seconds. Task, dependency, commit, and history arrays
@@ -252,8 +257,15 @@ Each workspace record contains:
 | `state` | string | `creating`, `active`, or `removed` |
 | `sequence_tasks` | array of string | Task chain for `--sequence` workspaces, else `[]` |
 | `review_gate` | string or null | Sequence-terminating review task, if any |
+| `adopted` | boolean | `true` when `workspace adopt` recorded a worktree another tool created |
+| `external_id` | string or null | `<tool>:<id>` given with `--external`, else `null` |
 | `created_at` | integer or null | Unix timestamp |
 | `updated_at` | integer or null | Unix timestamp |
+
+`adopted` and `external_id` were added in a compatible release, so
+`schema_version` stays `1`. Records written before them report `false` and
+`null`. Dispatch never deletes an adopted worktree unless
+`workspace remove --delete-worktree` asks it to.
 
 ## Doctor responses
 
@@ -323,7 +335,7 @@ Task commands (`task add|edit|move|delete`, `group add|ready`,
 - `summary` describing the board after the change; and
 - `warnings` always `[]`.
 
-Workspace commands (`workspace create|remove|prune`) use the
+Workspace commands (`workspace create|adopt|remove|prune`) use the
 [workspace envelope](#workspace-responses), whose `workspaces` array holds the
 records the command acted on. A record the command removed is reported as it
 was just before removal, with `state` set to `"removed"`.
@@ -383,7 +395,8 @@ do not know.
 | `unassign` | `unassign` | The unassigned task | `previous_assignee` (string or null) |
 | `commit add` | `commit_add` | The task | `commit` (the recorded ref) |
 | `workspace create` | `workspace_create` | The workspace's task | `workspace` (workspace ID) |
-| `workspace remove` | `workspace_remove` | The workspace's task | `workspace` (workspace ID), `force` (boolean) |
+| `workspace adopt` | `workspace_adopt` | The workspace's task | `workspace` (workspace ID), `external_id` (string or null) |
+| `workspace remove` | `workspace_remove` | The workspace's task | `workspace` (workspace ID), `force` (boolean), `worktree_deleted` (boolean: `false` when only the record of an adopted workspace was cleared) |
 | `workspace prune` | `workspace_prune` | None | `dry_run` (boolean), `skipped` (array) |
 
 `changed` is `false` for successful no-ops: `commit add` of a ref the task
@@ -394,7 +407,9 @@ nothing (always, with `--dry-run`). Every other success reports `true`.
 
 `workspace prune` lists the pruned records in `workspaces` (with `--dry-run`,
 the records that would be pruned, in their current state) and every
-candidate it left alone in `skipped`:
+candidate it left alone in `skipped`. Pruned records with `adopted: true` had
+only their record removed; their worktrees were left in place. Adopted
+records are never skipped:
 
 ```json
 "skipped": [{"workspace": "DE-07", "reason": "dirty"}]
@@ -454,7 +469,8 @@ The version 1 error codes are:
 | `invalid_commit` | The commit ref is not a 4–64 character hex SHA |
 | `invalid_group` | The group name is empty or too long |
 | `invalid_prefix` | The group prefix is not valid |
-| `invalid_path` | The workspace `--dir` cannot be resolved |
+| `invalid_path` | The workspace `--dir` cannot be resolved, or the `adopt --path` is not an existing directory |
+| `invalid_external_id` | The `--external` value is not `<tool>:<id>` |
 | `task_not_found` | A named task does not exist |
 | `group_not_found` | A named group does not exist |
 | `workspace_not_found` | No workspace matches the task or workspace ID |
@@ -470,10 +486,11 @@ The version 1 error codes are:
 | `dependency_not_found` | `dep remove` of a dependency that is not recorded |
 | `workspace_exists` | The task already has an active workspace |
 | `invalid_sequence` | The tasks do not form a valid `--sequence` chain |
-| `workspace_conflict` | The workspace path or branch is already in use |
+| `workspace_conflict` | The workspace path, branch, or external ID is already in use |
 | `repo_not_git` | The board repository is not a git repository |
 | `workspace_dirty` | `workspace remove` without `--force` on a worktree with changes |
-| `not_a_worktree` | The workspace path is not a registered git worktree |
+| `not_a_worktree` | The workspace path is not a registered git worktree (for `adopt`, of the board repository) |
+| `branch_mismatch` | `adopt --branch` differs from the worktree's checked-out branch, or the worktree has a detached HEAD and no `--branch` was given |
 | `git_failed` | A git command needed by the workspace operation failed |
 
 New codes may be added in a compatible release; treat an unknown code as a

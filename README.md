@@ -310,9 +310,10 @@ command, and writes the same command to `.dispatch/agents/<name>/resume.sh`.
 
 ```bash
 dispatch workspace create <task-id> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
+dispatch workspace adopt <task-id> --actor <agent-id> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]
 dispatch workspace list
 dispatch workspace show <task-id-or-workspace>
-dispatch workspace remove <task-id-or-workspace> [--force]
+dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]
 dispatch workspace repair <task-id-or-workspace>
 dispatch workspace prune [--done] [--stale] [--dry-run]
 ```
@@ -331,6 +332,43 @@ dirty worktrees, and non-worktree paths unless the operation is explicitly safe.
 worktree. Use `--dry-run` to preview prune actions. If the workflow directory
 and its worktrees move together, `doctor` identifies relocated worktrees and
 `workspace repair <id>` updates the recorded repository and worktree paths.
+
+#### Adopting A Worktree Created Elsewhere
+
+`workspace adopt` records a Git worktree that another tool already created,
+for example `orca worktree create`, without running `git worktree add`:
+
+```bash
+dispatch workspace adopt DE-12 --actor claude --path ../repo-orca-DE-12 --external orca:ws-42
+```
+
+The path must be an existing directory registered as a worktree of the
+board's repository (`git worktree list`), not the repository itself, and not
+already recorded. The task must be ready and unassigned, exactly as for
+`workspace create`, and `--sequence` covers the same linear chains. The branch
+is read from the worktree; `--branch` must match it, and is required only when
+the worktree has a detached HEAD. `--external <tool>:<id>` stores an
+`external_id` (a lowercase tool name, a colon, and an ID without spaces) so the
+other tool can map the record back to its own workspace; an external ID can
+belong to only one active record.
+
+Adopted workspaces behave like created ones for `start`, `show`, `list`, and
+the TUI, and `workspace show` prints `Origin: adopted` and the external ID.
+The worktree belongs to the tool that made it, so Dispatch leaves it on disk:
+
+- `workspace remove` clears only the record, even if the worktree is dirty or
+  already gone. `--delete-worktree` removes the worktree as well, with the
+  usual dirty-tree check (`--force` skips it).
+- `workspace prune --done` releases done adopted records without touching
+  their worktrees, and `workspace prune --stale` clears adopted records whose
+  worktree directory no longer exists.
+- `doctor` reports a missing adopted worktree as `workspace_path_missing`
+  rather than a relocation, and `workspace repair` refuses adopted records;
+  remove the record and adopt the worktree at its new path instead.
+
+`workspace adopt` adds a `workspace_adopt` entry to the task history and a
+`dispatch.log` record. See [ADR 0003](docs/adr/0003-workspace-adopt.md) for the
+design choices.
 
 ### TUI
 
@@ -697,7 +735,7 @@ the command name for commands without one):
 ```text
 task add|edit|move|delete   group add|ready   dep add|remove
 ready <id>...   start   finish   review   unassign   commit add
-workspace create|remove|prune
+workspace create|adopt|remove|prune
 ```
 
 On success they print the same envelope as the read commands (workspace
