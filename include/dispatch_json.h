@@ -2,6 +2,7 @@
 #define DISPATCH_JSON_H
 
 #include "dispatch.h"
+#include "dispatch_log.h"
 
 #include <stdio.h>
 
@@ -36,6 +37,11 @@ int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
 int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
                               const char *command, const DispatchAgent *only,
                               int include_archived);
+
+/* Writes the `log` envelope for records read from log_path. */
+int dispatch_json_emit_log(FILE *stream, const DispatchBoard *board,
+                           const char *log_path, const DispatchLogQuery *query,
+                           const DispatchLogRead *read);
 
 /* Presentation state of every task, captured before a mutation so the
  * result can report previous states and newly ready tasks. */

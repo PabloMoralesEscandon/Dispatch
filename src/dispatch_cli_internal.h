@@ -66,6 +66,7 @@ int cmd_doctor(int argc, char **argv);
 int cmd_finish(int argc, char **argv);
 int cmd_group(int argc, char **argv);
 int cmd_list(int argc, char **argv);
+int cmd_log(int argc, char **argv);
 int cmd_normalize(void);
 int cmd_queue_list(int argc, char **argv, DispatchState state, const char *label);
 int cmd_ready(int argc, char **argv);

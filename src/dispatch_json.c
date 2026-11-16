@@ -279,6 +279,53 @@ int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
     return dump_document(stream, root);
 }
 
+int dispatch_json_emit_log(FILE *stream, const DispatchBoard *board,
+                           const char *log_path, const DispatchLogQuery *query,
+                           const DispatchLogRead *read) {
+    json_t *query_json_value = json_object();
+    for (int i = 0; i < DISPATCH_LOG_FILTER_COUNT; i++)
+        json_object_set_new(query_json_value, dispatch_log_filter_fields[i],
+                            optional_string(query->filters[i]));
+    json_object_set_new(query_json_value, "limit",
+                        query->limit ? json_integer((json_int_t)query->limit)
+                                     : json_null());
+
+    json_t *summary = json_object();
+    json_object_set_new(summary, "total", json_integer((json_int_t)read->total));
+    json_object_set_new(summary, "matched",
+                        json_integer((json_int_t)read->matched));
+    json_object_set_new(summary, "returned",
+                        json_integer((json_int_t)read->count));
+    json_object_set_new(
+        summary, "skipped",
+        json_integer((json_int_t)(read->malformed + read->unsupported)));
+
+    json_t *records = json_array();
+    for (size_t i = 0; i < read->count; i++)
+        json_array_append(records, read->items[i].record);
+
+    json_t *warnings = json_array();
+    DispatchLogWarning found[2];
+    size_t warning_count = dispatch_log_read_warnings(read, log_path, found);
+    for (size_t i = 0; i < warning_count; i++) {
+        json_t *warning = json_object();
+        json_object_set_new(warning, "code", json_string(found[i].code));
+        json_object_set_new(warning, "message", json_string(found[i].message));
+        json_object_set_new(warning, "task_id", json_null());
+        json_object_set_new(warning, "agent", json_null());
+        json_object_set_new(warning, "count",
+                            json_integer((json_int_t)found[i].count));
+        json_object_set_new(warning, "first_line",
+                            json_integer((json_int_t)found[i].first_line));
+        json_array_append_new(warnings, warning);
+    }
+
+    json_t *root = envelope_json(board, "log", query_json_value, summary);
+    json_object_set_new(root, "records", records);
+    json_object_set_new(root, "warnings", warnings);
+    return dump_document(stream, root);
+}
+
 static json_t *blocked_by_json(const DispatchBoard *board,
                                const DispatchTask *task) {
     json_t *array = json_array();

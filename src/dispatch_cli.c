@@ -19,6 +19,7 @@ const DispatchCliCommand commands[] = {
     {"blocked", "List blocked work and blockers"},
     {"status", "Show board overview and health warnings"},
     {"doctor", "Check Dispatch setup and diagnostics"},
+    {"log", "Show dispatch.log audit records"},
     {"tui", "Open terminal UI"},
     {"show", "Show one task"},
     {"list", "List tasks by group and workflow order"},
@@ -52,7 +53,7 @@ void dispatch_cli_print_help(void) {
     puts("Implemented now:");
     puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/adopt/list/show/remove/repair/prune,");
     puts("  group add/ready, task add/edit/move/delete, dep add/remove, commit add/list/show, completion candidates,");
-    puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, tui, list, show, blocked");
+    puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, log, tui, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -541,6 +542,8 @@ static int run_command(const DispatchCliCommand *command, int argc,
         return cmd_status(argc, argv);
     if (strcmp(command->name, "doctor") == 0)
         return cmd_doctor(argc, argv);
+    if (strcmp(command->name, "log") == 0)
+        return cmd_log(argc, argv);
     if (strcmp(command->name, "tui") == 0)
         return dispatch_tui_main(argc, argv);
     if (strcmp(command->name, "ready") == 0)
