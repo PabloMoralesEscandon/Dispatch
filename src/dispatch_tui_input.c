@@ -186,6 +186,10 @@ void tui_handle_key(DispatchTui *tui, int ch) {
         else if (tui->screen == TUI_SCREEN_AGENT_INSPECTOR)
             edit_selected_agent_prompt(tui);
         break;
+    case 'o':
+        if (tui->screen == TUI_SCREEN_TASK_INSPECTOR)
+            run_selected_task_open_issue(tui);
+        break;
     case 'm':
         if (tui->screen == TUI_SCREEN_BOARD ||
             tui->screen == TUI_SCREEN_TASK_INSPECTOR)

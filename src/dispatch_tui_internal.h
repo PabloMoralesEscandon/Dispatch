@@ -436,6 +436,12 @@ int path_has_git_metadata(const char *path);
 
 void run_selected_task_diff(DispatchTui *tui);
 
+/* Builds the platform opener argv (open on macOS, xdg-open elsewhere) for
+ * the task's linked issue URL. Returns 0 when the task has no issue. */
+int issue_open_argv_for_task(const DispatchTask *task, DispatchExecArgv *argv);
+
+void run_selected_task_open_issue(DispatchTui *tui);
+
 char *tui_base64_encode(const unsigned char *data, size_t len);
 
 char *tui_trimmed_copy(const char *value);

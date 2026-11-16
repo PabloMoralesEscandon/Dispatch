@@ -3044,6 +3044,40 @@ assert_line "Issue: -"
 expect_ok "$BIN" show DE-01 --json
 assert_json tasks.0.issue null -
 
+# The TUI task inspector shows the issue, and o opens its URL with the
+# platform opener (open on macOS, xdg-open elsewhere).
+expect_ok "$BIN" tui --key-smoke task o
+assert_contains "Status: No issue linked to"
+expect_ok "$BIN" tui --help-controls-smoke
+assert_contains "  o          open linked issue"
+
+case_dir="$(make_case_dir issue-tui)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/issue-links-board.json" dispatch.json
+expect_ok "$BIN" tui --render-smoke task 100 30
+assert_line "  Issue          acme/widgets#12"
+expect_ok "$BIN" tui --open-issue-smoke GH-02
+assert_contains "argv[1]: https://github.com/Other-Org/thing.js/issues/7"
+expect_fail "$BIN" tui --open-issue-smoke GH-04
+assert_contains "No issue linked to GH-04"
+mkdir -p fake-bin
+for opener in open xdg-open; do
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/opened-url"\n' \
+        "$case_dir" > "fake-bin/$opener"
+    chmod +x "fake-bin/$opener"
+done
+PATH="$case_dir/fake-bin:$PATH" expect_ok "$BIN" tui --key-smoke task o
+assert_contains "Status: Opened https://github.com/acme/widgets/issues/12"
+assert_file_contains opened-url "https://github.com/acme/widgets/issues/12"
+# o belongs to the inspector; the board ignores it.
+rm -f opened-url
+PATH="$case_dir/fake-bin:$PATH" expect_ok "$BIN" tui --key-smoke board o
+if [ -e opened-url ]; then
+    fail "o opened an issue from the board view"
+fi
+PATH=/no-such-dir expect_ok "$BIN" tui --key-smoke task o
+assert_contains "is not available; issue: https://github.com/acme/widgets/issues/12"
+
 cd "$ROOT"
 
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"

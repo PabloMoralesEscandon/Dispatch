@@ -376,6 +376,9 @@ commit metadata exists. The diff covers all of the task's recorded commits, is
 rendered with forced color, and is shown through a pager (`$PAGER`, else `less`
 or `more`) so it stays on screen until you quit the pager. When no pager is
 installed the diff is shown without paging.
+The task inspector shows the task's linked GitHub issue, and `o` there opens
+the issue URL with `open` on macOS or `xdg-open` elsewhere. Linking and
+clearing issues happens through `task add` and `task edit`.
 In the task creation form, `Ctrl-O` opens an option picker for the active
 field: on the Group field it lists existing groups (typing still creates a new
 group), and on the Depends field it lists not-done tasks, excluding done tasks
@@ -423,7 +426,8 @@ ready|start|finish|review <task-id>
 Noninteractive acceptance hooks are available for tests and terminal smoke
 checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
 `--action-smoke`, `--diff-smoke`, `--agents-smoke`, `--workspaces-smoke`,
-`--logs-smoke`, `--palette-smoke`, and `--palette-complete-smoke`.
+`--logs-smoke`, `--open-issue-smoke`, `--palette-smoke`, and
+`--palette-complete-smoke`.
 `--render-smoke <screen> <cols> <rows> [keys]` renders through an ncurses
 virtual terminal and prints a normalized plain-text frame for headless tests.
 

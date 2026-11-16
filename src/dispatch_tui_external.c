@@ -2,6 +2,8 @@
 
 #include "dispatch_tui_internal.h"
 
+#include "dispatch_issue.h"
+
 static char *tui_shell_quote(const char *value);
 static const char *diff_pager(void);
 static int command_available(const char *command);
@@ -225,6 +227,72 @@ void run_selected_task_diff(DispatchTui *tui) {
 
 static int command_available(const char *command) {
     return dispatch_exec_command_available(command);
+}
+
+static const char *url_opener(void) {
+#ifdef __APPLE__
+    return "open";
+#else
+    return "xdg-open";
+#endif
+}
+
+int issue_open_argv_for_task(const DispatchTask *task, DispatchExecArgv *argv) {
+    DispatchIssueRef ref;
+    if (!task || !task->issue ||
+        !dispatch_issue_parse_canonical(task->issue, &ref))
+        return 0;
+    char url[DISPATCH_ISSUE_TEXT_MAX];
+    dispatch_issue_format_url(&ref, url, sizeof(url));
+    if (!dispatch_exec_argv_append(argv, url_opener()) ||
+        !dispatch_exec_argv_append(argv, url)) {
+        dispatch_exec_argv_free(argv);
+        return 0;
+    }
+    return 1;
+}
+
+void run_selected_task_open_issue(DispatchTui *tui) {
+    DispatchTask *task = selected_visible_task(tui);
+    if (!task) {
+        tui_set_status(tui, "No selected task");
+        return;
+    }
+
+    char message[512];
+    DispatchExecArgv argv = {0};
+    if (!issue_open_argv_for_task(task, &argv)) {
+        snprintf(message, sizeof(message), "No issue linked to %s", task->id);
+        tui_set_status(tui, message);
+        return;
+    }
+    const char *opener = argv.items[0];
+    const char *url = argv.items[1];
+    if (!command_available(opener)) {
+        snprintf(message, sizeof(message), "%s is not available; issue: %s",
+                 opener, url);
+        tui_set_status(tui, message);
+        dispatch_exec_argv_free(&argv);
+        return;
+    }
+
+    /* The opener hands the URL to the desktop and returns, so the TUI keeps
+     * the screen; its output would only corrupt the frame. */
+    DispatchExecOptions options = {
+        .stdin_mode = DISPATCH_EXEC_DEV_NULL,
+        .stdout_mode = DISPATCH_EXEC_DEV_NULL,
+        .stderr_mode = DISPATCH_EXEC_DEV_NULL,
+    };
+    DispatchExecResult result;
+    int launched = dispatch_exec_run((const char *const *)argv.items, &options,
+                                     &result);
+    int status = launched ? dispatch_exec_result_status(&result) : -1;
+    if (!launched || status != 0)
+        snprintf(message, sizeof(message), "Could not open %s", url);
+    else
+        snprintf(message, sizeof(message), "Opened %s", url);
+    tui_set_status(tui, message);
+    dispatch_exec_argv_free(&argv);
 }
 
 static const char *fallback_editor(void) {

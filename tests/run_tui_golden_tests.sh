@@ -107,4 +107,20 @@ capture_frame accented-task board i
 # every ASCII letter to its own board shortcut before the search buffer.
 capture_frame accented-search board "/ó"
 
+# GH-1: a task with a linked GitHub issue, kept in its own fixture so the
+# issue_link log record does not churn the logs frame above.
+ISSUE="$TMP_ROOT/issue"
+mkdir -p "$ISSUE/repo"
+git -C "$ISSUE/repo" init -q
+
+cd "$ISSUE"
+"$BIN" init repo >/dev/null
+"$BIN" group add Development --prefix DE >/dev/null
+"$BIN" task add DE "Trace work to GitHub" \
+    --description "Show the linked issue in the task inspector." \
+    --issue https://github.com/acme/widgets/issues/12 >/dev/null
+"$BIN" ready DE-01 --actor user >/dev/null
+
+capture_frame issue-task task
+
 printf 'PASS: TUI golden frames\n'

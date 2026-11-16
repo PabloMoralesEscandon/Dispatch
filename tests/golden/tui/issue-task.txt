@@ -1,0 +1,31 @@
+Frame: task 100x30
+ DISPATCH   Task                                                         actor:user  board:Dispatch
+
+  DE-01  Trace work to GitHub                                                                ready
+  ------------------------------------------------------------------------------------------------
+
+  Description    Show the linked issue in the task inspector.
+
+Details
+  Group          DE
+  Issue          acme/widgets#12
+  Review gate    required
+  Assigned       -
+  Started by     -
+  Completed by   -
+
+Dependencies
+  Depends on     -
+  Blocks         -
+  Commits        -
+
+History
+  - created by user
+  - issue_link by user: acme/widgets#12
+  - ready by user
+
+
+
+
+
+ Ready    q/Esc back   e edit   m move   >/< deps   d diff   x/X delete   L logs   PgUp/PgDn scroll

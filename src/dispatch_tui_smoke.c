@@ -13,6 +13,7 @@ static int tui_task_move_options_smoke(const char *current_group);
 static int tui_task_move_smoke(const char *task_id, const char *group_id,
                                const char *actor);
 static int tui_diff_smoke(const char *task_id);
+static int tui_open_issue_smoke(const char *task_id);
 static int tui_diff_exec_smoke(const char *task_id);
 static int tui_agents_smoke(void);
 static int tui_agent_inspect_smoke(const char *name);
@@ -284,6 +285,37 @@ static int tui_task_move_smoke(const char *task_id, const char *group_id,
         return 1;
     }
     printf("%s\n", message);
+    return 0;
+}
+
+static int tui_open_issue_smoke(const char *task_id) {
+    DispatchBoard board;
+    char error[256] = {0};
+    if (!dispatch_store_load(&board, DISPATCH_STORE_FILE, error,
+                             sizeof(error))) {
+        fprintf(stderr, "dispatch tui open issue smoke failed: %s\n",
+                error[0] ? error : "could not load board");
+        return 1;
+    }
+
+    DispatchTask *task = dispatch_board_find_task(&board, task_id);
+    if (!task) {
+        fprintf(stderr, "No task with id %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    DispatchExecArgv command = {0};
+    if (!issue_open_argv_for_task(task, &command)) {
+        fprintf(stderr, "No issue linked to %s\n", task_id);
+        dispatch_board_free(&board);
+        return 1;
+    }
+
+    for (size_t i = 0; i < command.count; i++)
+        printf("argv[%zu]: %s\n", i, command.items[i]);
+    dispatch_exec_argv_free(&command);
+    dispatch_board_free(&board);
     return 0;
 }
 
@@ -1552,6 +1584,7 @@ static void print_tui_help(void) {
     puts("  r/s/f/v ready/start/finish/review selected task");
     puts("  R ready selected task without a review gate");
     puts("  x/X delete selected task (X force-deletes past dependents)");
+    puts("  o in the task inspector opens the linked GitHub issue");
     puts("  tmux: no control-prefix bindings; run alongside tmux panes");
     puts("");
     puts("  --smoke   load the board and exit without initializing ncurses");
@@ -1563,6 +1596,7 @@ static void print_tui_help(void) {
     puts("  --task-move-options-smoke <current-group>");
     puts("  --diff-smoke <task-id>     print external diff command and exit");
     puts("  --diff-exec-smoke <task-id>  execute external diff and exit");
+    puts("  --open-issue-smoke <task-id>  print the issue URL opener command and exit");
     puts("  --agents-smoke             print agent dashboard data and exit");
     puts("  --agent-inspect-smoke <name>  print agent inspector data and exit");
     puts("  --agent-session-smoke <name> <session|- > <task|- > <workspace|- >");
@@ -1632,6 +1666,8 @@ int dispatch_tui_main(int argc, char **argv) {
         return tui_diff_smoke(argv[3]);
     if (argc == 4 && strcmp(argv[2], "--diff-exec-smoke") == 0)
         return tui_diff_exec_smoke(argv[3]);
+    if (argc == 4 && strcmp(argv[2], "--open-issue-smoke") == 0)
+        return tui_open_issue_smoke(argv[3]);
     if (argc == 3 && strcmp(argv[2], "--agents-smoke") == 0)
         return tui_agents_smoke();
     if (argc == 4 && strcmp(argv[2], "--agent-inspect-smoke") == 0)
