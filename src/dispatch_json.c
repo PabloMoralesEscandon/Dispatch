@@ -536,6 +536,9 @@ DispatchJsonResult *dispatch_json_result_new(const char *action) {
     result->changed = 1;
     result->targets = json_array();
     result->extras = json_object();
+    /* Prune always reports its skipped list, even when empty. */
+    if (strcmp(action, "workspace_prune") == 0)
+        json_object_set_new(result->extras, "skipped", json_array());
     return result;
 }
 

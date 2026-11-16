@@ -1,18 +1,18 @@
 #include "dispatch_cli_internal.h"
 
 static void print_workspace_create_usage(void) {
-    fprintf(stderr,
-            "Usage: dispatch workspace create <task-id> --actor <name> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]\n");
+    cli_error("usage", NULL,
+              "Usage: dispatch workspace create <task-id> --actor <name> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]\n");
 }
 
 static void print_workspace_remove_usage(void) {
-    fprintf(stderr,
-            "Usage: dispatch workspace remove <task-id-or-workspace> [--force]\n");
+    cli_error("usage", NULL,
+              "Usage: dispatch workspace remove <task-id-or-workspace> [--force]\n");
 }
 
 static void print_workspace_prune_usage(void) {
-    fprintf(stderr,
-            "Usage: dispatch workspace prune [--done] [--stale] [--dry-run]\n");
+    cli_error("usage", NULL,
+              "Usage: dispatch workspace prune [--done] [--stale] [--dry-run]\n");
 }
 
 static void print_workspace_repair_usage(void) {
@@ -23,8 +23,9 @@ static void print_workspace_repair_usage(void) {
 static char *current_workflow_path(void) {
     char *path = getcwd(NULL, 0);
     if (!path) {
-        fprintf(stderr, "Could not resolve current directory: %s\n",
-                strerror(errno));
+        cli_error("internal_error", NULL,
+                  "Could not resolve current directory: %s\n",
+                  strerror(errno));
         return NULL;
     }
     return path;
@@ -180,6 +181,25 @@ static void workspace_free_fields(DispatchWorkspace *workspace) {
     free(workspace->review_gate);
 }
 
+/* Deep copy of a workspace record, so JSON results can report records
+ * after they are removed from the board. */
+static DispatchWorkspace workspace_clone(const DispatchWorkspace *workspace) {
+    DispatchWorkspace copy = *workspace;
+    copy.id = cli_strdup(workspace->id);
+    copy.task_id = cli_strdup(workspace->task_id);
+    copy.actor = cli_strdup(workspace->actor);
+    copy.path = cli_strdup(workspace->path);
+    copy.branch = cli_strdup(workspace->branch);
+    copy.repo_path = cli_strdup(workspace->repo_path);
+    copy.review_gate =
+        workspace->review_gate ? cli_strdup(workspace->review_gate) : NULL;
+    memset(&copy.sequence_tasks, 0, sizeof(copy.sequence_tasks));
+    for (size_t i = 0; i < workspace->sequence_tasks.count; i++)
+        string_list_append_cli(&copy.sequence_tasks,
+                               workspace->sequence_tasks.items[i]);
+    return copy;
+}
+
 static int remove_workspace_record(DispatchBoard *board, const char *task_id) {
     for (size_t i = 0; i < board->workspaces.count; i++) {
         DispatchWorkspace *workspace = &board->workspaces.items[i];
@@ -280,18 +300,20 @@ static int build_workspace_sequence(const DispatchBoard *board,
     DispatchTask *current = start;
     for (size_t guard = 0; guard < board->tasks.count; guard++) {
         if (current->assigned_to) {
-            fprintf(stderr, "Sequence task %s must be unassigned\n",
-                    current->id);
+            cli_error("invalid_sequence", current->id,
+                      "Sequence task %s must be unassigned\n", current->id);
             return 0;
         }
         DispatchState state = dispatch_task_effective_state(board, current);
         if (state != DISPATCH_STATE_READY && state != DISPATCH_STATE_BLOCKED) {
-            fprintf(stderr, "Sequence task %s must be ready or blocked\n",
-                    current->id);
+            cli_error("invalid_sequence", current->id,
+                      "Sequence task %s must be ready or blocked\n",
+                      current->id);
             return 0;
         }
         if (live_workspace_for_task(board, current->id)) {
-            fprintf(stderr, "Workspace already exists for %s\n", current->id);
+            cli_error("workspace_exists", current->id,
+                      "Workspace already exists for %s\n", current->id);
             return 0;
         }
 
@@ -310,21 +332,22 @@ static int build_workspace_sequence(const DispatchBoard *board,
             return 1;
         }
         if (!next) {
-            fprintf(stderr,
-                    "Sequence task %s must have exactly one dependent\n",
-                    current->id);
+            cli_error("invalid_sequence", current->id,
+                      "Sequence task %s must have exactly one dependent\n",
+                      current->id);
             return 0;
         }
         if (!task_depends_only_on(next, current->id)) {
-            fprintf(stderr, "Sequence task %s must depend only on %s\n",
-                    next->id, current->id);
+            cli_error("invalid_sequence", next->id,
+                      "Sequence task %s must depend only on %s\n", next->id,
+                      current->id);
             return 0;
         }
         current = next;
     }
 
-    fprintf(stderr, "Sequence from %s does not reach a review gate\n",
-            start->id);
+    cli_error("invalid_sequence", start->id,
+              "Sequence from %s does not reach a review gate\n", start->id);
     return 0;
 }
 
@@ -471,7 +494,8 @@ static int mark_workspace_active(const char *task_id) {
         dispatch_board_find_workspace(&locked.board, task_id);
     if (!workspace) {
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace reservation disappeared for %s\n", task_id);
+        cli_error("workspace_not_found", task_id,
+                  "Workspace reservation disappeared for %s\n", task_id);
         return 0;
     }
 
@@ -526,8 +550,8 @@ static int cmd_workspace_create(int argc, char **argv) {
         return 1;
     }
     if (!dispatch_actor_label_is_valid(actor)) {
-        fprintf(stderr,
-                "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+        cli_error("invalid_actor", NULL,
+                  "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
         return 1;
     }
 
@@ -545,7 +569,8 @@ static int cmd_workspace_create(int argc, char **argv) {
     DispatchAgent *actor_agent = dispatch_board_find_agent(board, actor);
     if (actor_agent && actor_agent->archived) {
         locked_board_close(&locked);
-        fprintf(stderr, "Agent %s is archived; restore it first\n", actor);
+        cli_error("agent_archived", NULL,
+                  "Agent %s is archived; restore it first\n", actor);
         free(workflow_dir);
         return 1;
     }
@@ -553,20 +578,24 @@ static int cmd_workspace_create(int argc, char **argv) {
     DispatchTask *task = dispatch_board_find_task(board, task_id);
     if (!task) {
         locked_board_close(&locked);
-        fprintf(stderr, "No task with id %s\n", task_id);
+        cli_error("task_not_found", task_id, "No task with id %s\n", task_id);
         free(workflow_dir);
         return 1;
     }
     if (dispatch_task_effective_state(board, task) != DISPATCH_STATE_READY ||
         task->assigned_to) {
+        const char *code =
+            task->assigned_to ? "already_assigned" : "invalid_state";
         locked_board_close(&locked);
-        fprintf(stderr, "Task %s must be ready and unassigned\n", task_id);
+        cli_error(code, task_id, "Task %s must be ready and unassigned\n",
+                  task_id);
         free(workflow_dir);
         return 1;
     }
     if (live_workspace_for_task(board, task_id)) {
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace already exists for %s\n", task_id);
+        cli_error("workspace_exists", task_id,
+                  "Workspace already exists for %s\n", task_id);
         free(workflow_dir);
         return 1;
     }
@@ -586,9 +615,9 @@ static int cmd_workspace_create(int argc, char **argv) {
         repo_option && repo_option[0] ? repo_option : board->repo_path;
     char *repo_path = dispatch_resolve_path(workflow_dir, configured_repo);
     if (!repo_path || !dispatch_path_is_git_repository(repo_path)) {
-        fprintf(stderr,
-                "Configured repository is not a git repository: %s\n",
-                configured_repo);
+        cli_error("repo_not_git", task_id,
+                  "Configured repository is not a git repository: %s\n",
+                  configured_repo);
         locked_board_close(&locked);
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
@@ -615,7 +644,8 @@ static int cmd_workspace_create(int argc, char **argv) {
             : dispatch_default_workspace_branch(actor, name_for_defaults);
     if (!branch || branch[0] == '\0') {
         locked_board_close(&locked);
-        fprintf(stderr, "Could not derive workspace branch\n");
+        cli_error("internal_error", task_id,
+                  "Could not derive workspace branch\n");
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -632,7 +662,8 @@ static int cmd_workspace_create(int argc, char **argv) {
                                                                  name_for_defaults);
     if (!workspace_path) {
         locked_board_close(&locked);
-        fprintf(stderr, "Could not resolve workspace directory\n");
+        cli_error("invalid_path", task_id,
+                  "Could not resolve workspace directory\n");
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -644,7 +675,8 @@ static int cmd_workspace_create(int argc, char **argv) {
 
     if (strcmp(repo_path, workspace_path) == 0) {
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace path must not equal repository path\n");
+        cli_error("workspace_conflict", task_id,
+                  "Workspace path must not equal repository path\n");
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -656,7 +688,8 @@ static int cmd_workspace_create(int argc, char **argv) {
     }
     if (workspace_branch_exists(board, branch)) {
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace branch already reserved: %s\n", branch);
+        cli_error("workspace_conflict", task_id,
+                  "Workspace branch already reserved: %s\n", branch);
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -668,8 +701,8 @@ static int cmd_workspace_create(int argc, char **argv) {
     }
     if (workspace_path_exists(board, workspace_path)) {
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace path already reserved: %s\n",
-                workspace_path);
+        cli_error("workspace_conflict", task_id,
+                  "Workspace path already reserved: %s\n", workspace_path);
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -682,8 +715,8 @@ static int cmd_workspace_create(int argc, char **argv) {
     struct stat workspace_info;
     if (stat(workspace_path, &workspace_info) == 0) {
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace path already exists: %s\n",
-                workspace_path);
+        cli_error("workspace_conflict", task_id,
+                  "Workspace path already exists: %s\n", workspace_path);
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -716,7 +749,8 @@ static int cmd_workspace_create(int argc, char **argv) {
     if (!git_worktree_add(repo_path, workspace_path, branch, branch_exists)) {
         (void)git_worktree_remove_force(repo_path, workspace_path);
         remove_workspace_reservation_after_failure(task_id);
-        fprintf(stderr, "Could not create git worktree for %s\n", task_id);
+        cli_error("git_failed", task_id,
+                  "Could not create git worktree for %s\n", task_id);
         string_list_free_cli(&sequence_tasks);
         free(review_gate);
         free(sequence_name);
@@ -729,9 +763,9 @@ static int cmd_workspace_create(int argc, char **argv) {
 
     if (!mark_workspace_active(task_id)) {
         if (!git_worktree_remove_force(repo_path, workspace_path)) {
-            fprintf(stderr,
-                    "Could not roll back git worktree %s; manual cleanup may be required\n",
-                    workspace_path);
+            cli_error("git_failed", task_id,
+                      "Could not roll back git worktree %s; manual cleanup may be required\n",
+                      workspace_path);
         }
         remove_workspace_reservation_after_failure(task_id);
         string_list_free_cli(&sequence_tasks);
@@ -744,11 +778,14 @@ static int cmd_workspace_create(int argc, char **argv) {
         return 1;
     }
 
-    printf("Created workspace %s for %s\n", task_id, actor);
-    printf("  path: %s\n", workspace_path);
-    printf("  branch: %s\n", branch);
-    printf("  state: active\n");
-    if (sequence) {
+    int json = cli_json();
+    if (!json) {
+        printf("Created workspace %s for %s\n", task_id, actor);
+        printf("  path: %s\n", workspace_path);
+        printf("  branch: %s\n", branch);
+        printf("  state: active\n");
+    }
+    if (!json && sequence) {
         printf("  tasks:");
         for (size_t i = 0; i < sequence_tasks.count; i++)
             printf("%s%s", i == 0 ? " " : ",", sequence_tasks.items[i]);
@@ -771,6 +808,24 @@ static int cmd_workspace_create(int argc, char **argv) {
     append_dispatch_log(actor, "workspace", "workspace_create", targets, 2,
                         context, 4, message);
 
+    int status = 0;
+    if (json) {
+        DispatchBoard final_board;
+        if (!load_board_or_error(&final_board)) {
+            status = 1;
+        } else {
+            DispatchWorkspace *created =
+                dispatch_board_find_workspace(&final_board, task_id);
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("workspace_create");
+            dispatch_json_result_add_target(json_result, task_id);
+            dispatch_json_result_set_string(json_result, "workspace", task_id);
+            status = cli_json_emit_workspaces(&final_board, created,
+                                              created ? 1 : 0, json_result);
+            dispatch_board_free(&final_board);
+        }
+    }
+
     string_list_free_cli(&sequence_tasks);
     free(review_gate);
     free(sequence_name);
@@ -778,7 +833,7 @@ static int cmd_workspace_create(int argc, char **argv) {
     free(repo_path);
     free(branch);
     free(workspace_path);
-    return 0;
+    return status;
 }
 
 int workspace_git_worktree_present_at(const char *path) {
@@ -926,7 +981,8 @@ static int cmd_workspace_remove(int argc, char **argv) {
                                                            target);
     if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
         locked_board_close(&locked);
-        fprintf(stderr, "No workspace for %s\n", target);
+        cli_error("workspace_not_found", NULL, "No workspace for %s\n",
+                  target);
         return 1;
     }
 
@@ -936,9 +992,9 @@ static int cmd_workspace_remove(int argc, char **argv) {
                                                                     task)
                                     : DISPATCH_STATE_PROPOSED;
     if (!force && task_state == DISPATCH_STATE_DOING) {
-        fprintf(stderr,
-                "Workspace task %s is doing; use --force to remove\n",
-                workspace->task_id);
+        cli_error("invalid_state", workspace->task_id,
+                  "Workspace task %s is doing; use --force to remove\n",
+                  workspace->task_id);
         locked_board_close(&locked);
         return 1;
     }
@@ -949,8 +1005,9 @@ static int cmd_workspace_remove(int argc, char **argv) {
     locked_board_close(&locked);
 
     if (!git_worktree_is_registered(repo_path, workspace_path)) {
-        fprintf(stderr, "Workspace path is not a git worktree: %s\n",
-                workspace_path);
+        cli_error("not_a_worktree", record_task_id,
+                  "Workspace path is not a git worktree: %s\n",
+                  workspace_path);
         free(record_task_id);
         free(repo_path);
         free(workspace_path);
@@ -958,8 +1015,8 @@ static int cmd_workspace_remove(int argc, char **argv) {
     }
 
     if (!force && git_worktree_is_dirty(workspace_path)) {
-        fprintf(stderr, "Workspace has uncommitted changes: %s\n",
-                workspace_path);
+        cli_error("workspace_dirty", record_task_id,
+                  "Workspace has uncommitted changes: %s\n", workspace_path);
         free(record_task_id);
         free(repo_path);
         free(workspace_path);
@@ -969,8 +1026,8 @@ static int cmd_workspace_remove(int argc, char **argv) {
     int removed = force ? git_worktree_remove_force(repo_path, workspace_path)
                         : git_worktree_remove(repo_path, workspace_path);
     if (!removed) {
-        fprintf(stderr, "Could not remove git worktree: %s\n",
-                workspace_path);
+        cli_error("git_failed", record_task_id,
+                  "Could not remove git worktree: %s\n", workspace_path);
         free(record_task_id);
         free(repo_path);
         free(workspace_path);
@@ -983,26 +1040,54 @@ static int cmd_workspace_remove(int argc, char **argv) {
         free(workspace_path);
         return 1;
     }
+    DispatchWorkspace *current =
+        dispatch_board_find_workspace(&locked.board, record_task_id);
+    DispatchWorkspace removed_record = {0};
+    int have_record = 0;
+    if (cli_json() && current) {
+        removed_record = workspace_clone(current);
+        removed_record.state = DISPATCH_WORKSPACE_REMOVED;
+        have_record = 1;
+    }
     if (!remove_workspace_record(&locked.board, record_task_id)) {
+        if (have_record)
+            workspace_free_fields(&removed_record);
         locked_board_close(&locked);
-        fprintf(stderr, "Workspace record disappeared for %s\n",
-                record_task_id);
+        cli_error("workspace_not_found", record_task_id,
+                  "Workspace record disappeared for %s\n", record_task_id);
         free(record_task_id);
         free(repo_path);
         free(workspace_path);
         return 1;
     }
     if (!locked_board_save_or_error(&locked)) {
+        if (have_record)
+            workspace_free_fields(&removed_record);
         locked_board_close(&locked);
         free(record_task_id);
         free(repo_path);
         free(workspace_path);
         return 1;
     }
+
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result =
+            dispatch_json_result_new("workspace_remove");
+        dispatch_json_result_add_target(json_result, record_task_id);
+        dispatch_json_result_set_string(json_result, "workspace",
+                                        record_task_id);
+        dispatch_json_result_set_bool(json_result, "force", force);
+        status = cli_json_emit_workspaces(&locked.board, &removed_record,
+                                          have_record ? 1 : 0, json_result);
+    } else {
+        printf("Removed workspace %s\n", record_task_id);
+        printf("  path: %s\n", workspace_path);
+    }
+    if (have_record)
+        workspace_free_fields(&removed_record);
     locked_board_close(&locked);
 
-    printf("Removed workspace %s\n", record_task_id);
-    printf("  path: %s\n", workspace_path);
     DispatchLogField targets[] = {
         {"task", record_task_id},
         {"workspace", record_task_id},
@@ -1018,7 +1103,7 @@ static int cmd_workspace_remove(int argc, char **argv) {
     free(record_task_id);
     free(repo_path);
     free(workspace_path);
-    return 0;
+    return status;
 }
 
 static int cmd_workspace_repair(int argc, char **argv) {
@@ -1197,6 +1282,8 @@ typedef struct {
     char *repo_path;
     char *workspace_path;
     PruneCandidateKind kind;
+    DispatchWorkspace record; /* copy reported by --json */
+    int pruned;
 } PruneCandidate;
 
 typedef struct {
@@ -1221,6 +1308,8 @@ static void prune_candidates_append(PruneCandidates *candidates,
     candidate->repo_path = cli_strdup(workspace->repo_path);
     candidate->workspace_path = cli_strdup(workspace->path);
     candidate->kind = kind;
+    candidate->record = workspace_clone(workspace);
+    candidate->pruned = 0;
 }
 
 static void prune_candidates_free(PruneCandidates *candidates) {
@@ -1228,6 +1317,7 @@ static void prune_candidates_free(PruneCandidates *candidates) {
         free(candidates->items[i].task_id);
         free(candidates->items[i].repo_path);
         free(candidates->items[i].workspace_path);
+        workspace_free_fields(&candidates->items[i].record);
     }
     free(candidates->items);
     memset(candidates, 0, sizeof(*candidates));
@@ -1296,6 +1386,9 @@ static int cmd_workspace_prune(int argc, char **argv) {
     }
     locked_board_close(&locked);
 
+    int json = cli_json();
+    DispatchJsonResult *json_result =
+        json ? dispatch_json_result_new("workspace_prune") : NULL;
     DispatchStringList records_to_remove = {0};
     size_t pruned = 0;
     size_t skipped = 0;
@@ -1306,15 +1399,21 @@ static int cmd_workspace_prune(int argc, char **argv) {
 
         if (candidate->kind == PRUNE_CANDIDATE_STALE) {
             if (registered) {
-                printf("Skipped stale workspace %s: git worktree exists\n",
-                       candidate->task_id);
+                if (json)
+                    dispatch_json_result_add_skipped(
+                        json_result, candidate->task_id, "worktree_exists");
+                else
+                    printf("Skipped stale workspace %s: git worktree exists\n",
+                           candidate->task_id);
                 skipped++;
                 continue;
             }
 
-            printf("%s stale workspace %s\n",
-                   dry_run ? "Would prune" : "Pruned", candidate->task_id);
+            if (!json)
+                printf("%s stale workspace %s\n",
+                       dry_run ? "Would prune" : "Pruned", candidate->task_id);
             pruned++;
+            candidate->pruned = 1;
             if (!dry_run)
                 string_list_append_cli(&records_to_remove,
                                        candidate->task_id);
@@ -1322,40 +1421,57 @@ static int cmd_workspace_prune(int argc, char **argv) {
         }
 
         if (!registered) {
-            printf("Skipped done workspace %s: path is not a git worktree\n",
-                   candidate->task_id);
+            if (json)
+                dispatch_json_result_add_skipped(
+                    json_result, candidate->task_id, "not_a_worktree");
+            else
+                printf("Skipped done workspace %s: path is not a git worktree\n",
+                       candidate->task_id);
             skipped++;
             continue;
         }
 
         if (git_worktree_is_dirty(candidate->workspace_path)) {
-            printf("Skipped done workspace %s: workspace has uncommitted changes\n",
-                   candidate->task_id);
+            if (json)
+                dispatch_json_result_add_skipped(json_result,
+                                                 candidate->task_id, "dirty");
+            else
+                printf("Skipped done workspace %s: workspace has uncommitted changes\n",
+                       candidate->task_id);
             skipped++;
             continue;
         }
 
         if (dry_run) {
-            printf("Would remove done workspace %s\n", candidate->task_id);
+            if (!json)
+                printf("Would remove done workspace %s\n",
+                       candidate->task_id);
             pruned++;
+            candidate->pruned = 1;
             continue;
         }
 
         if (!git_worktree_remove(candidate->repo_path,
                                  candidate->workspace_path)) {
-            printf("Skipped done workspace %s: could not remove git worktree\n",
-                   candidate->task_id);
+            if (json)
+                dispatch_json_result_add_skipped(
+                    json_result, candidate->task_id, "remove_failed");
+            else
+                printf("Skipped done workspace %s: could not remove git worktree\n",
+                       candidate->task_id);
             skipped++;
             continue;
         }
 
-        printf("Removed done workspace %s\n", candidate->task_id);
+        if (!json)
+            printf("Removed done workspace %s\n", candidate->task_id);
         pruned++;
+        candidate->pruned = 1;
         string_list_append_cli(&records_to_remove, candidate->task_id);
     }
 
     int ok = dry_run || remove_workspace_records_by_id(&records_to_remove);
-    if (pruned == 0 && skipped == 0)
+    if (!json && pruned == 0 && skipped == 0)
         printf("No workspaces pruned\n");
 
     if (ok && !dry_run) {
@@ -1373,9 +1489,39 @@ static int cmd_workspace_prune(int argc, char **argv) {
                             context, 4, "Pruned workspaces");
     }
 
+    int status = ok ? 0 : 1;
+    if (json && ok) {
+        /* Report pruned records (removed unless this is a dry run) against
+         * the board as it is after pruning. */
+        DispatchWorkspace *records =
+            cli_realloc_array(NULL, candidates.count + 1, sizeof(*records));
+        size_t record_count = 0;
+        for (size_t i = 0; i < candidates.count; i++) {
+            if (!candidates.items[i].pruned)
+                continue;
+            records[record_count] = candidates.items[i].record;
+            if (!dry_run)
+                records[record_count].state = DISPATCH_WORKSPACE_REMOVED;
+            record_count++;
+        }
+        dispatch_json_result_set_changed(json_result, !dry_run && pruned > 0);
+        dispatch_json_result_set_bool(json_result, "dry_run", dry_run);
+        DispatchBoard final_board;
+        if (load_board_or_error(&final_board)) {
+            status = cli_json_emit_workspaces(&final_board, records,
+                                              record_count, json_result);
+            json_result = NULL;
+            dispatch_board_free(&final_board);
+        } else {
+            status = 1;
+        }
+        free(records);
+    }
+    dispatch_json_result_free(json_result);
+
     string_list_free_cli(&records_to_remove);
     prune_candidates_free(&candidates);
-    return ok ? 0 : 1;
+    return status;
 }
 
 int cmd_workspace(int argc, char **argv) {

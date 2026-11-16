@@ -472,6 +472,9 @@ static const struct {
     {"review", NULL, "review"},
     {"unassign", NULL, "unassign"},
     {"commit", "add", "commit add"},
+    {"workspace", "create", "workspace create"},
+    {"workspace", "remove", "workspace remove"},
+    {"workspace", "prune", "workspace prune"},
 };
 
 /* Strips --json from a supported mutating command and enters JSON result
