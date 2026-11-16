@@ -136,11 +136,11 @@ int load_board_or_error(DispatchBoard *board) {
     DispatchStoreLock lock = {0};
     if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
                                      sizeof(error))) {
-        fprintf(stderr, "%s\n", error);
+        cli_error("board_locked", NULL, "%s\n", error);
         return 0;
     }
     if (!board_file_exists()) {
-        fprintf(stderr,
+        cli_error("board_missing", NULL,
                 "No dispatch board in this directory; run dispatch init "
                 "<repo-path> or cd to the workflow directory\n");
         dispatch_store_lock_release(&lock);
@@ -148,17 +148,19 @@ int load_board_or_error(DispatchBoard *board) {
     }
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
                                   sizeof(error))) {
-        fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
-                error);
+        cli_error("board_unreadable", NULL, "Could not initialize %s: %s\n",
+                  DISPATCH_STORE_FILE, error);
         dispatch_store_lock_release(&lock);
         return 0;
     }
     if (!dispatch_store_load(board, DISPATCH_STORE_FILE, error, sizeof(error))) {
-        fprintf(stderr, "Could not load %s: %s\n", DISPATCH_STORE_FILE, error);
+        cli_error("board_unreadable", NULL, "Could not load %s: %s\n",
+                  DISPATCH_STORE_FILE, error);
         dispatch_store_lock_release(&lock);
         return 0;
     }
     dispatch_store_lock_release(&lock);
+    cli_json_snapshot(board);
     return 1;
 }
 
@@ -168,12 +170,12 @@ int locked_board_load_or_error(LockedBoard *locked) {
 
     if (!dispatch_store_lock_acquire(&locked->lock, DISPATCH_STORE_FILE, 1000,
                                      error, sizeof(error))) {
-        fprintf(stderr, "%s\n", error);
+        cli_error("board_locked", NULL, "%s\n", error);
         return 0;
     }
 
     if (!board_file_exists()) {
-        fprintf(stderr,
+        cli_error("board_missing", NULL,
                 "No dispatch board in this directory; run dispatch init "
                 "<repo-path> or cd to the workflow directory\n");
         dispatch_store_lock_release(&locked->lock);
@@ -181,19 +183,21 @@ int locked_board_load_or_error(LockedBoard *locked) {
     }
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, NULL, error,
                                   sizeof(error))) {
-        fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
-                error);
+        cli_error("board_unreadable", NULL, "Could not initialize %s: %s\n",
+                  DISPATCH_STORE_FILE, error);
         dispatch_store_lock_release(&locked->lock);
         return 0;
     }
     if (!dispatch_store_load(&locked->board, DISPATCH_STORE_FILE, error,
                              sizeof(error))) {
-        fprintf(stderr, "Could not load %s: %s\n", DISPATCH_STORE_FILE, error);
+        cli_error("board_unreadable", NULL, "Could not load %s: %s\n",
+                  DISPATCH_STORE_FILE, error);
         dispatch_store_lock_release(&locked->lock);
         return 0;
     }
 
     locked->loaded = 1;
+    cli_json_snapshot(&locked->board);
     return 1;
 }
 
@@ -201,7 +205,8 @@ int locked_board_save_or_error(LockedBoard *locked) {
     char error[256] = {0};
     if (!dispatch_store_save(&locked->board, DISPATCH_STORE_FILE, error,
                              sizeof(error))) {
-        fprintf(stderr, "Could not save %s: %s\n", DISPATCH_STORE_FILE, error);
+        cli_error("board_save_failed", NULL, "Could not save %s: %s\n",
+                  DISPATCH_STORE_FILE, error);
         return 0;
     }
     return 1;
@@ -417,6 +422,9 @@ static void scaffold_workflow_dir(void) {
     scaffold_workflow_file("CLAUDE.md", dispatch_template_claude_md);
 }
 
+static int run_command(const DispatchCliCommand *command, int argc,
+                       char **argv);
+
 int dispatch_cli_dispatch(int argc, char **argv) {
     if (argc < 2) {
         char *tui_argv[] = {
@@ -438,6 +446,55 @@ int dispatch_cli_dispatch(int argc, char **argv) {
     const DispatchCliCommand *command = find_command(argv[1]);
     if (!command) {
         fprintf(stderr, "Unknown Dispatch command: %s\n", argv[1]);
+        return 1;
+    }
+
+    return cli_json_end(run_command(command, argc, argv));
+}
+
+/* Mutating (sub)commands that accept --json and report a result object.
+ * `ready <id>` is handled in cmd_ready because `ready --json` is a read. */
+static const struct {
+    const char *command;
+    const char *subcommand;
+    const char *json_name;
+} json_mutations[] = {
+    {"start", NULL, "start"},
+    {"finish", NULL, "finish"},
+    {"review", NULL, "review"},
+    {"unassign", NULL, "unassign"},
+};
+
+/* Strips --json from a supported mutating command and enters JSON result
+ * mode. Returns 0 when --json was repeated, after entering JSON mode so the
+ * usage error is reported as JSON. */
+static int begin_json_mutation(int *argc, char **argv) {
+    for (size_t i = 0; i < sizeof(json_mutations) / sizeof(json_mutations[0]);
+         i++) {
+        if (strcmp(argv[1], json_mutations[i].command) != 0)
+            continue;
+        int first_arg = 2;
+        if (json_mutations[i].subcommand) {
+            if (*argc < 3 ||
+                strcmp(argv[2], json_mutations[i].subcommand) != 0)
+                continue;
+            first_arg = 3;
+        }
+
+        int json_output = 0;
+        int ok = dispatch_cli_extract_json_flag(argc, argv, first_arg,
+                                                &json_output);
+        if (json_output)
+            cli_json_begin(json_mutations[i].json_name);
+        return ok;
+    }
+    return 1;
+}
+
+static int run_command(const DispatchCliCommand *command, int argc,
+                       char **argv) {
+    if (!begin_json_mutation(&argc, argv)) {
+        cli_error("usage", NULL, "--json may only be given once\n");
         return 1;
     }
 

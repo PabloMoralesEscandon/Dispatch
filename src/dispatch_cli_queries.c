@@ -7,7 +7,8 @@ int save_task_transition(LockedBoard *locked, const char *verb,
     dispatch_board_normalize_states(&locked->board);
     if (!locked_board_save_or_error(locked))
         return 1;
-    printf("%s %s\n", verb, task_id);
+    if (!cli_json())
+        printf("%s %s\n", verb, task_id);
     return 0;
 }
 
