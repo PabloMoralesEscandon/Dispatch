@@ -3,10 +3,10 @@
 #include "dispatch_issue.h"
 
 static void print_invalid_issue_ref(const char *input) {
-    fprintf(stderr,
-            "Invalid issue reference '%s'; use #123, 123, owner/repo#123 or "
-            "https://github.com/owner/repo/issues/123\n",
-            input);
+    cli_error("invalid_issue", NULL,
+              "Invalid issue reference '%s'; use #123, 123, owner/repo#123 or "
+              "https://github.com/owner/repo/issues/123\n",
+              input);
 }
 
 static int issue_ref_is_well_formed(const char *input) {
@@ -46,10 +46,10 @@ static int resolve_issue_ref(const DispatchBoard *board, const char *input,
         char *trimmed = trimmed_copy(captured && remote ? remote : "");
         free(remote);
         if (!trimmed[0]) {
-            fprintf(stderr,
-                    "Cannot resolve issue #%ld: the board repo has no origin "
-                    "remote; use owner/repo#%ld\n",
-                    ref.number, ref.number);
+            cli_error("issue_unresolvable", NULL,
+                      "Cannot resolve issue #%ld: the board repo has no origin "
+                      "remote; use owner/repo#%ld\n",
+                      ref.number, ref.number);
             free(trimmed);
             return 0;
         }
@@ -57,10 +57,10 @@ static int resolve_issue_ref(const DispatchBoard *board, const char *input,
         if (!dispatch_issue_repo_from_remote(trimmed, owner_repo,
                                              sizeof(owner_repo)) ||
             !dispatch_issue_set_repo(&ref, owner_repo)) {
-            fprintf(stderr,
-                    "Cannot resolve issue #%ld: origin remote %s is not a "
-                    "GitHub repository; use owner/repo#%ld\n",
-                    ref.number, trimmed, ref.number);
+            cli_error("issue_unresolvable", NULL,
+                      "Cannot resolve issue #%ld: origin remote %s is not a "
+                      "GitHub repository; use owner/repo#%ld\n",
+                      ref.number, trimmed, ref.number);
             free(trimmed);
             return 0;
         }
@@ -142,10 +142,28 @@ int cmd_repo(int argc, char **argv) {
     return 0;
 }
 
+/* Why dispatch_board_add_group refused a group, for the JSON error code. */
+static const char *group_add_failure_code(const char *name,
+                                          const char *prefix) {
+    if (!name[0] || strlen(name) > DISPATCH_GROUP_NAME_MAX)
+        return "invalid_group";
+    if (prefix && prefix[0]) {
+        char *upper = cli_strdup(prefix);
+        for (char *p = upper; *p; p++)
+            *p = (char)toupper((unsigned char)*p);
+        int valid = dispatch_group_prefix_is_valid(upper);
+        free(upper);
+        if (!valid)
+            return "invalid_prefix";
+    }
+    return "group_exists";
+}
+
 static int cmd_group_add(int argc, char **argv) {
     if (argc < 4) {
-        fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX] "
-                        "[--description <text>]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch group add <name> [--prefix XX] "
+                  "[--description <text>]\n");
         return 1;
     }
 
@@ -158,7 +176,7 @@ static int cmd_group_add(int argc, char **argv) {
         } else if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
             description = argv[++i];
         } else {
-            fprintf(stderr, "Unknown group option: %s\n", argv[i]);
+            cli_error("usage", NULL, "Unknown group option: %s\n", argv[i]);
             return 1;
         }
     }
@@ -169,8 +187,9 @@ static int cmd_group_add(int argc, char **argv) {
     DispatchBoard *board = &locked.board;
 
     if (!dispatch_board_add_group(board, name, prefix)) {
+        const char *code = group_add_failure_code(name, prefix);
         locked_board_close(&locked);
-        fprintf(stderr, "Could not add group '%s'\n", name);
+        cli_error(code, NULL, "Could not add group '%s'\n", name);
         return 1;
     }
 
@@ -182,7 +201,8 @@ static int cmd_group_add(int argc, char **argv) {
         return 1;
     }
 
-    printf("Added group %s (%s)\n", group->name, group->prefix);
+    if (!cli_json())
+        printf("Added group %s (%s)\n", group->name, group->prefix);
     DispatchLogField targets[] = {
         {"group", group->id},
     };
@@ -194,14 +214,20 @@ static int cmd_group_add(int argc, char **argv) {
     snprintf(message, sizeof(message), "Added group %s", group->name);
     append_dispatch_log("user", "group", "add", targets, 1, context, 2,
                         message);
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result = dispatch_json_result_new("group_add");
+        dispatch_json_result_set_string(json_result, "group", group->id);
+        status = cli_json_emit_tasks(board, group->id, json_result);
+    }
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 static int cmd_group_ready(int argc, char **argv) {
     if (argc < 4) {
-        fprintf(stderr,
-                "Usage: dispatch group ready <group> [--actor <name>] [--no-review]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch group ready <group> [--actor <name>] [--no-review]\n");
         return 1;
     }
 
@@ -215,7 +241,8 @@ static int cmd_group_ready(int argc, char **argv) {
         } else if (strcmp(argv[i], "--no-review") == 0) {
             no_review = 1;
         } else {
-            fprintf(stderr, "Unknown group ready option: %s\n", argv[i]);
+            cli_error("usage", NULL, "Unknown group ready option: %s\n",
+                      argv[i]);
             return 1;
         }
     }
@@ -228,11 +255,15 @@ static int cmd_group_ready(int argc, char **argv) {
     DispatchGroup *group = dispatch_board_find_group(board, group_id);
     if (!group) {
         locked_board_close(&locked);
-        fprintf(stderr, "No group with id, prefix, or name %s\n", group_id);
+        cli_error("group_not_found", NULL,
+                  "No group with id, prefix, or name %s\n", group_id);
         return 1;
     }
 
+    DispatchJsonResult *json_result =
+        cli_json() ? dispatch_json_result_new("group_ready") : NULL;
     int readied = 0;
+    int modified = 0;
     for (size_t i = 0; i < board->tasks.count; i++) {
         DispatchTask *task = &board->tasks.items[i];
         if (strcmp(task->group, group->id) != 0)
@@ -243,6 +274,9 @@ static int cmd_group_ready(int argc, char **argv) {
             if (no_review)
                 task->requires_review = 0;
             readied++;
+            modified++;
+            if (json_result)
+                dispatch_json_result_add_target(json_result, task->id);
             continue;
         }
 
@@ -250,18 +284,25 @@ static int cmd_group_ready(int argc, char **argv) {
             (task->state == DISPATCH_STATE_READY ||
              task->state == DISPATCH_STATE_BLOCKED) &&
             !task->assigned_to && !task->started_by) {
+            if (task->requires_review) {
+                modified++;
+                if (json_result)
+                    dispatch_json_result_add_target(json_result, task->id);
+            }
             task->requires_review = 0;
         }
     }
 
     dispatch_board_normalize_states(board);
     if (!locked_board_save_or_error(&locked)) {
+        dispatch_json_result_free(json_result);
         locked_board_close(&locked);
         return 1;
     }
 
-    printf("Readied %d task%s in group %s\n", readied,
-           readied == 1 ? "" : "s", group->prefix);
+    if (!json_result)
+        printf("Readied %d task%s in group %s\n", readied,
+               readied == 1 ? "" : "s", group->prefix);
     DispatchLogField targets[] = {
         {"group", group->id},
     };
@@ -276,8 +317,15 @@ static int cmd_group_ready(int argc, char **argv) {
              readied, readied == 1 ? "" : "s", group->prefix);
     append_dispatch_log(actor, "group", "ready", targets, 1, context, 2,
                         message);
+    int status = 0;
+    if (json_result) {
+        dispatch_json_result_set_changed(json_result, modified > 0);
+        dispatch_json_result_set_string(json_result, "group", group->id);
+        dispatch_json_result_set_bool(json_result, "no_review", no_review);
+        status = cli_json_emit_tasks(board, group->id, json_result);
+    }
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 static int cmd_group_edit(int argc, char **argv) {
@@ -466,34 +514,37 @@ int cmd_task(int argc, char **argv) {
             } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
                 actor = argv[++i];
             } else {
-                fprintf(stderr, "Unknown task edit option: %s\n", argv[i]);
+                cli_error("usage", NULL, "Unknown task edit option: %s\n",
+                          argv[i]);
                 return 1;
             }
         }
 
         if (!title && !description && !issue && !clear_issue) {
-            fprintf(stderr, "Task edit requires --title, --description, "
-                            "--issue, or --clear-issue\n");
+            cli_error("usage", NULL,
+                      "Task edit requires --title, --description, "
+                      "--issue, or --clear-issue\n");
             return 1;
         }
         if (issue && clear_issue) {
-            fprintf(stderr, "Use either --issue or --clear-issue, not both\n");
+            cli_error("usage", NULL,
+                      "Use either --issue or --clear-issue, not both\n");
             return 1;
         }
         if (issue && !issue_ref_is_well_formed(issue))
             return 1;
         if (title && title[0] == '\0') {
-            fprintf(stderr, "Task title must not be empty\n");
+            cli_error("invalid_title", NULL, "Task title must not be empty\n");
             return 1;
         }
         if (title && title_starts_with_dispatch_id(title)) {
-            fprintf(stderr,
-                    "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
+            cli_error("invalid_title", NULL,
+                      "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
             return 1;
         }
         if (!dispatch_actor_label_is_valid(actor)) {
-            fprintf(stderr,
-                    "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+            cli_error("invalid_actor", NULL,
+                      "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
             return 1;
         }
 
@@ -504,7 +555,8 @@ int cmd_task(int argc, char **argv) {
             dispatch_board_find_task(&locked.board, task_id);
         if (!task) {
             locked_board_close(&locked);
-            fprintf(stderr, "No task with id %s\n", task_id);
+            cli_error("task_not_found", task_id, "No task with id %s\n",
+                      task_id);
             return 1;
         }
 
@@ -520,7 +572,8 @@ int cmd_task(int argc, char **argv) {
             (description &&
              !dispatch_task_set_description(task, description))) {
             locked_board_close(&locked);
-            fprintf(stderr, "Could not edit task %s\n", task_id);
+            cli_error("internal_error", task_id, "Could not edit task %s\n",
+                      task_id);
             return 1;
         }
 
@@ -562,8 +615,10 @@ int cmd_task(int argc, char **argv) {
             return 1;
         }
 
+        int json = cli_json();
         if (edited) {
-            printf("Edited task %s\n", task_id);
+            if (!json)
+                printf("Edited task %s\n", task_id);
             DispatchLogField targets[] = {
                 {"task", task_id},
             };
@@ -579,19 +634,30 @@ int cmd_task(int argc, char **argv) {
                                 message);
         }
         if (unlinked) {
-            printf("Unlinked %s from %s\n", previous_issue, task_id);
+            if (!json)
+                printf("Unlinked %s from %s\n", previous_issue, task_id);
             log_issue_change(actor, task_id, 0, previous_issue);
         }
         if (linked) {
-            printf("Linked %s to %s\n", task_id, canonical);
+            if (!json)
+                printf("Linked %s to %s\n", task_id, canonical);
             log_issue_change(actor, task_id, 1, canonical);
         }
-        if (issue && !linked)
+        if (!json && issue && !linked)
             printf("Task %s is already linked to %s\n", task_id, canonical);
-        if (clear_issue && !unlinked)
+        if (!json && clear_issue && !unlinked)
             printf("Task %s has no linked issue\n", task_id);
+        int status = 0;
+        if (json) {
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("task_edit");
+            dispatch_json_result_add_target(json_result, task_id);
+            dispatch_json_result_set_changed(json_result,
+                                             edited || unlinked || linked);
+            status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+        }
         locked_board_close(&locked);
-        return 0;
+        return status;
     }
 
     if (argc >= 5 && strcmp(argv[2], "move") == 0) {
@@ -603,13 +669,14 @@ int cmd_task(int argc, char **argv) {
             if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
                 actor = argv[++i];
             } else {
-                fprintf(stderr, "Unknown task move option: %s\n", argv[i]);
+                cli_error("usage", NULL, "Unknown task move option: %s\n",
+                          argv[i]);
                 return 1;
             }
         }
         if (!dispatch_actor_label_is_valid(actor)) {
-            fprintf(stderr,
-                    "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+            cli_error("invalid_actor", NULL,
+                      "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
             return 1;
         }
 
@@ -620,19 +687,22 @@ int cmd_task(int argc, char **argv) {
             dispatch_board_find_task(&locked.board, task_id);
         if (!task) {
             locked_board_close(&locked);
-            fprintf(stderr, "No task with id %s\n", task_id);
+            cli_error("task_not_found", task_id, "No task with id %s\n",
+                      task_id);
             return 1;
         }
         DispatchGroup *group =
             dispatch_board_find_group(&locked.board, group_id);
         if (!group) {
             locked_board_close(&locked);
-            fprintf(stderr, "No group with id, prefix, or name %s\n", group_id);
+            cli_error("group_not_found", task_id,
+                      "No group with id, prefix, or name %s\n", group_id);
             return 1;
         }
         if (strcmp(task->group, group->id) == 0) {
-            fprintf(stderr, "Task %s already belongs to group %s\n", task_id,
-                    group->id);
+            cli_error("already_in_group", task_id,
+                      "Task %s already belongs to group %s\n", task_id,
+                      group->id);
             locked_board_close(&locked);
             return 1;
         }
@@ -647,8 +717,9 @@ int cmd_task(int argc, char **argv) {
             return 1;
         }
 
-        printf("Moved task %s from %s to %s (ID unchanged)\n", task_id,
-               from_group, to_group);
+        if (!cli_json())
+            printf("Moved task %s from %s to %s (ID unchanged)\n", task_id,
+                   from_group, to_group);
         DispatchLogField targets[] = {
             {"task", task_id},
             {"group", to_group},
@@ -662,10 +733,20 @@ int cmd_task(int argc, char **argv) {
                  task_id, from_group, to_group);
         append_dispatch_log(actor, "task", "move", targets, 2, context, 2,
                             message);
+        int status = 0;
+        if (cli_json()) {
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("task_move");
+            dispatch_json_result_add_target(json_result, task_id);
+            dispatch_json_result_set_string(json_result, "from_group",
+                                            from_group);
+            dispatch_json_result_set_string(json_result, "to_group", to_group);
+            status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+        }
         free(from_group);
         free(to_group);
         locked_board_close(&locked);
-        return 0;
+        return status;
     }
 
     if (argc >= 4 && strcmp(argv[2], "delete") == 0) {
@@ -675,7 +756,8 @@ int cmd_task(int argc, char **argv) {
             if (strcmp(argv[i], "--force") == 0) {
                 force = 1;
             } else {
-                fprintf(stderr, "Unknown task delete option: %s\n", argv[i]);
+                cli_error("usage", NULL, "Unknown task delete option: %s\n",
+                          argv[i]);
                 return 1;
             }
         }
@@ -683,19 +765,21 @@ int cmd_task(int argc, char **argv) {
         LockedBoard locked;
         if (!locked_board_load_or_error(&locked))
             return 1;
+        int exists = dispatch_board_find_task(&locked.board, task_id) != NULL;
         if (!dispatch_board_delete_task(&locked.board, task_id, force)) {
             locked_board_close(&locked);
-            fprintf(stderr,
-                    "Could not delete %s%s\n",
-                    task_id,
-                    force ? "" : " (task may have dependents; use --force)");
+            cli_error(exists ? "has_dependents" : "task_not_found", task_id,
+                      "Could not delete %s%s\n",
+                      task_id,
+                      force ? "" : " (task may have dependents; use --force)");
             return 1;
         }
         if (!locked_board_save_or_error(&locked)) {
             locked_board_close(&locked);
             return 1;
         }
-        printf("Deleted task %s\n", task_id);
+        if (!cli_json())
+            printf("Deleted task %s\n", task_id);
         DispatchLogField targets[] = {
             {"task", task_id},
         };
@@ -706,8 +790,16 @@ int cmd_task(int argc, char **argv) {
         snprintf(message, sizeof(message), "Deleted task %s", task_id);
         append_dispatch_log("user", "task", "delete", targets, 1, context, 1,
                             message);
+        int status = 0;
+        if (cli_json()) {
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("task_delete");
+            dispatch_json_result_add_target(json_result, task_id);
+            dispatch_json_result_set_bool(json_result, "force", force);
+            status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+        }
         locked_board_close(&locked);
-        return 0;
+        return status;
     }
 
     if (argc >= 5 && strcmp(argv[2], "priority") == 0) {
@@ -757,16 +849,16 @@ int cmd_task(int argc, char **argv) {
     }
 
     if (argc < 5 || strcmp(argv[2], "add") != 0) {
-        fprintf(stderr,
-                "Usage: dispatch task add <group> <title> [--description "
-                "text] [--actor <name>] [--no-review] [--issue <ref>]\n");
-        fprintf(stderr,
-                "       dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]\n");
-        fprintf(stderr,
-                "       dispatch task move <id> <group> [--actor <name>]\n");
-        fprintf(stderr, "       dispatch task delete <id> [--force]\n");
-        fprintf(stderr,
-                "       dispatch task priority <id> <value> [--actor <name>]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch task add <group> <title> [--description "
+                  "text] [--actor <name>] [--no-review] [--issue <ref>]\n");
+        cli_error("usage", NULL,
+                  "       dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]\n");
+        cli_error("usage", NULL,
+                  "       dispatch task move <id> <group> [--actor <name>]\n");
+        cli_error("usage", NULL, "       dispatch task delete <id> [--force]\n");
+        cli_error("usage", NULL,
+                  "       dispatch task priority <id> <value> [--actor <name>]\n");
         return 1;
     }
 
@@ -778,8 +870,8 @@ int cmd_task(int argc, char **argv) {
     int requires_review = 1;
 
     if (title_starts_with_dispatch_id(title)) {
-        fprintf(stderr,
-                "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
+        cli_error("invalid_title", NULL,
+                  "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
         return 1;
     }
 
@@ -793,15 +885,15 @@ int cmd_task(int argc, char **argv) {
         } else if (strcmp(argv[i], "--issue") == 0 && (i + 1) < argc) {
             issue = argv[++i];
         } else {
-            fprintf(stderr, "Unknown task option: %s\n", argv[i]);
+            cli_error("usage", NULL, "Unknown task option: %s\n", argv[i]);
             return 1;
         }
     }
     if (issue && !issue_ref_is_well_formed(issue))
         return 1;
     if (!dispatch_actor_label_is_valid(actor)) {
-        fprintf(stderr,
-                "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+        cli_error("invalid_actor", NULL,
+                  "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
         return 1;
     }
 
@@ -821,9 +913,12 @@ int cmd_task(int argc, char **argv) {
         dispatch_board_add_task_with_actor(board, group, title, description,
                                            actor);
     if (!task) {
+        const char *code = dispatch_board_find_group(board, group)
+                               ? "invalid_title"
+                               : "group_not_found";
         locked_board_close(&locked);
-        fprintf(stderr, "Could not add task '%s' to group '%s'\n", title,
-                group);
+        cli_error(code, NULL, "Could not add task '%s' to group '%s'\n", title,
+                  group);
         return 1;
     }
     task->requires_review = requires_review;
@@ -839,7 +934,8 @@ int cmd_task(int argc, char **argv) {
         return 1;
     }
 
-    printf("Added task %s\n", task_id);
+    if (!cli_json())
+        printf("Added task %s\n", task_id);
     DispatchLogField targets[] = {
         {"task", task_id},
         {"group", group},
@@ -853,24 +949,31 @@ int cmd_task(int argc, char **argv) {
     append_dispatch_log(actor, "task", "add", targets, 2, context, 2,
                         message);
     if (issue) {
-        printf("Linked %s to %s\n", task_id, canonical);
+        if (!cli_json())
+            printf("Linked %s to %s\n", task_id, canonical);
         log_issue_change(actor, task_id, 1, canonical);
+    }
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result = dispatch_json_result_new("task_add");
+        dispatch_json_result_add_target(json_result, task_id);
+        status = cli_json_emit_tasks(board, NULL, json_result);
     }
     free(task_id);
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 int cmd_dep(int argc, char **argv) {
     if (argc != 5 ||
         (strcmp(argv[2], "add") != 0 && strcmp(argv[2], "remove") != 0)) {
-        fprintf(stderr,
-                "Usage: dispatch dep add <dependency-id> <dependent-id>\n");
-        fprintf(stderr,
-                "       dispatch dep remove <dependency-id> <dependent-id>\n");
-        fprintf(stderr,
-                "Example: dispatch dep add DE-01 DE-02 means DE-02 depends "
-                "on DE-01\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch dep add <dependency-id> <dependent-id>\n");
+        cli_error("usage", NULL,
+                  "       dispatch dep remove <dependency-id> <dependent-id>\n");
+        cli_error("usage", NULL,
+                  "Example: dispatch dep add DE-01 DE-02 means DE-02 depends "
+                  "on DE-01\n");
         return 1;
     }
 
@@ -882,17 +985,35 @@ int cmd_dep(int argc, char **argv) {
         return 1;
     DispatchBoard *board = &locked.board;
 
+    int adding = strcmp(argv[2], "add") == 0;
+    DispatchTask *from = dispatch_board_find_task(board, from_id);
+    DispatchTask *to = dispatch_board_find_task(board, to_id);
+    int already_present = 0;
+    for (size_t i = 0; to && i < to->depends_on.count; i++) {
+        if (strcmp(to->depends_on.items[i], from_id) == 0)
+            already_present = 1;
+    }
+
     int ok;
-    if (strcmp(argv[2], "add") == 0) {
+    if (adding) {
         ok = dispatch_task_add_dependency(board, from_id, to_id);
     } else {
         ok = dispatch_task_remove_dependency(board, from_id, to_id);
     }
 
     if (!ok) {
+        const char *code;
+        const char *code_task = to_id;
+        if (!to || (adding && !from)) {
+            code = "task_not_found";
+            code_task = to ? from_id : to_id;
+        } else {
+            code = adding ? "dependency_cycle" : "dependency_not_found";
+        }
         locked_board_close(&locked);
-        fprintf(stderr, "Could not %s dependency %s -> %s (%s depends on %s)\n",
-                argv[2], from_id, to_id, to_id, from_id);
+        cli_error(code, code_task,
+                  "Could not %s dependency %s -> %s (%s depends on %s)\n",
+                  argv[2], from_id, to_id, to_id, from_id);
         return 1;
     }
 
@@ -901,9 +1022,10 @@ int cmd_dep(int argc, char **argv) {
         return 1;
     }
 
-    printf("%s dependency %s -> %s (%s depends on %s)\n",
-           strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
-           to_id, to_id, from_id);
+    if (!cli_json())
+        printf("%s dependency %s -> %s (%s depends on %s)\n",
+               strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
+               to_id, to_id, from_id);
     DispatchLogField targets[] = {
         {"dependency", from_id},
         {"dependent", to_id},
@@ -916,6 +1038,17 @@ int cmd_dep(int argc, char **argv) {
                         strcmp(argv[2], "add") == 0 ? "dependency_add"
                                                      : "dependency_remove",
                         targets, 2, NULL, 0, message);
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result = dispatch_json_result_new(
+            adding ? "dependency_add" : "dependency_remove");
+        dispatch_json_result_add_target(json_result, to_id);
+        dispatch_json_result_set_changed(json_result,
+                                         adding ? !already_present : 1);
+        dispatch_json_result_set_string(json_result, "dependency", from_id);
+        dispatch_json_result_set_string(json_result, "dependent", to_id);
+        status = cli_json_emit_tasks(board, NULL, json_result);
+    }
     locked_board_close(&locked);
-    return 0;
+    return status;
 }

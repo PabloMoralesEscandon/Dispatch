@@ -34,6 +34,24 @@ typedef struct {
 
 extern const DispatchCliCommand commands[];
 
+/* --json result mode for mutating commands; see
+ * docs/json-output-contract.md. cli_error prints fmt to stderr unchanged
+ * in human mode and records a coded error in JSON mode. The board loaders
+ * snapshot task states on the first load of a JSON-mode command. */
+void cli_json_begin(const char *command);
+int cli_json(void);
+void cli_error(const char *code, const char *task_id, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+void cli_json_snapshot(const DispatchBoard *board);
+/* Emit a success document and free result; return the exit status. */
+int cli_json_emit_tasks(const DispatchBoard *board, const char *group,
+                        DispatchJsonResult *result);
+int cli_json_emit_workspaces(const DispatchBoard *board,
+                             const DispatchWorkspace *records, size_t count,
+                             DispatchJsonResult *result);
+/* Emit the JSON error document when status is non-zero; reset state. */
+int cli_json_end(int status);
+
 char *agent_prompt_path_for(const char *agent_dir, const char *name);
 void append_dispatch_log(const char *actor, const char *command, const char *action, const DispatchLogField *targets, size_t target_count, const DispatchLogField *context, size_t context_count, const char *message);
 const char *bool_string(int value);

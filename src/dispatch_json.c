@@ -4,6 +4,7 @@
 
 #include <jansson.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static DispatchState presentation_state(const DispatchBoard *board,
@@ -464,4 +465,281 @@ int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
     if (result != 0 || fputc('\n', stream) == EOF)
         return 0;
     return 1;
+}
+
+static int dump_document(FILE *stream, json_t *root) {
+    int result = json_dumpf(root, stream, JSON_INDENT(2));
+    json_decref(root);
+    if (result != 0 || fputc('\n', stream) == EOF)
+        return 0;
+    return fflush(stream) == 0;
+}
+
+void dispatch_json_snapshot_take(DispatchJsonSnapshot *snapshot,
+                                 const DispatchBoard *board) {
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (!board || board->tasks.count == 0)
+        return;
+
+    snapshot->ids = calloc(board->tasks.count, sizeof(*snapshot->ids));
+    snapshot->states = calloc(board->tasks.count, sizeof(*snapshot->states));
+    if (!snapshot->ids || !snapshot->states) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        snapshot->ids[i] = strdup(task->id);
+        if (!snapshot->ids[i]) {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
+        snapshot->states[i] = presentation_state(board, task);
+        snapshot->count++;
+    }
+}
+
+void dispatch_json_snapshot_free(DispatchJsonSnapshot *snapshot) {
+    if (!snapshot)
+        return;
+    for (size_t i = 0; i < snapshot->count; i++)
+        free(snapshot->ids[i]);
+    free(snapshot->ids);
+    free(snapshot->states);
+    memset(snapshot, 0, sizeof(*snapshot));
+}
+
+static int snapshot_state(const DispatchJsonSnapshot *snapshot,
+                          const char *task_id, DispatchState *state) {
+    for (size_t i = 0; snapshot && i < snapshot->count; i++) {
+        if (strcmp(snapshot->ids[i], task_id) == 0) {
+            *state = snapshot->states[i];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+struct DispatchJsonResult {
+    char *action;
+    int changed;
+    json_t *targets; /* array of task ID strings */
+    json_t *extras;  /* action-specific fields */
+};
+
+DispatchJsonResult *dispatch_json_result_new(const char *action) {
+    DispatchJsonResult *result = calloc(1, sizeof(*result));
+    if (!result || !(result->action = strdup(action))) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    result->changed = 1;
+    result->targets = json_array();
+    result->extras = json_object();
+    /* Prune always reports its skipped list, even when empty. */
+    if (strcmp(action, "workspace_prune") == 0)
+        json_object_set_new(result->extras, "skipped", json_array());
+    return result;
+}
+
+void dispatch_json_result_free(DispatchJsonResult *result) {
+    if (!result)
+        return;
+    free(result->action);
+    json_decref(result->targets);
+    json_decref(result->extras);
+    free(result);
+}
+
+void dispatch_json_result_add_target(DispatchJsonResult *result,
+                                     const char *task_id) {
+    json_array_append_new(result->targets, json_string(task_id));
+}
+
+void dispatch_json_result_set_changed(DispatchJsonResult *result,
+                                      int changed) {
+    result->changed = changed ? 1 : 0;
+}
+
+void dispatch_json_result_set_string(DispatchJsonResult *result,
+                                     const char *key, const char *value) {
+    json_object_set_new(result->extras, key, optional_string(value));
+}
+
+void dispatch_json_result_set_bool(DispatchJsonResult *result,
+                                   const char *key, int value) {
+    json_object_set_new(result->extras, key, json_boolean(value));
+}
+
+void dispatch_json_result_add_skipped(DispatchJsonResult *result,
+                                      const char *workspace_id,
+                                      const char *reason) {
+    json_t *skipped = json_object_get(result->extras, "skipped");
+    if (!skipped) {
+        skipped = json_array();
+        json_object_set_new(result->extras, "skipped", skipped);
+    }
+    json_t *entry = json_object();
+    json_object_set_new(entry, "workspace", json_string(workspace_id));
+    json_object_set_new(entry, "reason", json_string(reason));
+    json_array_append_new(skipped, entry);
+}
+
+static json_t *state_or_null(int known, DispatchState state) {
+    return known ? json_string(dispatch_state_name(state)) : json_null();
+}
+
+/* The single target task ID, or NULL when the command acted on zero or
+ * several tasks. */
+static const char *single_target(const DispatchJsonResult *result) {
+    if (json_array_size(result->targets) != 1)
+        return NULL;
+    return json_string_value(json_array_get(result->targets, 0));
+}
+
+static json_t *result_json(const DispatchBoard *board,
+                           const DispatchJsonSnapshot *before,
+                           const DispatchJsonResult *result) {
+    json_t *object = json_object();
+    json_object_set_new(object, "action", json_string(result->action));
+    json_object_set_new(object, "changed", json_boolean(result->changed));
+
+    json_t *targets = json_array();
+    size_t index;
+    json_t *value;
+    json_array_foreach(result->targets, index, value) {
+        const char *task_id = json_string_value(value);
+        DispatchState previous = DISPATCH_STATE_PROPOSED;
+        int had_previous = snapshot_state(before, task_id, &previous);
+        const DispatchTask *task = find_task(board, task_id);
+        json_t *target = json_object();
+        json_object_set_new(target, "task", json_string(task_id));
+        json_object_set_new(target, "previous_state",
+                            state_or_null(had_previous, previous));
+        json_object_set_new(
+            target, "new_state",
+            state_or_null(task != NULL,
+                          task ? presentation_state(board, task)
+                               : DISPATCH_STATE_PROPOSED));
+        json_array_append_new(targets, target);
+    }
+
+    const char *task_id = single_target(result);
+    json_t *single = task_id ? json_array_get(targets, 0) : NULL;
+    json_object_set_new(object, "task", optional_string(task_id));
+    json_object_set(object, "previous_state",
+                    single ? json_object_get(single, "previous_state")
+                           : json_null());
+    json_object_set(object, "new_state",
+                    single ? json_object_get(single, "new_state")
+                           : json_null());
+    json_object_set_new(object, "targets", targets);
+
+    json_t *newly_ready = json_array();
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        if (presentation_state(board, task) != DISPATCH_STATE_READY)
+            continue;
+        DispatchState previous = DISPATCH_STATE_PROPOSED;
+        if (snapshot_state(before, task->id, &previous) &&
+            previous == DISPATCH_STATE_READY)
+            continue;
+        json_array_append_new(newly_ready, json_string(task->id));
+    }
+    json_object_set_new(object, "newly_ready", newly_ready);
+
+    const char *key;
+    json_object_foreach(result->extras, key, value)
+        json_object_set(object, key, value);
+    return object;
+}
+
+int dispatch_json_emit_mutation(FILE *stream, const DispatchBoard *board,
+                                const char *command, const char *group,
+                                const DispatchJsonSnapshot *before,
+                                const DispatchJsonResult *result) {
+    json_t *tasks = json_array();
+    size_t returned = 0;
+    size_t index;
+    json_t *value;
+    json_array_foreach(result->targets, index, value) {
+        const DispatchTask *task = find_task(board, json_string_value(value));
+        if (!task)
+            continue;
+        json_array_append_new(tasks, task_json(board, task));
+        returned++;
+    }
+
+    DispatchJsonRequest request = {
+        .command = command,
+        .task_id = single_target(result),
+        .group = group,
+        .include_done = -1,
+    };
+
+    json_t *board_json = json_object();
+    json_object_set_new(board_json, "name", json_string(board->name));
+    json_object_set_new(board_json, "repo_path",
+                        json_string(board->repo_path ? board->repo_path : "."));
+    json_object_set_new(board_json, "groups", groups_json(board));
+
+    json_t *root = json_object();
+    json_object_set_new(root, "schema_version", json_integer(1));
+    json_object_set_new(root, "command", json_string(command));
+    json_object_set_new(root, "board", board_json);
+    json_object_set_new(root, "query", query_json(&request));
+    json_object_set_new(root, "summary", summary_json(board, returned));
+    json_object_set_new(root, "tasks", tasks);
+    json_object_set_new(root, "warnings", json_array());
+    json_object_set_new(root, "result", result_json(board, before, result));
+    return dump_document(stream, root);
+}
+
+int dispatch_json_emit_workspace_mutation(
+    FILE *stream, const DispatchBoard *board, const char *command,
+    const DispatchWorkspace *records, size_t record_count,
+    const DispatchJsonSnapshot *before, const DispatchJsonResult *result) {
+    json_t *workspaces = json_array();
+    for (size_t i = 0; i < record_count; i++)
+        json_array_append_new(workspaces,
+                              workspace_record_json(board, &records[i]));
+
+    json_t *board_json = json_object();
+    json_object_set_new(board_json, "name", json_string(board->name));
+    json_object_set_new(board_json, "repo_path",
+                        json_string(board->repo_path ? board->repo_path : "."));
+
+    json_t *summary = json_object();
+    json_object_set_new(summary, "returned",
+                        json_integer((json_int_t)record_count));
+
+    json_t *root = json_object();
+    json_object_set_new(root, "schema_version", json_integer(1));
+    json_object_set_new(root, "command", json_string(command));
+    json_object_set_new(root, "board", board_json);
+    json_object_set_new(root, "summary", summary);
+    json_object_set_new(root, "workspaces", workspaces);
+    json_object_set_new(root, "result", result_json(board, before, result));
+    return dump_document(stream, root);
+}
+
+int dispatch_json_emit_error(FILE *stream, const char *command,
+                             const char *code, const char *message,
+                             const char *task_id) {
+    json_t *error = json_object();
+    json_object_set_new(error, "code", json_string(code));
+    /* Messages echo user input, which may not be valid UTF-8. */
+    json_t *message_json = json_string(message ? message : "");
+    json_object_set_new(error, "message",
+                        message_json ? message_json
+                                     : json_string("(message is not valid UTF-8)"));
+    json_t *task_json_value = task_id ? json_string(task_id) : NULL;
+    json_object_set_new(error, "task_id",
+                        task_json_value ? task_json_value : json_null());
+
+    json_t *root = json_object();
+    json_object_set_new(root, "schema_version", json_integer(1));
+    json_object_set_new(root, "command", json_string(command));
+    json_object_set_new(root, "error", error);
+    return dump_document(stream, root);
 }

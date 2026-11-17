@@ -72,6 +72,50 @@ assert_json() {
     fi
 }
 
+# Runs a command with stdout and stderr captured separately, for --json
+# mutations whose success document goes to stdout and error to stderr.
+run_split() {
+    set +e
+    RUN_STDOUT="$("$@" 2>"$TMP_ROOT/split-stderr")"
+    RUN_STATUS=$?
+    set -e
+    RUN_STDERR="$(cat "$TMP_ROOT/split-stderr")"
+}
+
+# Expects a --json mutation to succeed with one JSON document on stdout and
+# nothing on stderr; leaves the document in RUN_OUTPUT for assert_json.
+expect_json_ok() {
+    run_split "$@"
+    RUN_OUTPUT="$RUN_STDOUT
+$RUN_STDERR"
+    if [ "$RUN_STATUS" -ne 0 ]; then
+        fail "expected JSON success: $*"
+    fi
+    if [ -n "$RUN_STDERR" ]; then
+        fail "expected empty stderr: $*"
+    fi
+    RUN_OUTPUT="$RUN_STDOUT"
+}
+
+# Expects a --json mutation to fail with nothing on stdout and a JSON error
+# document carrying the given code on stderr.
+expect_json_error() {
+    local code="$1"
+    shift
+    run_split "$@"
+    RUN_OUTPUT="$RUN_STDOUT
+$RUN_STDERR"
+    if [ "$RUN_STATUS" -eq 0 ]; then
+        fail "expected JSON failure: $*"
+    fi
+    if [ -n "$RUN_STDOUT" ]; then
+        fail "expected empty stdout: $*"
+    fi
+    RUN_OUTPUT="$RUN_STDERR"
+    assert_json schema_version integer 1 error.code string "$code" \
+        error.message string "*"
+}
+
 assert_file_contains() {
     local file="$1"
     local text="$2"
@@ -929,9 +973,6 @@ expect_fail "$BIN" workspace show Missing --json
 assert_contains "No workspace for Missing"
 assert_not_contains '"schema_version"'
 
-expect_fail "$BIN" ready DE-07 --json
-assert_contains "--json is only valid when listing ready tasks"
-assert_not_contains '"schema_version"'
 expect_fail "$BIN" status --json --json
 assert_contains "Usage: dispatch status [--json]"
 assert_not_contains '"schema_version"'
@@ -943,6 +984,7 @@ expect_ok "$BIN" list
 assert_output_equals "$human_list"
 expect_ok "$BIN" show DE-02
 assert_output_equals "$human_show"
+
 expect_ok "$BIN" ready
 assert_output_equals "$human_ready"
 expect_ok "$BIN" blocked
@@ -953,6 +995,367 @@ expect_ok "$BIN" proposed
 assert_output_equals "$human_proposed"
 expect_ok "$BIN" status
 assert_output_equals "$human_status"
+
+# Mutating commands accept --json and report a result object; errors keep
+# their exit status and add a JSON error document on stderr.
+case_dir="$(make_case_dir json-mutations)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE Root --no-review
+expect_ok "$BIN" task add DE Child
+expect_ok "$BIN" task add DE Other
+expect_ok "$BIN" dep add DE-01 DE-02
+
+# ready <id>: batch result with per-target transitions.
+expect_json_ok "$BIN" ready DE-01 DE-02 --json --actor user
+assert_json \
+    schema_version integer 1 \
+    command string ready \
+    board.groups array_length 1 \
+    query.task_id null - \
+    query.include_done null - \
+    query.states array_length 0 \
+    summary.total integer 3 \
+    summary.returned integer 2 \
+    tasks array_length 2 \
+    tasks.0.id string DE-01 \
+    tasks.1.id string DE-02 \
+    warnings array_length 0 \
+    result.action string ready \
+    result.changed boolean true \
+    result.task null - \
+    result.previous_state null - \
+    result.new_state null - \
+    result.targets array_length 2 \
+    result.targets.0.task string DE-01 \
+    result.targets.0.previous_state string proposed \
+    result.targets.0.new_state string ready \
+    result.targets.1.task string DE-02 \
+    result.targets.1.previous_state string proposed \
+    result.targets.1.new_state string blocked \
+    result.newly_ready array_length 1 \
+    result.newly_ready.0 string DE-01
+expect_json_ok "$BIN" ready --json DE-03
+assert_json \
+    query.task_id string DE-03 \
+    result.task string DE-03 \
+    result.previous_state string proposed \
+    result.new_state string ready \
+    result.newly_ready.0 string DE-03
+expect_json_error task_not_found "$BIN" ready DE-01 Missing --json
+assert_json error.task_id string Missing \
+    error.message string "Could not mark Missing ready"
+expect_json_error usage "$BIN" ready DE-01 --bogus --json
+expect_json_error usage "$BIN" ready DE-01 --json --json
+expect_fail "$BIN" ready --json --json
+assert_contains "Usage: dispatch ready [--json]"
+assert_not_contains '"schema_version"'
+
+# start: single-target result and the state-specific error codes.
+expect_json_ok "$BIN" start DE-01 --actor json-agent --json
+assert_json \
+    command string start \
+    query.task_id string DE-01 \
+    tasks.0.assigned_to string json-agent \
+    result.action string start \
+    result.task string DE-01 \
+    result.previous_state string ready \
+    result.new_state string doing \
+    result.newly_ready array_length 0
+expect_json_error invalid_state "$BIN" start DE-02 --actor json-agent --json
+assert_json error.task_id string DE-02 \
+    error.message string "Cannot start DE-02: task is blocked, not ready"
+expect_json_error task_not_found "$BIN" start Missing --actor json-agent --json
+expect_json_error usage "$BIN" start DE-03 --json
+assert_json error.task_id null - \
+    error.message string "Usage: dispatch start <id> --actor <name>"
+expect_fail "$BIN" start Missing --actor json-agent
+assert_line "No task with id Missing"
+assert_not_contains '"schema_version"'
+
+# unassign returns a doing task to ready.
+expect_ok "$BIN" start DE-03 --actor json-agent
+expect_json_ok "$BIN" unassign DE-03 --actor user --json
+assert_json \
+    command string unassign \
+    tasks.0.assigned_to null - \
+    result.action string unassign \
+    result.task string DE-03 \
+    result.previous_state string doing \
+    result.new_state string ready \
+    result.previous_assignee string json-agent \
+    result.newly_ready.0 string DE-03
+expect_json_error not_assigned "$BIN" unassign DE-03 --actor user --json
+
+# finish reports the tasks its completion made ready.
+expect_json_ok "$BIN" finish DE-01 --actor json-agent --json
+assert_json \
+    command string finish \
+    tasks.0.state string done \
+    result.action string finish \
+    result.task string DE-01 \
+    result.previous_state string doing \
+    result.new_state string done \
+    result.review_required boolean false \
+    result.newly_ready array_length 1 \
+    result.newly_ready.0 string DE-02
+expect_json_error invalid_state "$BIN" finish DE-01 --actor json-agent --json
+expect_ok "$BIN" start DE-02 --actor json-agent
+expect_json_ok "$BIN" finish DE-02 --actor json-agent --json
+assert_json \
+    result.new_state string review \
+    result.review_required boolean true \
+    result.newly_ready array_length 0
+
+# review accepts a review task.
+expect_json_error invalid_state "$BIN" review DE-03 --json
+assert_json error.task_id string DE-03
+expect_json_ok "$BIN" review DE-02 --actor user --json
+assert_json \
+    command string review \
+    result.action string review \
+    result.task string DE-02 \
+    result.previous_state string review \
+    result.new_state string done
+
+# group add / group ready.
+expect_json_ok "$BIN" group add Quality --prefix QA --json
+assert_json \
+    command string "group add" \
+    query.group string QA \
+    board.groups array_length 2 \
+    board.groups.1.id string QA \
+    tasks array_length 0 \
+    result.action string group_add \
+    result.group string QA \
+    result.task null - \
+    result.targets array_length 0 \
+    result.newly_ready array_length 0
+expect_json_error group_exists "$BIN" group add Quality --prefix QA --json
+expect_json_error invalid_prefix "$BIN" group add Broken --prefix "Q!" --json
+expect_json_error usage "$BIN" group add --json
+expect_ok "$BIN" task add QA First
+expect_ok "$BIN" task add QA Second
+expect_ok "$BIN" dep add QA-01 QA-02
+expect_json_ok "$BIN" group ready QA --json --actor user --no-review
+assert_json \
+    command string "group ready" \
+    query.group string QA \
+    summary.returned integer 2 \
+    tasks.0.requires_review boolean false \
+    result.action string group_ready \
+    result.changed boolean true \
+    result.group string QA \
+    result.no_review boolean true \
+    result.targets array_length 2 \
+    result.targets.0.task string QA-01 \
+    result.targets.0.new_state string ready \
+    result.targets.1.task string QA-02 \
+    result.targets.1.new_state string blocked \
+    result.newly_ready array_length 1 \
+    result.newly_ready.0 string QA-01
+expect_json_ok "$BIN" group ready QA --json
+assert_json result.changed boolean false result.targets array_length 0
+expect_json_error group_not_found "$BIN" group ready Missing --json
+
+# task add returns the generated ID.
+expect_json_ok "$BIN" task add DE "Write docs" --json --description "Docs"
+assert_json \
+    command string "task add" \
+    query.task_id string DE-04 \
+    tasks.0.id string DE-04 \
+    tasks.0.title string "Write docs" \
+    tasks.0.description string Docs \
+    tasks.0.state string proposed \
+    result.action string task_add \
+    result.task string DE-04 \
+    result.previous_state null - \
+    result.new_state string proposed
+expect_json_error invalid_title "$BIN" task add DE "DE-09 Bad" --json
+expect_json_error group_not_found "$BIN" task add Missing Title --json
+expect_json_error invalid_actor "$BIN" task add DE Title --actor "bad actor" --json
+expect_json_error invalid_issue "$BIN" task add DE Title --issue nope --json
+expect_json_error issue_unresolvable "$BIN" task add DE Title --issue 12 --json
+expect_json_error usage "$BIN" task add DE --json
+expect_ok "$BIN" list all
+assert_not_contains "Title"
+
+# task edit, including an issue link and an unchanged re-link.
+expect_json_ok "$BIN" task edit DE-04 --json --title "Write more docs" \
+    --issue acme/widgets#12
+assert_json \
+    command string "task edit" \
+    tasks.0.title string "Write more docs" \
+    tasks.0.issue.number integer 12 \
+    result.action string task_edit \
+    result.changed boolean true \
+    result.previous_state string proposed \
+    result.new_state string proposed
+expect_json_ok "$BIN" task edit DE-04 --issue acme/widgets#12 --json
+assert_json result.changed boolean false
+expect_json_error task_not_found "$BIN" task edit Missing --title X --json
+expect_json_error usage "$BIN" task edit DE-04 --json
+expect_json_error invalid_title "$BIN" task edit DE-04 --title "" --json
+
+# task move.
+expect_json_ok "$BIN" task move DE-04 QA --json
+assert_json \
+    command string "task move" \
+    tasks.0.id string DE-04 \
+    tasks.0.group string QA \
+    result.action string task_move \
+    result.from_group string DE \
+    result.to_group string QA
+expect_json_error already_in_group "$BIN" task move DE-04 QA --json
+expect_json_error group_not_found "$BIN" task move DE-04 Missing --json
+
+# dep add / dep remove report the dependent's state change.
+expect_json_ok "$BIN" dep add DE-03 DE-04 --json
+assert_json \
+    command string "dep add" \
+    query.task_id string DE-04 \
+    tasks.0.depends_on.0 string DE-03 \
+    result.action string dependency_add \
+    result.changed boolean true \
+    result.dependency string DE-03 \
+    result.dependent string DE-04 \
+    result.task string DE-04
+expect_json_ok "$BIN" dep add DE-03 DE-04 --json
+assert_json result.changed boolean false
+expect_json_error dependency_cycle "$BIN" dep add DE-04 DE-03 --json
+expect_json_error task_not_found "$BIN" dep add Missing DE-04 --json
+assert_json error.task_id string Missing
+expect_json_error usage "$BIN" dep add DE-03 --json
+expect_ok "$BIN" task add QA Third
+expect_ok "$BIN" ready QA-03 --actor user
+expect_ok "$BIN" dep add QA-02 QA-03
+expect_json_ok "$BIN" dep remove QA-02 QA-03 --json
+assert_json \
+    command string "dep remove" \
+    result.action string dependency_remove \
+    result.previous_state string blocked \
+    result.new_state string ready \
+    result.newly_ready.0 string QA-03
+expect_json_error dependency_not_found "$BIN" dep remove QA-02 QA-03 --json
+
+# commit add, including the already-recorded no-op.
+expect_json_ok "$BIN" commit add DE-01 abc1234 --json --actor json-agent
+assert_json \
+    command string "commit add" \
+    tasks.0.commits.0 string abc1234 \
+    result.action string commit_add \
+    result.changed boolean true \
+    result.commit string abc1234 \
+    result.task string DE-01
+expect_json_ok "$BIN" commit add DE-01 abc1234 --json
+assert_json result.changed boolean false tasks.0.commits array_length 1
+expect_json_error invalid_commit "$BIN" commit add DE-01 xyz --json
+expect_json_error task_not_found "$BIN" commit add Missing abc1234 --json
+expect_json_error usage "$BIN" commit add --json
+
+# task delete: a blocked dependent becomes ready under --force.
+expect_ok "$BIN" task add DE Prerequisite
+expect_ok "$BIN" task add DE Waiting
+expect_ok "$BIN" dep add DE-05 DE-06
+expect_ok "$BIN" ready DE-06 --actor user
+expect_json_error has_dependents "$BIN" task delete DE-05 --json
+expect_json_ok "$BIN" task delete DE-05 --force --json
+assert_json \
+    command string "task delete" \
+    tasks array_length 0 \
+    summary.returned integer 0 \
+    result.action string task_delete \
+    result.force boolean true \
+    result.task string DE-05 \
+    result.previous_state string proposed \
+    result.new_state null - \
+    result.newly_ready array_length 1 \
+    result.newly_ready.0 string DE-06
+expect_json_error task_not_found "$BIN" task delete DE-05 --json
+
+# workspace create/remove/prune use the workspace envelope.
+expect_json_ok "$BIN" workspace create DE-06 --actor json-agent --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace create" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-06 \
+    workspaces.0.task_id string DE-06 \
+    workspaces.0.actor string json-agent \
+    workspaces.0.state string active \
+    result.action string workspace_create \
+    result.changed boolean true \
+    result.workspace string DE-06 \
+    result.task string DE-06 \
+    result.previous_state string ready \
+    result.new_state string ready \
+    result.newly_ready array_length 0
+expect_json_error workspace_exists "$BIN" workspace create DE-06 \
+    --actor json-agent --json
+expect_json_error task_not_found "$BIN" workspace create Missing \
+    --actor json-agent --json
+expect_json_error usage "$BIN" workspace create DE-06 --json
+
+expect_json_ok "$BIN" workspace remove DE-06 --json
+assert_json \
+    command string "workspace remove" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-06 \
+    workspaces.0.state string removed \
+    result.action string workspace_remove \
+    result.changed boolean true \
+    result.workspace string DE-06 \
+    result.force boolean false \
+    result.task string DE-06
+expect_json_error workspace_not_found "$BIN" workspace remove DE-06 --json
+expect_json_error usage "$BIN" workspace remove --json
+
+# workspace prune: dry run, a dirty skip, then the real removal.
+expect_ok "$BIN" task add DE Prunable --no-review
+expect_ok "$BIN" ready DE-07 --actor user --no-review
+expect_ok "$BIN" workspace create DE-07 --actor json-agent
+expect_ok "$BIN" start DE-07 --actor json-agent
+expect_ok "$BIN" finish DE-07 --actor json-agent
+expect_json_ok "$BIN" workspace prune --done --dry-run --json
+assert_json \
+    command string "workspace prune" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-07 \
+    workspaces.0.state string active \
+    result.action string workspace_prune \
+    result.changed boolean false \
+    result.dry_run boolean true \
+    result.task null - \
+    result.skipped array_length 0
+prune_path="$("$BIN" workspace show DE-07 | sed -n 's/^Path: //p')"
+printf 'dirty\n' > "$prune_path/dirty.txt"
+expect_json_ok "$BIN" workspace prune --done --json
+assert_json \
+    workspaces array_length 0 \
+    result.changed boolean false \
+    result.dry_run boolean false \
+    result.skipped array_length 1 \
+    result.skipped.0.workspace string DE-07 \
+    result.skipped.0.reason string dirty
+rm "$prune_path/dirty.txt"
+expect_json_ok "$BIN" workspace prune --done --json
+assert_json \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-07 \
+    workspaces.0.state string removed \
+    result.changed boolean true \
+    result.skipped array_length 0
+expect_json_error usage "$BIN" workspace prune --bogus --json
+
+# Out-of-scope subcommands keep rejecting --json as before.
+expect_fail "$BIN" task priority DE-01 5 --json
+assert_contains "Unknown task priority option: --json"
+assert_not_contains '"schema_version"'
 
 case_dir="$(make_case_dir task-edit)"
 cd "$case_dir"

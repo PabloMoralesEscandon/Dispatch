@@ -30,4 +30,56 @@ int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
                                   const char *command,
                                   const DispatchWorkspace *only);
 
+/* Presentation state of every task, captured before a mutation so the
+ * result can report previous states and newly ready tasks. */
+typedef struct {
+    char **ids;
+    DispatchState *states;
+    size_t count;
+} DispatchJsonSnapshot;
+
+void dispatch_json_snapshot_take(DispatchJsonSnapshot *snapshot,
+                                 const DispatchBoard *board);
+void dispatch_json_snapshot_free(DispatchJsonSnapshot *snapshot);
+
+/* The result object of a mutating command, built up by the command and
+ * consumed by one of the mutation emitters. */
+typedef struct DispatchJsonResult DispatchJsonResult;
+
+DispatchJsonResult *dispatch_json_result_new(const char *action);
+void dispatch_json_result_free(DispatchJsonResult *result);
+/* Records a task the command acted on; order is preserved. */
+void dispatch_json_result_add_target(DispatchJsonResult *result,
+                                     const char *task_id);
+void dispatch_json_result_set_changed(DispatchJsonResult *result,
+                                      int changed);
+/* Sets an action-specific field; a NULL value is emitted as null. */
+void dispatch_json_result_set_string(DispatchJsonResult *result,
+                                     const char *key, const char *value);
+void dispatch_json_result_set_bool(DispatchJsonResult *result,
+                                   const char *key, int value);
+/* Appends {"workspace": id, "reason": reason} to result.skipped. */
+void dispatch_json_result_add_skipped(DispatchJsonResult *result,
+                                      const char *workspace_id,
+                                      const char *reason);
+
+/* Writes the task envelope for a mutation: tasks holds the targets that
+ * still exist, followed by result. group fills query.group when non-NULL. */
+int dispatch_json_emit_mutation(FILE *stream, const DispatchBoard *board,
+                                const char *command, const char *group,
+                                const DispatchJsonSnapshot *before,
+                                const DispatchJsonResult *result);
+
+/* Writes the workspace envelope for a mutation with the given records,
+ * followed by result. */
+int dispatch_json_emit_workspace_mutation(
+    FILE *stream, const DispatchBoard *board, const char *command,
+    const DispatchWorkspace *records, size_t record_count,
+    const DispatchJsonSnapshot *before, const DispatchJsonResult *result);
+
+/* Writes {"schema_version", "command", "error": {code, message, task_id}}. */
+int dispatch_json_emit_error(FILE *stream, const char *command,
+                             const char *code, const char *message,
+                             const char *task_id);
+
 #endif

@@ -7,7 +7,8 @@ int save_task_transition(LockedBoard *locked, const char *verb,
     dispatch_board_normalize_states(&locked->board);
     if (!locked_board_save_or_error(locked))
         return 1;
-    printf("%s %s\n", verb, task_id);
+    if (!cli_json())
+        printf("%s %s\n", verb, task_id);
     return 0;
 }
 
@@ -438,10 +439,10 @@ static void print_task_commits(const DispatchTask *task, int include_header) {
 
 int cmd_commit(int argc, char **argv) {
     if (argc < 4) {
-        fprintf(stderr,
-                "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
-        fprintf(stderr, "       dispatch commit list <task-id>\n");
-        fprintf(stderr, "       dispatch commit show <task-id>\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+        cli_error("usage", NULL, "       dispatch commit list <task-id>\n");
+        cli_error("usage", NULL, "       dispatch commit show <task-id>\n");
         return 1;
     }
 
@@ -472,16 +473,16 @@ int cmd_commit(int argc, char **argv) {
     }
 
     if (strcmp(subcommand, "add") != 0) {
-        fprintf(stderr,
-                "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
-        fprintf(stderr, "       dispatch commit list <task-id>\n");
-        fprintf(stderr, "       dispatch commit show <task-id>\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+        cli_error("usage", NULL, "       dispatch commit list <task-id>\n");
+        cli_error("usage", NULL, "       dispatch commit show <task-id>\n");
         return 1;
     }
 
     if (argc != 5 && argc != 7) {
-        fprintf(stderr,
-                "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
         return 1;
     }
 
@@ -489,15 +490,16 @@ int cmd_commit(int argc, char **argv) {
     const char *actor = "user";
     if (argc == 7) {
         if (strcmp(argv[5], "--actor") != 0 || argv[6][0] == '\0') {
-            fprintf(stderr,
-                    "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
+            cli_error("usage", NULL,
+                      "Usage: dispatch commit add <task-id> <sha> [--actor <name>]\n");
             return 1;
         }
         actor = argv[6];
     }
 
     if (!commit_ref_is_valid(sha)) {
-        fprintf(stderr, "Commit reference must be a 4-64 character hex SHA\n");
+        cli_error("invalid_commit", NULL,
+                  "Commit reference must be a 4-64 character hex SHA\n");
         return 1;
     }
 
@@ -508,24 +510,39 @@ int cmd_commit(int argc, char **argv) {
     DispatchTask *task = dispatch_board_find_task(&locked.board, task_id);
     if (!task) {
         locked_board_close(&locked);
-        fprintf(stderr, "No task with id %s\n", task_id);
+        cli_error("task_not_found", task_id, "No task with id %s\n", task_id);
         return 1;
     }
 
+    DispatchJsonResult *json_result = NULL;
+    if (cli_json()) {
+        json_result = dispatch_json_result_new("commit_add");
+        dispatch_json_result_add_target(json_result, task_id);
+        dispatch_json_result_set_string(json_result, "commit", sha);
+    }
+
     if (task_commit_contains(task, sha)) {
+        int status = 0;
+        if (json_result) {
+            dispatch_json_result_set_changed(json_result, 0);
+            status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+        } else {
+            printf("Commit %s already recorded for %s\n", sha, task_id);
+        }
         locked_board_close(&locked);
-        printf("Commit %s already recorded for %s\n", sha, task_id);
-        return 0;
+        return status;
     }
 
     task_commit_append(task, sha);
     dispatch_task_append_history(task, actor, "commit", sha);
     if (!locked_board_save_or_error(&locked)) {
+        dispatch_json_result_free(json_result);
         locked_board_close(&locked);
         return 1;
     }
 
-    printf("Added commit %s to %s\n", sha, task_id);
+    if (!json_result)
+        printf("Added commit %s to %s\n", sha, task_id);
     DispatchLogField targets[] = {
         {"task", task_id},
     };
@@ -536,8 +553,11 @@ int cmd_commit(int argc, char **argv) {
     snprintf(message, sizeof(message), "Added commit %s to %s", sha, task_id);
     append_dispatch_log(actor, "commit", "commit_add", targets, 1, context, 1,
                         message);
+    int status = json_result
+                     ? cli_json_emit_tasks(&locked.board, NULL, json_result)
+                     : 0;
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 int cmd_ready_list(int json_output) {
