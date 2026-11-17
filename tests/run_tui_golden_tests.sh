@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${DISPATCH_BIN:-$ROOT/dispatch}"
 GOLDEN_DIR="${TUI_GOLDEN_DIR:-$ROOT/tests/golden/tui}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-tui-golden.XXXXXX")"
+# Dispatch stores realpaths (/private/var/... for a macOS TMPDIR), so match
+# paths in captured text against the resolved root as well.
+TMP_ROOT_REAL="$(cd "$TMP_ROOT" && pwd -P)"
 UPDATE_GOLDENS="${UPDATE_GOLDENS:-0}"
 MUTATE_FRAME="${TUI_GOLDEN_MUTATE_FRAME:-}"
 
@@ -18,10 +21,18 @@ fi
 # shellcheck source=tests/utf8_locale.sh
 . "$ROOT/tests/utf8_locale.sh"
 
+# A path inside a frame line (the board header, inspector fields) is cut to
+# the frame width at a point that depends on how long this machine's temp path
+# is, and no rewrite of the captured text can undo that.
+# DISPATCH_TUI_SMOKE_TMP_ROOT makes the render itself print "<tmp>" before
+# layout (docs/adr/0005-portable-tui-goldens.md). The rules below only cover
+# paths that end their line, where nothing follows them.
+export DISPATCH_TUI_SMOKE_TMP_ROOT="$TMP_ROOT"
+
 normalize_frame() {
     sed -E \
+        -e "s|$TMP_ROOT_REAL|<tmp>|g" \
         -e "s|$TMP_ROOT|<tmp>|g" \
-        -e 's|Repo [^|]*[|]|Repo <path> |' \
         -e 's|(agent/golden/DE-01)  /.*|\1  <workspace>|' \
         -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?/<timestamp>/g'
 }
@@ -36,7 +47,9 @@ capture_frame() {
         normalize_frame >"$actual"
 
     if [ "$MUTATE_FRAME" = "$name" ]; then
-        sed -i '2s/DISPATCH/DISPATCH-MUTATED/' "$actual"
+        # Not sed -i: GNU and BSD sed disagree on its argument.
+        sed '2s/DISPATCH/DISPATCH-MUTATED/' "$actual" >"$actual.mutated"
+        mv "$actual.mutated" "$actual"
     fi
 
     if [ "$UPDATE_GOLDENS" = "1" ]; then

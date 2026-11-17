@@ -3,7 +3,7 @@ Frame: board 100x30
 
 Tasks  1 ready   0 doing   0 review   0 blocked   1 proposed   0 done
 
-Repo <tmp>/accented/repo    2 tasks (2 shown)    1 groups    0 agents    0
+Repo <tmp>/accented/repo    2 tasks (2 shown)    1 groups    0 agents    0 workspaces
 View   not-done    1-7/R filter   G group   A actor   / search   c clear
 
    TR  Traducción   2
