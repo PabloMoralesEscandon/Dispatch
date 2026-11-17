@@ -9,6 +9,7 @@ Frame: task 100x30
 
 Details
   Group          TR
+  Issue          -
   Review gate    required
   Assigned       -
   Started by     -
@@ -22,7 +23,6 @@ Dependencies
 History
   - created by user
   - ready by user
-
 
 
 

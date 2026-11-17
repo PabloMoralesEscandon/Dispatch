@@ -217,7 +217,8 @@ another process updates it.
 
 `status` prints a compact board overview: task counts by state, ready and review
 queues, blocked count, enabled/archived agent counts, workspace counts, and
-warnings such as completed tasks without recorded commits.
+warnings such as completed tasks without recorded commits or several tasks
+linking the same GitHub issue.
 `doctor` checks board readability, repository layout, PATH/symlink setup,
 completion installation, generated agent prompt/run files, and workspace paths.
 
@@ -375,6 +376,9 @@ commit metadata exists. The diff covers all of the task's recorded commits, is
 rendered with forced color, and is shown through a pager (`$PAGER`, else `less`
 or `more`) so it stays on screen until you quit the pager. When no pager is
 installed the diff is shown without paging.
+The task inspector shows the task's linked GitHub issue, and `o` there opens
+the issue URL with `open` on macOS or `xdg-open` elsewhere. Linking and
+clearing issues happens through `task add` and `task edit`.
 In the task creation form, `Ctrl-O` opens an option picker for the active
 field: on the Group field it lists existing groups (typing still creates a new
 group), and on the Depends field it lists not-done tasks, excluding done tasks
@@ -422,7 +426,8 @@ ready|start|finish|review <task-id>
 Noninteractive acceptance hooks are available for tests and terminal smoke
 checks: `dispatch tui --smoke`, `--inspect-smoke`, `--filter-smoke`,
 `--action-smoke`, `--diff-smoke`, `--agents-smoke`, `--workspaces-smoke`,
-`--logs-smoke`, `--palette-smoke`, and `--palette-complete-smoke`.
+`--logs-smoke`, `--open-issue-smoke`, `--palette-smoke`, and
+`--palette-complete-smoke`.
 `--render-smoke <screen> <cols> <rows> [keys]` renders through an ncurses
 virtual terminal and prints a normalized plain-text frame for headless tests.
 
@@ -465,8 +470,8 @@ yet.
 ### Tasks
 
 ```bash
-dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review]
-dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]
+dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review] [--issue <ref>]
+dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]
 dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
 dispatch show <id> [--json]
@@ -485,6 +490,35 @@ ID, group, workflow state, dependencies, commit references, or prior history.
 The edit is appended to task history using the supplied `--actor`, which
 defaults to `user`. Pass an empty description to clear it.
 
+#### Linked GitHub issues
+
+A task can link one GitHub issue, so planned work stays traceable to where it
+is tracked. Link it when adding the task with `task add --issue <ref>`, change
+it with `task edit <id> --issue <ref>`, and remove it with
+`task edit <id> --clear-issue`. Dispatch stores the link canonically as
+`owner/repo#number` and accepts these forms:
+
+```text
+123                                        bare number
+#123                                       bare number
+acme/widgets#123                           canonical form
+https://github.com/acme/widgets/issues/123 issue URL
+```
+
+A bare number resolves against the GitHub `origin` remote of the board's
+repository, read locally with `git remote get-url origin`. Linking never makes
+a network call or runs `gh`, so Dispatch does not check that the issue exists.
+Malformed refs, pull request URLs, non-GitHub URLs, and bare numbers on a repo
+without a GitHub `origin` are rejected without changing the board.
+
+Linking a different issue replaces the current one. Each change appends an
+`issue_link` or `issue_unlink` entry to task history and `dispatch.log`, with
+the ref in the history note and in the log record's `context.issue`. Several
+tasks may link the same issue; `status` warns about it so accidental
+duplicates are easy to spot. `show` prints the linked issue and its URL, `list`
+adds `issue:#123` to the task line, and JSON task objects carry an `issue`
+object (see [JSON Output](#json-output)).
+
 `task move` changes the task's group while preserving its ID, workflow state,
 dependencies, commit references, workspace associations, agent session links,
 and history. The move is appended to task history using the supplied `--actor`,
@@ -500,7 +534,8 @@ the group prints a single `(done)` marker instead of every completed task row.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name. Use `list all` to include
 completed tasks, optionally scoped to a group with `list all <group>`.
-Tasks with recorded commits show a `commits:N` summary on their task line.
+Tasks with recorded commits show a `commits:N` summary on their task line, and
+tasks with a linked issue show `issue:#N`.
 
 When stdout is a terminal, `list` uses ANSI color to distinguish group headings,
 task IDs, states, and metadata. Set `FORCE_COLOR=1` to force color in captured
@@ -639,10 +674,14 @@ the state shown by the CLI after dependencies are evaluated; `stored_state` is
 the persisted lifecycle state. Unset actor, workspace, and timestamp fields are
 JSON `null`.
 
+Task objects also carry `issue`: `null`, or the linked GitHub issue as
+`{"repo": "acme/widgets", "number": 12, "url": "https://github.com/acme/widgets/issues/12"}`.
+
 Only `status` populates `warnings`. Warning objects contain a stable `code`, a
 human-readable `message`, and nullable `task_id` and `agent` fields. Version 1
-reports missing commits, assignment/state mismatches, and agent sessions that
-reference missing tasks.
+reports missing commits, assignment/state mismatches, agent sessions that
+reference missing tasks, and tasks that link the same issue as an earlier
+task.
 
 Consumers should ignore unknown fields. Adding optional fields is compatible;
 removing a field or changing its type or meaning requires a new

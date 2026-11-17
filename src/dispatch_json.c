@@ -1,5 +1,7 @@
 #include "dispatch_json.h"
 
+#include "dispatch_issue.h"
+
 #include <jansson.h>
 #include <stdio.h>
 #include <string.h>
@@ -55,6 +57,22 @@ active_task_workspace(const DispatchBoard *board, const char *task_id) {
             return workspace;
     }
     return NULL;
+}
+
+static json_t *issue_json(const char *issue) {
+    DispatchIssueRef ref;
+    if (!issue || !dispatch_issue_parse_canonical(issue, &ref))
+        return json_null();
+
+    char repo[DISPATCH_ISSUE_TEXT_MAX];
+    char url[DISPATCH_ISSUE_TEXT_MAX];
+    dispatch_issue_format_repo(&ref, repo, sizeof(repo));
+    dispatch_issue_format_url(&ref, url, sizeof(url));
+    json_t *object = json_object();
+    json_object_set_new(object, "repo", json_string(repo));
+    json_object_set_new(object, "number", json_integer((json_int_t)ref.number));
+    json_object_set_new(object, "url", json_string(url));
+    return object;
 }
 
 static json_t *workspace_json(const DispatchWorkspace *workspace) {
@@ -214,6 +232,7 @@ static json_t *task_json(const DispatchBoard *board, const DispatchTask *task) {
     json_object_set_new(object, "blocked_by", blocked_by_json(board, task));
     json_object_set_new(object, "blocks", blocks_json(board, task));
     json_object_set_new(object, "commits", string_list_json(&task->commits));
+    json_object_set_new(object, "issue", issue_json(task->issue));
     json_object_set_new(object, "workspace",
                         workspace_json(active_task_workspace(board, task->id)));
     json_object_set_new(object, "created_at", time_or_null(task->created_at));
@@ -370,6 +389,14 @@ static json_t *warnings_json(const DispatchBoard *board, int include_warnings) {
                      task->assigned_to, dispatch_state_name(state));
             append_warning(warnings, "assignment_state_mismatch", message,
                            task->id, NULL);
+        }
+        const DispatchTask *duplicate =
+            dispatch_board_earlier_task_with_issue(board, task);
+        if (duplicate) {
+            snprintf(message, sizeof(message), "%s links %s, also linked to %s",
+                     task->id, task->issue, duplicate->id);
+            append_warning(warnings, "duplicate_issue", message, task->id,
+                           NULL);
         }
     }
     for (size_t i = 0; i < board->agents.count; i++) {

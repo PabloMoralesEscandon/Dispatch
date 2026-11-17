@@ -8,6 +8,7 @@ Frame: task 100x30
 
 Details
   Group          DE
+  Issue          -
   Review gate    required
   Assigned       -
   Started by     -
@@ -26,6 +27,5 @@ Workspace
 History
   - created by user
   - ready by user
-
 
  Ready    q/Esc back   e edit   m move   >/< deps   d diff   x/X delete   L logs   PgUp/PgDn scroll

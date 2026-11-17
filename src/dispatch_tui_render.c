@@ -367,6 +367,7 @@ static const HelpItem help_task_inspector_items[] = {
     {">", "add dependency"},
     {"<", "remove dependency"},
     {"d", "diff"},
+    {"o", "open linked issue"},
     {"x  X", "delete / force delete"},
     {"L", "task logs"},
     {"PgUp/PgDn", "scroll description"},
@@ -1093,7 +1094,7 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
     int desc_width = cols - desc_x;
     int total = description_rows(desc, desc_width, -1, NULL, 0);
     /* Leave room for the fixed sections below the description. */
-    int reserved = 16;
+    int reserved = 17;
     int region = rows - 1 - y - reserved;
     if (region < 3)
         region = 3;
@@ -1134,6 +1135,7 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
 
     y = draw_section(y, rows, cols, "Details");
     y = draw_field(y, rows, cols, "Group", task->group);
+    y = draw_field(y, rows, cols, "Issue", task->issue);
     y = draw_field(y, rows, cols, "Review gate",
                    task->requires_review ? "required" : "none");
     y = draw_field(y, rows, cols, "Assigned", task->assigned_to);

@@ -1,5 +1,7 @@
 #include "dispatch_store.h"
 
+#include "dispatch_issue.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <jansson.h>
@@ -286,6 +288,7 @@ static void task_free_fields(DispatchTask *task) {
     free(task->assigned_to);
     free(task->started_by);
     free(task->completed_by);
+    free(task->issue);
     for (size_t i = 0; i < task->history.count; i++) {
         free(task->history.items[i].actor);
         free(task->history.items[i].action);
@@ -406,6 +409,10 @@ static json_t *task_to_json(const DispatchTask *task) {
     json_object_set_new(object, "completed_by",
                         task->completed_by ? json_string(task->completed_by)
                                            : json_null());
+    /* Written only when set, so boards without linked issues keep their
+     * existing shape on every save. */
+    if (task->issue)
+        json_object_set_new(object, "issue", json_string(task->issue));
     json_object_set_new(object, "created_at", json_time_or_null(task->created_at));
     json_object_set_new(object, "started_at", json_time_or_null(task->started_at));
     json_object_set_new(object, "completed_at",
@@ -650,6 +657,22 @@ static int load_tasks(DispatchBoard *board, json_t *tasks, char *error,
         task.assigned_to = assigned_to ? store_strdup(assigned_to) : NULL;
         task.started_by = started_by ? store_strdup(started_by) : NULL;
         task.completed_by = completed_by ? store_strdup(completed_by) : NULL;
+
+        json_t *issue = json_object_get(value, "issue");
+        if (issue && !json_is_null(issue)) {
+            DispatchIssueRef ref;
+            if (!json_is_string(issue) ||
+                !dispatch_issue_parse_canonical(json_string_value(issue),
+                                                &ref)) {
+                set_error(error, error_size,
+                          "task issue must be owner/repo#number");
+                task_free_fields(&task);
+                return 0;
+            }
+            char canonical[DISPATCH_ISSUE_TEXT_MAX];
+            dispatch_issue_format(&ref, canonical, sizeof(canonical));
+            task.issue = store_strdup(canonical);
+        }
         task.created_at = json_time_or_zero(value, "created_at");
         task.started_at = json_time_or_zero(value, "started_at");
         task.completed_at = json_time_or_zero(value, "completed_at");

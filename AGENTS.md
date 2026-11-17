@@ -79,7 +79,8 @@ dispatch group ready <group> --actor <name> [--no-review]
 dispatch group edit <prefix> --description <text>
 dispatch group list
 dispatch group show <prefix>
-dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review]
+dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review] [--issue <ref>]
+dispatch task edit <TASK-ID> --issue <ref>|--clear-issue [--actor <agent-id>]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
 dispatch commit add <TASK-ID> <sha> [--actor <agent-id>]
@@ -268,6 +269,10 @@ near-duplicate of an existing group is a planning mistake. Create a new group
 only when no recorded scope fits, and give it a `--description` at creation so
 the next planner can reuse it. If a group you extend has no recorded scope
 yet, record one with `dispatch group edit <prefix> --description <text>`.
+
+When the work is tracked in a GitHub issue, link it with `--issue <ref>` on
+`task add` (or `task edit`). A ref is `#123`, `123`, `owner/repo#123`, or the
+issue URL; bare numbers resolve against the repo's GitHub `origin` remote.
 
 Example user request:
 

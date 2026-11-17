@@ -100,6 +100,11 @@ Every entry in `tasks` has the same shape:
   "blocked_by": ["DE-01"],
   "blocks": ["DE-03"],
   "commits": [],
+  "issue": {
+    "repo": "acme/widgets",
+    "number": 12,
+    "url": "https://github.com/acme/widgets/issues/12"
+  },
   "workspace": null,
   "created_at": 1750000000,
   "started_at": null,
@@ -124,6 +129,20 @@ from `state` when derived state has not yet been normalized and persisted.
 `depends_on` contains all direct dependency IDs. `blocked_by` contains only
 dependencies that are not effectively done. `blocks` contains IDs of all tasks
 that directly depend on this task. `commits` contains recorded commit refs.
+
+`issue` is the task's linked GitHub issue, or `null` when the task has none
+(including boards written before issue links existed). When set it contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `repo` | string | `owner/repo` as linked, case preserved |
+| `number` | integer | Issue number, always positive |
+| `url` | string | `https://github.com/<repo>/issues/<number>` |
+
+A task links at most one issue. The field was added in a compatible release,
+so `schema_version` stays `1`; consumers written before it should already
+ignore it as an unknown field. Dispatch never contacts GitHub to fill it, so
+the issue is not guaranteed to exist.
 
 `workspace` is `null` when no active workspace covers the task. Otherwise it
 contains:
@@ -178,6 +197,9 @@ The version 1 warning codes are:
 - `missing_commits` for a done or review task with no recorded commits.
 - `assignment_state_mismatch` for an assigned task outside doing or review.
 - `missing_current_task` for an agent session that references an unknown task.
+- `duplicate_issue` for a task linking the same issue as an earlier task in
+  board order. Repos compare case-insensitively. `task_id` names the later
+  task, and the message names the earlier one.
 
 Each warning always contains `code`, `message`, `task_id`, and `agent`. Fields
 that do not apply are `null`.

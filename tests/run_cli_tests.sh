@@ -118,18 +118,18 @@ if grep -En '(^|[^[:alnum:]_])(system|popen|pclose)[[:space:]]*\(' \
 fi
 
 # shellcheck disable=SC2086
-cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c \
+cc $TEST_CFLAGS -Iinclude tests/lock_primitive_test.c src/dispatch_store.c src/dispatch.c src/dispatch_issue.c \
     -ljansson -o "$TMP_ROOT/lock_primitive_test"
 "$TMP_ROOT/lock_primitive_test" "$TMP_ROOT/dispatch.json" >/dev/null
 
 # shellcheck disable=SC2086
-cc $TEST_CFLAGS -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c \
+cc $TEST_CFLAGS -Iinclude tests/store_records_test.c src/dispatch_store.c src/dispatch.c src/dispatch_issue.c \
     -ljansson -o "$TMP_ROOT/store_records_test"
 "$TMP_ROOT/store_records_test" "$TMP_ROOT/empty-records.json" \
     "$TMP_ROOT/populated-records.json" >/dev/null
 
 # shellcheck disable=SC2086
-cc $TEST_CFLAGS -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c \
+cc $TEST_CFLAGS -Iinclude tests/log_writer_test.c src/dispatch_store.c src/dispatch.c src/dispatch_issue.c \
     -ljansson -o "$TMP_ROOT/log_writer_test"
 "$TMP_ROOT/log_writer_test" "$TMP_ROOT/dispatch.log" >/dev/null
 
@@ -142,6 +142,11 @@ cc $TEST_CFLAGS -Iinclude tests/workspace_naming_test.c src/dispatch.c \
 cc $TEST_CFLAGS -Iinclude tests/utf8_width_test.c src/dispatch_utf8.c \
     -o "$TMP_ROOT/utf8_width_test"
 "$TMP_ROOT/utf8_width_test" >/dev/null
+
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/issue_ref_test.c src/dispatch_issue.c \
+    -o "$TMP_ROOT/issue_ref_test"
+"$TMP_ROOT/issue_ref_test" >/dev/null
 
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
@@ -963,7 +968,7 @@ expect_ok "$BIN" ready DE-01 --actor user --no-review
 expect_ok "$BIN" ready DE-02 --actor user
 
 expect_fail "$BIN" task edit DE-02
-assert_contains "Task edit requires --title, --description, or both"
+assert_contains "Task edit requires --title, --description, --issue, or --clear-issue"
 expect_fail "$BIN" task edit missing --title Updated
 assert_contains "No task with id missing"
 expect_fail "$BIN" task edit DE-02 --title ""
@@ -1741,6 +1746,9 @@ assert_contains 'dispatch completion candidates "$1"'
 assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
 assert_contains "_dispatch_compadd_candidates runners"
+assert_contains "compadd -- add edit delete"
+assert_contains "add) compadd -- --description --actor --no-review --issue ;;"
+assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor ;;"
 
 expect_fail "$BIN" completion zsh extra
 assert_contains "Usage: dispatch completion candidates"
@@ -1755,6 +1763,22 @@ assert_contains "--actor --no-review"
 assert_contains "--description --actor --no-review"
 assert_contains "_dispatch_complete_candidates runners"
 
+# GH-1: task add and task edit complete the issue flags.
+"$BIN" completion bash > "$TMP_ROOT/dispatch-completion.bash"
+bash_complete() {
+    # shellcheck disable=SC2016
+    expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+        bash "$TMP_ROOT/dispatch-completion.bash" "$@"
+}
+bash_complete dispatch task add DE Title --i
+assert_line "--issue"
+bash_complete dispatch task edit DE-01 --
+assert_line "--title"
+assert_line "--issue"
+assert_line "--clear-issue"
+bash_complete dispatch task e
+assert_line "edit"
+
 expect_fail "$BIN" completion bash extra
 assert_contains "Usage: dispatch completion candidates"
 
@@ -1768,6 +1792,9 @@ assert_contains "all (__dispatch_candidates groups)"
 assert_contains "(__dispatch_candidates tasks)"
 assert_contains "-l runner -r -a '(__dispatch_candidates runners)'"
 assert_contains "(__dispatch_candidates workspaces)"
+assert_contains "__fish_seen_subcommand_from add' -l issue -r"
+assert_contains "__fish_seen_subcommand_from edit' -l issue -r"
+assert_contains "__fish_seen_subcommand_from edit' -l clear-issue"
 
 if command -v fish >/dev/null 2>&1; then
     "$BIN" completion fish > "$TMP_ROOT/dispatch-completion.fish"
@@ -2615,6 +2642,9 @@ fi
 assert_file_contains AGENTS.md "# Dispatch Agent Instructions"
 assert_file_contains AGENTS.md "Never read \`dispatch.json\` directly."
 assert_file_contains CLAUDE.md "# Dispatch Agent Instructions"
+# GH-1: agents on new boards learn to link GitHub issues.
+assert_file_contains AGENTS.md "[--no-review] [--issue <ref>]"
+assert_file_contains CLAUDE.md "dispatch task edit <TASK-ID> --issue <ref>|--clear-issue"
 expect_ok "$BIN" doctor
 assert_contains "AGENTS.md found in workflow directory"
 # Re-init with an existing board must not scaffold or recreate files.
@@ -2866,6 +2896,212 @@ expect_ok "$BIN" tui --desc-wrap-smoke TR-03 8 4 0
 assert_contains "Total: 2"
 assert_contains "Line: [aaaaaaaá]"
 assert_contains "Line: [bbbbbbbb]"
+
+# GH-1: a task links at most one GitHub issue, stored as owner/repo#number.
+# Refs are validated locally; a bare number resolves against the board repo's
+# origin remote with a local git call, never the network.
+case_dir="$(make_case_dir issue-links)"
+cd "$case_dir"
+git init -q repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+
+expect_fail "$BIN" task add DE "Needs origin" --issue 12
+assert_contains "Cannot resolve issue #12: the board repo has no origin remote; use owner/repo#12"
+git -C repo remote add origin https://gitlab.com/acme/widgets.git
+expect_fail "$BIN" task add DE "Needs GitHub" --issue '#12'
+assert_contains "Cannot resolve issue #12: origin remote https://gitlab.com/acme/widgets.git is not a GitHub repository; use owner/repo#12"
+git -C repo remote set-url origin git@github.com:acme/widgets.git
+
+for bad_ref in 'acme#1' 'acme/widgets' 'acme/widgets#0' '#12abc' \
+    'https://github.com/acme/widgets/pull/3' \
+    'https://gitlab.com/acme/widgets/issues/3'; do
+    expect_fail "$BIN" task add DE "Bad ref" --issue "$bad_ref"
+    assert_contains "Invalid issue reference '$bad_ref'"
+done
+expect_fail "$BIN" task add DE "Missing value" --issue
+assert_contains "Unknown task option: --issue"
+# Rejected refs add no task and write no log record.
+expect_ok "$BIN" list
+assert_contains "(no tasks)"
+assert_file_not_contains dispatch.log '"issue_link"'
+
+# Linking never shells out to gh.
+mkdir -p fake-bin
+printf '#!/usr/bin/env bash\ntouch "%s/gh-was-called"\nexit 1\n' "$case_dir" > fake-bin/gh
+chmod +x fake-bin/gh
+PATH="$case_dir/fake-bin:$PATH" expect_ok "$BIN" task add DE "Bare number" --issue 12
+assert_line "Added task DE-01"
+assert_line "Linked DE-01 to acme/widgets#12"
+if [ -e gh-was-called ]; then
+    fail "linking an issue called gh"
+fi
+expect_ok "$BIN" task add DE "Hash number" --issue '#13' --actor codex
+assert_line "Linked DE-02 to acme/widgets#13"
+expect_ok "$BIN" task add DE "Issue URL" --issue https://github.com/Other-Org/thing.js/issues/7/
+assert_line "Linked DE-03 to Other-Org/thing.js#7"
+expect_ok "$BIN" task add DE "Canonical ref" --issue acme/widgets#12
+assert_line "Linked DE-04 to acme/widgets#12"
+expect_ok "$BIN" task add DE "No issue"
+assert_not_contains "Linked"
+
+expect_ok "$BIN" task edit DE-05 --issue 20 --actor codex
+assert_line "Linked DE-05 to acme/widgets#20"
+assert_not_contains "Edited task"
+expect_ok "$BIN" task edit DE-05 --issue acme/widgets#20
+assert_line "Task DE-05 is already linked to acme/widgets#20"
+expect_ok "$BIN" task edit DE-05 --issue 21 --title "Relinked"
+assert_line "Edited task DE-05"
+assert_line "Unlinked acme/widgets#20 from DE-05"
+assert_line "Linked DE-05 to acme/widgets#21"
+expect_ok "$BIN" task edit DE-05 --clear-issue --actor codex
+assert_line "Unlinked acme/widgets#21 from DE-05"
+expect_ok "$BIN" task edit DE-05 --clear-issue
+assert_line "Task DE-05 has no linked issue"
+expect_fail "$BIN" task edit DE-05 --issue 1 --clear-issue
+assert_contains "Use either --issue or --clear-issue, not both"
+expect_fail "$BIN" task edit DE-05 --issue nope
+assert_contains "Invalid issue reference 'nope'"
+expect_fail "$BIN" task edit DE-99 --issue 1
+assert_contains "No task with id DE-99"
+expect_fail "$BIN" task edit DE-05
+assert_contains "Task edit requires --title, --description, --issue, or --clear-issue"
+
+expect_ok "$BIN" show DE-05
+assert_line "  issue_link by codex: acme/widgets#20"
+assert_line "  issue_unlink by user: acme/widgets#20"
+assert_line "  issue_link by user: acme/widgets#21"
+assert_line "  issue_unlink by codex: acme/widgets#21"
+assert_file_contains dispatch.log '"actor":"user","command":"task","action":"issue_link","outcome":"success","message":"Linked DE-01 to acme/widgets#12","targets":{"task":"DE-01"},"context":{"issue":"acme/widgets#12"}'
+assert_file_contains dispatch.log '"actor":"codex","command":"task","action":"issue_unlink","outcome":"success","message":"Unlinked acme/widgets#21 from DE-05","targets":{"task":"DE-05"},"context":{"issue":"acme/widgets#21"}'
+if [ "$(grep -c '"action":"issue_link"' dispatch.log)" -ne 6 ] ||
+    [ "$(grep -c '"action":"issue_unlink"' dispatch.log)" -ne 2 ]; then
+    fail "expected 6 issue_link and 2 issue_unlink log records"
+fi
+
+# show prints the linked issue and its URL; list adds issue:#N to the line.
+expect_ok "$BIN" show DE-01
+assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12)"
+expect_ok "$BIN" show DE-05
+assert_line "Issue: -"
+expect_ok "$BIN" list
+assert_line "  DE-01    proposed   Bare number  issue:#12"
+assert_line "  DE-03    proposed   Issue URL  issue:#7"
+assert_line "  DE-05    proposed   Relinked"
+
+# JSON task objects carry a nullable issue object; schema_version stays 1.
+expect_ok "$BIN" show DE-03 --json
+assert_json \
+    schema_version integer 1 \
+    tasks.0.issue object - \
+    tasks.0.issue.repo string Other-Org/thing.js \
+    tasks.0.issue.number integer 7 \
+    tasks.0.issue.url string https://github.com/Other-Org/thing.js/issues/7
+expect_ok "$BIN" show DE-05 --json
+assert_json tasks.0.issue null -
+
+# Two tasks may link the same issue, and status warns about it.
+expect_ok "$BIN" status
+assert_line "  DE-04 links acme/widgets#12, also linked to DE-01"
+expect_ok "$BIN" status --json
+assert_json \
+    warnings array_length 1 \
+    warnings.0.code string duplicate_issue \
+    warnings.0.message string "DE-04 links acme/widgets#12, also linked to DE-01" \
+    warnings.0.task_id string DE-04 \
+    warnings.0.agent null -
+
+# A fixture board with linked issues: stored null and a missing field both
+# mean "no issue", and duplicates compare case-insensitively like GitHub.
+case_dir="$(make_case_dir issue-fixture)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/issue-links-board.json" dispatch.json
+expect_ok "$BIN" list GH
+assert_line "  GH-01    ready      Linked to the board repo  issue:#12"
+assert_line "  GH-02    blocked    Linked to another repo  depends_on:GH-01  issue:#7"
+assert_line "  GH-04    ready      Explicitly unlinked"
+assert_line "  GH-05    ready      No issue field"
+expect_ok "$BIN" show GH-02
+assert_line "Issue: Other-Org/thing.js#7 (https://github.com/Other-Org/thing.js/issues/7)"
+expect_ok "$BIN" list --json
+assert_json \
+    tasks.0.issue.repo string acme/widgets \
+    tasks.0.issue.number integer 12 \
+    tasks.0.issue.url string https://github.com/acme/widgets/issues/12 \
+    tasks.1.issue.repo string Other-Org/thing.js \
+    tasks.3.issue null - \
+    tasks.4.issue null -
+expect_ok "$BIN" status
+assert_line "  GH-03 links ACME/widgets#12, also linked to GH-01"
+expect_ok "$BIN" normalize
+expect_ok "$BIN" show GH-01
+assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12)"
+assert_line "  issue_link by user: acme/widgets#12"
+expect_ok "$BIN" task edit GH-05 --issue Other-Org/thing.js#8
+assert_line "Linked GH-05 to Other-Org/thing.js#8"
+expect_ok "$BIN" show GH-05 --json
+assert_json tasks.0.issue.number integer 8
+expect_ok "$BIN" task edit GH-05 --clear-issue
+expect_ok "$BIN" show GH-05 --json
+assert_json tasks.0.issue null -
+
+# A stored issue that is not a canonical ref is rejected on load.
+sed 's|"Other-Org/thing.js#7"|"Other-Org/thing.js/7"|' \
+    "$ROOT/tests/fixtures/issue-links-board.json" > dispatch.json
+expect_fail "$BIN" list
+assert_contains "task issue must be owner/repo#number"
+
+# Boards written before issue links load unchanged, and normalize does not
+# add an issue field to them.
+case_dir="$(make_case_dir issue-legacy-board)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/dependency-board.json" dispatch.json
+expect_ok "$BIN" list all
+legacy_list="$RUN_OUTPUT"
+expect_ok "$BIN" normalize
+assert_file_not_contains dispatch.json '"issue"'
+expect_ok "$BIN" list all
+if [ "$RUN_OUTPUT" != "$legacy_list" ]; then
+    fail "normalize changed how a board without issue links lists"
+fi
+expect_ok "$BIN" show DE-01
+assert_line "Issue: -"
+expect_ok "$BIN" show DE-01 --json
+assert_json tasks.0.issue null -
+
+# The TUI task inspector shows the issue, and o opens its URL with the
+# platform opener (open on macOS, xdg-open elsewhere).
+expect_ok "$BIN" tui --key-smoke task o
+assert_contains "Status: No issue linked to"
+expect_ok "$BIN" tui --help-controls-smoke
+assert_contains "  o          open linked issue"
+
+case_dir="$(make_case_dir issue-tui)"
+cd "$case_dir"
+cp "$ROOT/tests/fixtures/issue-links-board.json" dispatch.json
+expect_ok "$BIN" tui --render-smoke task 100 30
+assert_line "  Issue          acme/widgets#12"
+expect_ok "$BIN" tui --open-issue-smoke GH-02
+assert_contains "argv[1]: https://github.com/Other-Org/thing.js/issues/7"
+expect_fail "$BIN" tui --open-issue-smoke GH-04
+assert_contains "No issue linked to GH-04"
+mkdir -p fake-bin
+for opener in open xdg-open; do
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/opened-url"\n' \
+        "$case_dir" > "fake-bin/$opener"
+    chmod +x "fake-bin/$opener"
+done
+PATH="$case_dir/fake-bin:$PATH" expect_ok "$BIN" tui --key-smoke task o
+assert_contains "Status: Opened https://github.com/acme/widgets/issues/12"
+assert_file_contains opened-url "https://github.com/acme/widgets/issues/12"
+# o belongs to the inspector; the board ignores it.
+rm -f opened-url
+PATH="$case_dir/fake-bin:$PATH" expect_ok "$BIN" tui --key-smoke board o
+if [ -e opened-url ]; then
+    fail "o opened an issue from the board view"
+fi
+PATH=/no-such-dir expect_ok "$BIN" tui --key-smoke task o
+assert_contains "is not available; issue: https://github.com/acme/widgets/issues/12"
 
 cd "$ROOT"
 

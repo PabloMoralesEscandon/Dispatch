@@ -1,5 +1,7 @@
 #include "dispatch_cli_internal.h"
 
+#include "dispatch_issue.h"
+
 int save_task_transition(LockedBoard *locked, const char *verb,
                                 const char *task_id) {
     dispatch_board_normalize_states(&locked->board);
@@ -91,6 +93,9 @@ static void print_task_line(const DispatchBoard *board, const DispatchTask *task
     }
     if (task->commits.count > 0)
         printf("  %scommits:%zu%s", meta_color, task->commits.count, reset);
+    DispatchIssueRef issue;
+    if (task->issue && dispatch_issue_parse_canonical(task->issue, &issue))
+        printf("  %sissue:#%ld%s", meta_color, issue.number, reset);
     if (task->priority != 0)
         printf("  %spriority:%d%s", meta_color, task->priority, reset);
     printf("\n");
@@ -315,6 +320,14 @@ int cmd_show(int argc, char **argv) {
            dispatch_state_name(task_presentation_state(&board, task)));
     printf("Requires review: %s\n", task->requires_review ? "yes" : "no");
     printf("Priority: %d\n", task->priority);
+    DispatchIssueRef issue;
+    if (task->issue && dispatch_issue_parse_canonical(task->issue, &issue)) {
+        char url[DISPATCH_ISSUE_TEXT_MAX];
+        dispatch_issue_format_url(&issue, url, sizeof(url));
+        printf("Issue: %s (%s)\n", task->issue, url);
+    } else {
+        printf("Issue: -\n");
+    }
     printf("Assigned to: %s\n", task->assigned_to ? task->assigned_to : "-");
     printf("Started by: %s\n", task->started_by ? task->started_by : "-");
     printf("Completed by: %s\n",
@@ -755,6 +768,13 @@ int cmd_status(int argc, char **argv) {
             state != DISPATCH_STATE_DOING && state != DISPATCH_STATE_REVIEW) {
             printf("  %s is assigned to %s but state is %s\n", task->id,
                    task->assigned_to, dispatch_state_name(state));
+            warnings++;
+        }
+        const DispatchTask *duplicate =
+            dispatch_board_earlier_task_with_issue(&board, task);
+        if (duplicate) {
+            printf("  %s links %s, also linked to %s\n", task->id,
+                   task->issue, duplicate->id);
             warnings++;
         }
     }

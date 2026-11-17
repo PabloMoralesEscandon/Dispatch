@@ -1,0 +1,10 @@
+# Architecture Decision Records
+
+Each record captures one design decision: the context that forced it, what was
+decided, and the consequences. Records are numbered in order and never
+renumbered; a decision that changes later gets a new record that supersedes
+the old one.
+
+| ADR | Title | Status |
+| --- | --- | --- |
+| [0001](0001-github-issue-links.md) | Link a GitHub issue to a task | Accepted |

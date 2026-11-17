@@ -1,5 +1,94 @@
 #include "dispatch_cli_internal.h"
 
+#include "dispatch_issue.h"
+
+static void print_invalid_issue_ref(const char *input) {
+    fprintf(stderr,
+            "Invalid issue reference '%s'; use #123, 123, owner/repo#123 or "
+            "https://github.com/owner/repo/issues/123\n",
+            input);
+}
+
+static int issue_ref_is_well_formed(const char *input) {
+    DispatchIssueRef ref;
+    if (dispatch_issue_parse(input, &ref) == DISPATCH_ISSUE_PARSE_INVALID) {
+        print_invalid_issue_ref(input);
+        return 0;
+    }
+    return 1;
+}
+
+/* Turns --issue input into a canonical owner/repo#number. A bare number
+ * resolves against the board repo's origin remote; reading the remote is a
+ * local git call, so linking never touches the network. */
+static int resolve_issue_ref(const DispatchBoard *board, const char *input,
+                             char *canonical, size_t canonical_size) {
+    DispatchIssueRef ref;
+    DispatchIssueParse parsed = dispatch_issue_parse(input, &ref);
+    if (parsed == DISPATCH_ISSUE_PARSE_INVALID) {
+        print_invalid_issue_ref(input);
+        return 0;
+    }
+
+    if (parsed == DISPATCH_ISSUE_PARSE_NEEDS_REPO) {
+        const char *repo_path = board->repo_path ? board->repo_path : ".";
+        const char *argv[] = {"git",     "-C",     repo_path, "remote",
+                              "get-url", "origin", NULL};
+        DispatchExecOptions options = {
+            .stdin_mode = DISPATCH_EXEC_DEV_NULL,
+            .stderr_mode = DISPATCH_EXEC_DEV_NULL,
+        };
+        DispatchExecResult result;
+        char *remote = NULL;
+        int captured =
+            dispatch_exec_capture(argv, &options, &remote, NULL, &result) &&
+            dispatch_exec_result_success(&result);
+        char *trimmed = trimmed_copy(captured && remote ? remote : "");
+        free(remote);
+        if (!trimmed[0]) {
+            fprintf(stderr,
+                    "Cannot resolve issue #%ld: the board repo has no origin "
+                    "remote; use owner/repo#%ld\n",
+                    ref.number, ref.number);
+            free(trimmed);
+            return 0;
+        }
+        char owner_repo[DISPATCH_ISSUE_TEXT_MAX];
+        if (!dispatch_issue_repo_from_remote(trimmed, owner_repo,
+                                             sizeof(owner_repo)) ||
+            !dispatch_issue_set_repo(&ref, owner_repo)) {
+            fprintf(stderr,
+                    "Cannot resolve issue #%ld: origin remote %s is not a "
+                    "GitHub repository; use owner/repo#%ld\n",
+                    ref.number, trimmed, ref.number);
+            free(trimmed);
+            return 0;
+        }
+        free(trimmed);
+    }
+
+    dispatch_issue_format(&ref, canonical, canonical_size);
+    return 1;
+}
+
+static void log_issue_change(const char *actor, const char *task_id,
+                             int linked, const char *issue) {
+    DispatchLogField targets[] = {
+        {"task", task_id},
+    };
+    DispatchLogField context[] = {
+        {"issue", issue},
+    };
+    char message[256];
+    if (linked)
+        snprintf(message, sizeof(message), "Linked %s to %s", task_id, issue);
+    else
+        snprintf(message, sizeof(message), "Unlinked %s from %s", issue,
+                 task_id);
+    append_dispatch_log(actor, "task", linked ? "issue_link" : "issue_unlink",
+                        targets, 1, context, 1, message);
+}
+
 int cmd_repo(int argc, char **argv) {
     if (argc == 2) {
         DispatchBoard board;
@@ -360,6 +449,8 @@ int cmd_task(int argc, char **argv) {
         const char *task_id = argv[3];
         const char *title = NULL;
         const char *description = NULL;
+        const char *issue = NULL;
+        int clear_issue = 0;
         const char *actor = "user";
 
         for (int i = 4; i < argc; i++) {
@@ -368,6 +459,10 @@ int cmd_task(int argc, char **argv) {
             } else if (strcmp(argv[i], "--description") == 0 &&
                        (i + 1) < argc) {
                 description = argv[++i];
+            } else if (strcmp(argv[i], "--issue") == 0 && (i + 1) < argc) {
+                issue = argv[++i];
+            } else if (strcmp(argv[i], "--clear-issue") == 0) {
+                clear_issue = 1;
             } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
                 actor = argv[++i];
             } else {
@@ -376,11 +471,17 @@ int cmd_task(int argc, char **argv) {
             }
         }
 
-        if (!title && !description) {
-            fprintf(stderr,
-                    "Task edit requires --title, --description, or both\n");
+        if (!title && !description && !issue && !clear_issue) {
+            fprintf(stderr, "Task edit requires --title, --description, "
+                            "--issue, or --clear-issue\n");
             return 1;
         }
+        if (issue && clear_issue) {
+            fprintf(stderr, "Use either --issue or --clear-issue, not both\n");
+            return 1;
+        }
+        if (issue && !issue_ref_is_well_formed(issue))
+            return 1;
         if (title && title[0] == '\0') {
             fprintf(stderr, "Task title must not be empty\n");
             return 1;
@@ -407,6 +508,14 @@ int cmd_task(int argc, char **argv) {
             return 1;
         }
 
+        char canonical[DISPATCH_ISSUE_TEXT_MAX] = "";
+        if (issue && !resolve_issue_ref(&locked.board, issue, canonical,
+                                        sizeof(canonical))) {
+            locked_board_close(&locked);
+            return 1;
+        }
+
+        int edited = title || description;
         if ((title && !dispatch_task_set_title(task, title)) ||
             (description &&
              !dispatch_task_set_description(task, description))) {
@@ -418,26 +527,69 @@ int cmd_task(int argc, char **argv) {
         const char *note = title && description
                                ? "title and description"
                                : title ? "title" : "description";
-        if (!dispatch_task_append_history(task, actor, "edited", note) ||
+        if (edited &&
+            !dispatch_task_append_history(task, actor, "edited", note)) {
+            locked_board_close(&locked);
+            return 1;
+        }
+
+        /* One issue per task: linking a different issue unlinks the old one
+         * first, so history pairs every link with its unlink. */
+        char previous_issue[DISPATCH_ISSUE_TEXT_MAX] = "";
+        int unlinked = 0;
+        int linked = 0;
+        if (task->issue &&
+            (clear_issue || (issue && strcmp(task->issue, canonical) != 0))) {
+            snprintf(previous_issue, sizeof(previous_issue), "%s",
+                     task->issue);
+            if (!dispatch_task_unlink_issue(task, actor)) {
+                locked_board_close(&locked);
+                return 1;
+            }
+            unlinked = 1;
+        }
+        if (issue && !task->issue) {
+            if (!dispatch_task_link_issue(task, canonical, actor)) {
+                locked_board_close(&locked);
+                return 1;
+            }
+            linked = 1;
+        }
+
+        if ((edited || unlinked || linked) &&
             !locked_board_save_or_error(&locked)) {
             locked_board_close(&locked);
             return 1;
         }
 
-        printf("Edited task %s\n", task_id);
-        DispatchLogField targets[] = {
-            {"task", task_id},
-        };
-        DispatchLogField context[] = {
-            {"title_changed", bool_string(title != NULL)},
-            {"description_changed", bool_string(description != NULL)},
-            {"title", title ? title : ""},
-            {"description", description ? description : ""},
-        };
-        char message[256];
-        snprintf(message, sizeof(message), "Edited task %s", task_id);
-        append_dispatch_log(actor, "task", "edit", targets, 1, context, 4,
-                            message);
+        if (edited) {
+            printf("Edited task %s\n", task_id);
+            DispatchLogField targets[] = {
+                {"task", task_id},
+            };
+            DispatchLogField context[] = {
+                {"title_changed", bool_string(title != NULL)},
+                {"description_changed", bool_string(description != NULL)},
+                {"title", title ? title : ""},
+                {"description", description ? description : ""},
+            };
+            char message[256];
+            snprintf(message, sizeof(message), "Edited task %s", task_id);
+            append_dispatch_log(actor, "task", "edit", targets, 1, context, 4,
+                                message);
+        }
+        if (unlinked) {
+            printf("Unlinked %s from %s\n", previous_issue, task_id);
+            log_issue_change(actor, task_id, 0, previous_issue);
+        }
+        if (linked) {
+            printf("Linked %s to %s\n", task_id, canonical);
+            log_issue_change(actor, task_id, 1, canonical);
+        }
+        if (issue && !linked)
+            printf("Task %s is already linked to %s\n", task_id, canonical);
+        if (clear_issue && !unlinked)
+            printf("Task %s has no linked issue\n", task_id);
         locked_board_close(&locked);
         return 0;
     }
@@ -607,9 +759,9 @@ int cmd_task(int argc, char **argv) {
     if (argc < 5 || strcmp(argv[2], "add") != 0) {
         fprintf(stderr,
                 "Usage: dispatch task add <group> <title> [--description "
-                "text] [--actor <name>] [--no-review]\n");
+                "text] [--actor <name>] [--no-review] [--issue <ref>]\n");
         fprintf(stderr,
-                "       dispatch task edit <id> [--title <text>] [--description <text>] [--actor <name>]\n");
+                "       dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]\n");
         fprintf(stderr,
                 "       dispatch task move <id> <group> [--actor <name>]\n");
         fprintf(stderr, "       dispatch task delete <id> [--force]\n");
@@ -622,6 +774,7 @@ int cmd_task(int argc, char **argv) {
     const char *title = argv[4];
     const char *description = "";
     const char *actor = "user";
+    const char *issue = NULL;
     int requires_review = 1;
 
     if (title_starts_with_dispatch_id(title)) {
@@ -637,11 +790,15 @@ int cmd_task(int argc, char **argv) {
             actor = argv[++i];
         } else if (strcmp(argv[i], "--no-review") == 0) {
             requires_review = 0;
+        } else if (strcmp(argv[i], "--issue") == 0 && (i + 1) < argc) {
+            issue = argv[++i];
         } else {
             fprintf(stderr, "Unknown task option: %s\n", argv[i]);
             return 1;
         }
     }
+    if (issue && !issue_ref_is_well_formed(issue))
+        return 1;
     if (!dispatch_actor_label_is_valid(actor)) {
         fprintf(stderr,
                 "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
@@ -653,6 +810,13 @@ int cmd_task(int argc, char **argv) {
         return 1;
     DispatchBoard *board = &locked.board;
 
+    char canonical[DISPATCH_ISSUE_TEXT_MAX] = "";
+    if (issue &&
+        !resolve_issue_ref(board, issue, canonical, sizeof(canonical))) {
+        locked_board_close(&locked);
+        return 1;
+    }
+
     DispatchTask *task =
         dispatch_board_add_task_with_actor(board, group, title, description,
                                            actor);
@@ -663,6 +827,10 @@ int cmd_task(int argc, char **argv) {
         return 1;
     }
     task->requires_review = requires_review;
+    if (issue && !dispatch_task_link_issue(task, canonical, actor)) {
+        locked_board_close(&locked);
+        return 1;
+    }
 
     char *task_id = strdup(task->id);
     if (!locked_board_save_or_error(&locked)) {
@@ -684,6 +852,10 @@ int cmd_task(int argc, char **argv) {
     snprintf(message, sizeof(message), "Added task %s", task_id);
     append_dispatch_log(actor, "task", "add", targets, 2, context, 2,
                         message);
+    if (issue) {
+        printf("Linked %s to %s\n", task_id, canonical);
+        log_issue_change(actor, task_id, 1, canonical);
+    }
     free(task_id);
     locked_board_close(&locked);
     return 0;
