@@ -235,30 +235,21 @@ const char *json_nested_string_field(json_t *object, const char *parent,
     return json_string_field(nested, name);
 }
 
+/* Same fields as `dispatch log` filters (dispatch_log_filter_values), but
+ * the interactive view matches substrings, ignoring case. */
 static int log_record_matches_filter(json_t *record, const char *field,
                                      const char *value) {
     if (!field || !field[0] || !value || !value[0])
         return 1;
-    if (strcmp(field, "actor") == 0)
-        return text_contains_casefold(json_string_field(record, "actor"), value);
-    if (strcmp(field, "command") == 0)
-        return text_contains_casefold(json_string_field(record, "command"), value);
-    if (strcmp(field, "action") == 0)
-        return text_contains_casefold(json_string_field(record, "action"), value);
-    if (strcmp(field, "task") == 0)
-        return text_contains_casefold(json_nested_string_field(record, "targets",
-                                                              "task"),
-                                      value);
-    if (strcmp(field, "agent") == 0)
-        return text_contains_casefold(json_nested_string_field(record, "targets",
-                                                              "agent"),
-                                      value) ||
-               text_contains_casefold(json_string_field(record, "actor"), value);
-    if (strcmp(field, "workspace") == 0)
-        return text_contains_casefold(json_nested_string_field(record, "targets",
-                                                              "workspace"),
-                                      value);
-    return 1;
+    const char *values[2] = {"", ""};
+    int count = dispatch_log_filter_values(record, field, values);
+    if (count < 0)
+        return 1;
+    for (int i = 0; i < count; i++) {
+        if (text_contains_casefold(values[i], value))
+            return 1;
+    }
+    return 0;
 }
 
 static void log_records_append(TuiLogRecords *records, json_t *record) {

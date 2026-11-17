@@ -32,6 +32,7 @@
 
 #include "dispatch.h"
 #include "dispatch_exec.h"
+#include "dispatch_log.h"
 #include "dispatch_store.h"
 #include "dispatch_utf8.h"
 

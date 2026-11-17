@@ -1311,7 +1311,9 @@ assert_json \
     result.changed boolean true \
     result.workspace string DE-06 \
     result.force boolean false \
-    result.task string DE-06
+    result.task string DE-06 \
+    query.workspace string DE-06 \
+    summary.removed integer 0
 expect_json_error workspace_not_found "$BIN" workspace remove DE-06 --json
 expect_json_error usage "$BIN" workspace remove --json
 
@@ -3751,6 +3753,335 @@ expect_ok "$BIN" tui --key-smoke task o
 assert_contains "Status: No issue linked to"
 expect_ok "$BIN" tui --help-controls-smoke
 assert_contains "  o          open linked issue"
+
+# GH-2: agent, workspace, and log reads emit JSON.
+case_dir="$(make_case_dir json-reads)"
+cd "$case_dir"
+mkdir repo
+
+expect_fail "$BIN" log --json
+assert_contains "No dispatch board in this directory"
+assert_not_contains '"schema_version"'
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit --allow-empty -m init
+
+expect_ok "$BIN" agent list --json
+assert_json \
+    schema_version integer 1 \
+    command string "agent list" \
+    board.name string Dispatch \
+    query.name null - \
+    query.include_archived boolean false \
+    summary.total integer 0 \
+    summary.returned integer 0 \
+    agents array_length 0
+
+expect_ok "$BIN" group add Development --prefix DE
+expect_ok "$BIN" task add DE One --no-review
+expect_ok "$BIN" task add DE Two
+expect_ok "$BIN" task add DE Three --no-review
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 --actor user
+expect_ok "$BIN" agent create --name worker --runner claude --model opus \
+    --no-run-script
+expect_ok "$BIN" agent create --name idle --runner opencode
+expect_ok "$BIN" agent archive idle
+expect_ok "$BIN" workspace create DE-01 --actor worker
+expect_ok "$BIN" start DE-01 --actor worker
+expect_ok "$BIN" agent session worker --session-id sess-1 \
+    --current-task DE-01 --last-workspace DE-01
+expect_ok git -C repo worktree add -b orca/three ../orca-three HEAD
+expect_ok "$BIN" workspace adopt DE-03 --actor worker --path orca-three \
+    --external orca:ws-3
+expect_ok "$BIN" dep add DE-01 DE-02
+
+expect_ok "$BIN" agent list
+human_agent_list="$RUN_OUTPUT"
+expect_ok "$BIN" agent list --json
+assert_json \
+    command string "agent list" \
+    query.include_archived boolean false \
+    summary.total integer 2 \
+    summary.returned integer 1 \
+    summary.enabled integer 1 \
+    summary.archived integer 1 \
+    summary.with_current_task integer 1 \
+    agents array_length 1 \
+    agents.0.name string worker \
+    agents.0.runner string claude \
+    agents.0.model string opus \
+    agents.0.archived boolean false \
+    agents.0.agent_dir string .dispatch/agents/worker \
+    agents.0.prompt_path string .dispatch/agents/worker/worker-PROMPT.md \
+    agents.0.run_script_path null - \
+    agents.0.session_id string sess-1 \
+    agents.0.current_task string DE-01 \
+    agents.0.last_workspace string DE-01 \
+    agents.0.assigned_tasks array_length 1 \
+    agents.0.assigned_tasks.0 string DE-01 \
+    agents.0.workspaces array_length 2 \
+    agents.0.workspaces.0 string DE-01 \
+    agents.0.workspaces.1 string DE-03 \
+    agents.0.created_at integer "*" \
+    agents.0.updated_at integer "*"
+expect_ok "$BIN" agent list
+assert_output_equals "$human_agent_list"
+
+expect_ok "$BIN" agent list --json --all
+assert_json \
+    query.include_archived boolean true \
+    summary.returned integer 2 \
+    agents array_length 2 \
+    agents.0.name string worker \
+    agents.1.name string idle \
+    agents.1.archived boolean true \
+    agents.1.model null - \
+    agents.1.run_script_path string .dispatch/agents/idle/run.sh \
+    agents.1.session_id null - \
+    agents.1.current_task null - \
+    agents.1.assigned_tasks array_length 0 \
+    agents.1.workspaces array_length 0
+
+# show returns one agent, archived or not.
+expect_ok "$BIN" agent show --json idle
+assert_json \
+    command string "agent show" \
+    query.name string idle \
+    query.include_archived null - \
+    summary.total integer 2 \
+    summary.returned integer 1 \
+    agents array_length 1 \
+    agents.0.name string idle \
+    agents.0.archived boolean true
+expect_ok "$BIN" agent show worker
+assert_line "Name: worker"
+
+expect_fail "$BIN" agent show missing --json
+assert_contains "No agent named missing"
+assert_not_contains '"schema_version"'
+expect_fail "$BIN" agent list --json --json
+assert_contains "Usage: dispatch agent list [--all] [--json]"
+expect_fail "$BIN" agent list --archived --json
+assert_contains "Usage: dispatch agent list [--all] [--json]"
+expect_fail "$BIN" agent show --json
+assert_contains "Usage: dispatch agent show <name> [--json]"
+assert_not_contains '"schema_version"'
+
+# The workspace envelope carries query and board-wide record counts.
+expect_ok "$BIN" workspace list --json
+assert_json \
+    command string "workspace list" \
+    query.workspace null - \
+    summary.total integer 2 \
+    summary.returned integer 2 \
+    summary.active integer 2 \
+    summary.removed integer 0 \
+    workspaces.0.id string DE-01 \
+    workspaces.0.task_state string doing \
+    workspaces.0.adopted boolean false \
+    workspaces.0.external_id null - \
+    workspaces.1.id string DE-03 \
+    workspaces.1.branch string orca/three \
+    workspaces.1.path string "$case_dir/orca-three" \
+    workspaces.1.adopted boolean true \
+    workspaces.1.external_id string orca:ws-3
+expect_ok "$BIN" workspace show DE-03 --json
+assert_json \
+    command string "workspace show" \
+    query.workspace string DE-03 \
+    summary.total integer 2 \
+    summary.returned integer 1 \
+    workspaces array_length 1 \
+    workspaces.0.adopted boolean true \
+    workspaces.0.external_id string orca:ws-3
+
+# log: every record, oldest first, with its line number.
+expect_ok "$BIN" log
+assert_contains "user             init       init"
+assert_contains "worker           start      start                task:DE-01  Started DE-01"
+assert_contains "dependency:DE-01 dependent:DE-02  Added dependency DE-01 -> DE-02"
+last_log_line="$(printf '%s\n' "$RUN_OUTPUT" | tail -n 1)"
+case "$last_log_line" in
+*"dep        dependency_add"*) ;;
+*) fail "expected the newest log record last" ;;
+esac
+log_lines="$(line_count dispatch.log)"
+
+expect_json_ok "$BIN" log --json
+assert_json \
+    schema_version integer 1 \
+    command string log \
+    board.name string Dispatch \
+    query.task null - \
+    query.actor null - \
+    query.agent null - \
+    query.workspace null - \
+    query.command null - \
+    query.action null - \
+    query.limit null - \
+    summary.total integer "$log_lines" \
+    summary.matched integer "$log_lines" \
+    summary.returned integer "$log_lines" \
+    summary.skipped integer 0 \
+    records array_length "$log_lines" \
+    records.0.line integer 1 \
+    records.0.version integer 1 \
+    records.0.timestamp string "*" \
+    records.0.actor string user \
+    records.0.command string init \
+    records.0.action string init \
+    records.0.targets object - \
+    records.0.outcome string success \
+    records.0.message string "Created dispatch.json" \
+    records.0.context null - \
+    warnings array_length 0
+
+# Filters match exactly and combine; --agent also matches the actor.
+expect_json_ok "$BIN" log --task DE-01 --json
+assert_json \
+    query.task string DE-01 \
+    records array_length 4 \
+    records.0.action string add \
+    records.1.action string ready \
+    records.2.action string workspace_create \
+    records.3.action string start \
+    records.3.targets.task string DE-01 \
+    records.3.context.new_state string doing
+expect_json_ok "$BIN" log --task DE-0 --json
+assert_json records array_length 0 summary.matched integer 0
+expect_json_ok "$BIN" log --actor worker --command start --json
+assert_json \
+    query.actor string worker \
+    query.command string start \
+    records array_length 1 \
+    records.0.action string start
+expect_json_ok "$BIN" log --agent worker --json
+assert_json \
+    records array_length 5 \
+    records.0.targets.agent string worker \
+    records.0.actor string user \
+    records.2.actor string worker \
+    records.2.command string start
+expect_json_ok "$BIN" log --workspace DE-03 --json
+assert_json \
+    records array_length 1 \
+    records.0.action string workspace_adopt \
+    records.0.context.external_id string orca:ws-3
+expect_json_ok "$BIN" log --action dependency_add --json
+assert_json \
+    records array_length 1 \
+    records.0.targets.dependency string DE-01 \
+    records.0.targets.dependent string DE-02
+expect_ok "$BIN" log --command agent
+assert_contains "agent:worker  Created agent worker"
+assert_not_contains "Started DE-01"
+
+# --limit keeps the newest matches, still oldest first.
+expect_json_ok "$BIN" log --task DE-01 --limit 2 --json
+assert_json \
+    query.limit integer 2 \
+    summary.matched integer 4 \
+    summary.returned integer 2 \
+    records array_length 2 \
+    records.0.action string workspace_create \
+    records.1.action string start
+expect_json_ok "$BIN" log --limit 100 --json
+assert_json records array_length "$log_lines"
+expect_ok "$BIN" log --limit 1
+assert_contains "dependency_add"
+assert_not_contains "Started DE-01"
+
+# Blank, malformed, and unknown-version lines are skipped and counted; a
+# line the writer does not produce still keeps its extra fields.
+cp dispatch.log dispatch.log.good
+{
+    printf '\n'
+    printf 'not json\n'
+    printf '{"version":1,"actor":"user"}\n'
+    printf '[1,2]\n'
+    printf '{"version":2,"timestamp":"2027-01-01T00:00:00Z"}\n'
+    printf '{"version":1,"timestamp":"2026-06-19T12:00:00Z","actor":"ext","command":"other","action":"note","extra":7}\n'
+} >> dispatch.log
+expect_json_ok "$BIN" log --json
+assert_json \
+    summary.total integer "$((log_lines + 1))" \
+    summary.returned integer "$((log_lines + 1))" \
+    summary.skipped integer 4 \
+    records."$log_lines".line integer "$((log_lines + 6))" \
+    records."$log_lines".actor string ext \
+    records."$log_lines".targets object - \
+    records."$log_lines".outcome null - \
+    records."$log_lines".message null - \
+    records."$log_lines".extra integer 7 \
+    warnings array_length 2 \
+    warnings.0.code string malformed_log_lines \
+    warnings.0.count integer 3 \
+    warnings.0.first_line integer "$((log_lines + 2))" \
+    warnings.0.task_id null - \
+    warnings.0.agent null - \
+    warnings.1.code string unsupported_log_version \
+    warnings.1.count integer 1 \
+    warnings.1.first_line integer "$((log_lines + 5))"
+expect_json_ok "$BIN" log --actor ext --json
+assert_json records array_length 1 summary.skipped integer 4 warnings array_length 2
+run_split "$BIN" log --actor ext
+if [ "$RUN_STATUS" -ne 0 ]; then
+    fail "log with skipped lines should succeed"
+fi
+RUN_OUTPUT="$RUN_STDOUT"
+assert_contains "ext              other      note"
+RUN_OUTPUT="$RUN_STDERR"
+assert_contains "Warning: skipped 3 malformed lines in dispatch.log, first at line $((log_lines + 2))"
+assert_contains "Warning: skipped 1 record with an unsupported version in dispatch.log, first at line $((log_lines + 5))"
+mv dispatch.log.good dispatch.log
+
+expect_ok "$BIN" log --actor nobody
+assert_line "(no log records)"
+mv dispatch.log dispatch.log.saved
+expect_ok "$BIN" log
+assert_line "(no dispatch.log)"
+expect_json_ok "$BIN" log --json
+assert_json summary.total integer 0 records array_length 0 warnings array_length 0
+mv dispatch.log.saved dispatch.log
+
+for bad_args in "--limit 0" "--limit -1" "--limit abc" "--limit" \
+    "--task" "--task DE-01 --task DE-02" "--task ''" "--since 1" "extra" \
+    "--json --json"; do
+    eval "set -- $bad_args"
+    expect_fail "$BIN" log "$@"
+    assert_contains "Usage: dispatch log [--task <id>]"
+    assert_not_contains '"schema_version"'
+done
+
+# Completion offers the new command and flags.
+expect_ok "$BIN" completion candidates commands
+assert_line "log"
+expect_ok "$BIN" completion zsh
+assert_contains "_dispatch_log_command"
+assert_contains "list) compadd -- --all --json ;;"
+assert_contains "list|show) compadd -- --json ;;"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from log' -l task -r -a '(__dispatch_candidates tasks)'"
+assert_contains "__fish_seen_subcommand_from list show' -l json"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-log-completion.bash"
+# Value completion calls dispatch from PATH, so use the binary under test.
+log_complete() {
+    # shellcheck disable=SC2016
+    PATH="$(dirname "$BIN"):$PATH" expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+        bash "$TMP_ROOT/dispatch-log-completion.bash" "$@"
+}
+log_complete dispatch log --l
+assert_line "--limit"
+log_complete dispatch log --task ""
+assert_line "DE-01"
+log_complete dispatch log --agent w
+assert_line "worker"
+log_complete dispatch agent list --j
+assert_line "--json"
+log_complete dispatch workspace show DE-01 --j
+assert_line "--json"
 
 case_dir="$(make_case_dir issue-tui)"
 cd "$case_dir"

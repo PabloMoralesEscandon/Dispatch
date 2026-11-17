@@ -4,7 +4,8 @@ This document defines version 1 of the machine-readable output produced when
 `--json` is passed to:
 
 - the read commands `list`, `show`, `ready`, `blocked`, `reviews`,
-  `proposed`, `status`, `doctor`, `workspace list`, and `workspace show`;
+  `proposed`, `status`, `doctor`, `agent list`, `agent show`,
+  `workspace list`, `workspace show`, and `log`;
 - the mutating commands `task add|edit|move|delete`, `group add|ready`,
   `dep add|remove`, `ready <id>`, `start`, `finish`, `review`, `unassign`,
   `commit add`, and `workspace create|adopt|remove|prune`, described in
@@ -19,7 +20,8 @@ This document defines version 1 of the machine-readable output produced when
 - Mutating command errors retain the existing non-zero exit status, write
   nothing to stdout, and write one JSON error document to stderr (see
   [Error documents](#error-documents)).
-- For read commands, `--json` may appear anywhere after the command name. For
+- For read commands, `--json` may appear anywhere after the command name, or
+  after the subcommand for `agent list|show` and `workspace list|show`. For
   mutating commands it may appear anywhere after the subcommand, or after the
   command name for `ready`, `start`, `finish`, `review`, and `unassign`
   (`task add DE Title --json`, `start --json DE-01 --actor a`). `ready` without a
@@ -33,7 +35,11 @@ This document defines version 1 of the machine-readable output produced when
 
 ## Response envelope
 
-Every command returns the same top-level fields:
+Task commands return these top-level fields. Agent, workspace, and log
+responses use the same `schema_version`, `command`, `board`, `query`, and
+`summary` fields with their own record array; see
+[Workspace responses](#workspace-responses),
+[Agent responses](#agent-responses), and [Log responses](#log-responses).
 
 ```json
 {
@@ -234,7 +240,8 @@ envelope instead of the task envelope:
   "schema_version": 1,
   "command": "workspace list",
   "board": { "name": "Dispatch", "repo_path": "repo" },
-  "summary": { "returned": 1 },
+  "query": { "workspace": null },
+  "summary": { "total": 2, "returned": 1, "active": 1, "removed": 1 },
   "workspaces": [ ... ]
 }
 ```
@@ -242,6 +249,14 @@ envelope instead of the task envelope:
 `workspace list` returns every non-removed record in board order;
 `workspace show` returns the selected record as a one-element array. An empty
 successful listing returns `"workspaces": []`.
+
+`query.workspace` is the ID of the record `workspace show` selected (the
+argument may name its task instead), and `null` for `workspace list`.
+`summary.returned` is the length of `workspaces`; `total`, `active`, and
+`removed` count every stored workspace record, where a record is active
+unless its state is `removed`, as in the task envelope's
+`summary.workspaces`. `query` and the `summary` counts other than `returned`
+were added in a compatible release.
 
 Each workspace record contains:
 
@@ -266,6 +281,190 @@ Each workspace record contains:
 `schema_version` stays `1`. Records written before them report `false` and
 `null`. Dispatch never deletes an adopted worktree unless
 `workspace remove --delete-worktree` asks it to.
+
+## Agent responses
+
+`agent list [--all] --json` and `agent show <name> --json` use an agent
+envelope:
+
+```json
+{
+  "schema_version": 1,
+  "command": "agent list",
+  "board": { "name": "Dispatch", "repo_path": "repo" },
+  "query": { "name": null, "include_archived": false },
+  "summary": {
+    "total": 2,
+    "returned": 1,
+    "enabled": 1,
+    "archived": 1,
+    "with_current_task": 1
+  },
+  "agents": [
+    {
+      "name": "codex",
+      "runner": "codex",
+      "model": null,
+      "archived": false,
+      "agent_dir": ".dispatch/agents/codex",
+      "prompt_path": ".dispatch/agents/codex/codex-PROMPT.md",
+      "run_script_path": ".dispatch/agents/codex/run.sh",
+      "session_id": null,
+      "current_task": "DE-02",
+      "last_workspace": "DE-02",
+      "assigned_tasks": ["DE-02"],
+      "workspaces": ["DE-02"],
+      "created_at": 1750000000,
+      "updated_at": 1750000100
+    }
+  ]
+}
+```
+
+`agent list` returns agents in board order, skipping archived agents unless
+`--all` is given; `query.include_archived` records which. `agent show`
+returns the named agent, archived or not, as a one-element array, with
+`query.name` set and `query.include_archived` `null`. An empty listing
+returns `"agents": []`.
+
+`summary.returned` is the length of `agents`. `total`, `enabled`, `archived`,
+and `with_current_task` count every agent on the board, with the same
+meaning as the task envelope's `summary.agents`.
+
+Each agent object contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Agent name, also its actor name |
+| `runner` | string | `codex`, `claude`, or `opencode` |
+| `model` | string or null | Model passed to the runner |
+| `archived` | boolean | `true` when the agent is archived |
+| `agent_dir` | string or null | Support directory, relative to the workflow directory |
+| `prompt_path` | string or null | Generated prompt file |
+| `run_script_path` | string or null | Generated run script, `null` with `--no-run-script` |
+| `session_id` | string or null | Recorded runner session ID |
+| `current_task` | string or null | Task recorded with `agent session --current-task` |
+| `last_workspace` | string or null | Workspace recorded with `agent session --last-workspace` |
+| `assigned_tasks` | array of string | IDs of tasks assigned to the agent, in board order |
+| `workspaces` | array of string | IDs of the agent's non-removed workspaces, in board order |
+| `created_at` | integer or null | Unix timestamp |
+| `updated_at` | integer or null | Unix timestamp |
+
+`current_task` and `last_workspace` are what the agent recorded and may name
+a task or workspace that no longer exists; `status` warns about a missing
+current task. `assigned_tasks` and `workspaces` are derived from the board
+when the command runs.
+
+## Log responses
+
+`dispatch log --json` reads `dispatch.log`, the audit trail described in the
+README, and returns its records:
+
+```json
+{
+  "schema_version": 1,
+  "command": "log",
+  "board": { "name": "Dispatch", "repo_path": "repo" },
+  "query": {
+    "task": "DE-01",
+    "actor": null,
+    "agent": null,
+    "workspace": null,
+    "command": null,
+    "action": null,
+    "limit": 1
+  },
+  "summary": { "total": 9, "matched": 3, "returned": 1, "skipped": 1 },
+  "records": [
+    {
+      "line": 6,
+      "version": 1,
+      "timestamp": "2026-06-19T12:35:20Z",
+      "actor": "codex",
+      "command": "start",
+      "action": "start",
+      "targets": { "task": "DE-01" },
+      "outcome": "success",
+      "message": "Started DE-01",
+      "context": { "previous_state": "ready", "new_state": "doing" }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "malformed_log_lines",
+      "message": "skipped 1 malformed line in dispatch.log, first at line 7",
+      "task_id": null,
+      "agent": null,
+      "count": 1,
+      "first_line": 7
+    }
+  ]
+}
+```
+
+The command loads the board first and fails like other read commands outside
+a workflow directory. A missing `dispatch.log` is not an error: it returns
+`"records": []`.
+
+Filters select records by exact, case-sensitive comparison and combine with
+AND. Each may be given once:
+
+| Option | `query` key | Matches records whose |
+| --- | --- | --- |
+| `--task <id>` | `task` | `targets.task` equals the value |
+| `--actor <name>` | `actor` | `actor` equals the value |
+| `--agent <name>` | `agent` | `targets.agent` or `actor` equals the value |
+| `--workspace <id>` | `workspace` | `targets.workspace` equals the value |
+| `--command <name>` | `command` | `command` equals the value |
+| `--action <name>` | `action` | `action` equals the value |
+
+These are the fields the TUI logs view filters on; the TUI matches
+substrings ignoring case, the CLI does not. Unused filters are `null` in
+`query`.
+
+`--limit <n>` keeps the newest `n` matching records; `query.limit` is `n`,
+or `null` without the option. `n` must be a positive integer. `records` is
+always in file order, oldest first, so the newest record is last.
+
+`summary.total` counts the readable records in the log, `matched` those that
+pass the filters, `returned` the length of `records` (`matched` cut to the
+limit), and `skipped` the lines that were not readable records.
+
+Each record contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `line` | integer | 1-based line number in `dispatch.log` |
+| `version` | integer | Log record version, always `1` |
+| `timestamp` | string | UTC time in RFC 3339 form, as stored |
+| `actor` | string | Actor responsible for the change |
+| `command` | string | Command family, such as `start` or `workspace` |
+| `action` | string | Action within the command, such as `workspace_create` |
+| `targets` | object | Stable IDs such as `task`, `group`, `agent`, `workspace`; `{}` when absent |
+| `outcome` | string or null | `success` for records Dispatch writes |
+| `message` | string or null | Short human-readable summary |
+| `context` | object or null | Structured details, `null` when absent |
+
+Any other field of a stored record follows these, unchanged. The log is
+append-only, so `line` identifies a record across reads; a tool can follow
+the log by keeping the last `line` it saw.
+
+A line is a readable record when it is a JSON object whose `version` is the
+integer `1`, whose `timestamp`, `actor`, `command`, and `action` are strings,
+and whose `targets` and `context` are objects and `outcome` and `message`
+strings when present. Blank lines are ignored. Other lines are skipped and
+reported in `warnings`, at most one warning per code, in this order:
+
+| Code | Skipped lines |
+| --- | --- |
+| `malformed_log_lines` | Not JSON, not an object, or missing or mistyped fields |
+| `unsupported_log_version` | An object whose `version` is an integer other than `1` |
+
+Log warnings have the status warning fields (`code`, `message`, `task_id`,
+`agent`, the last two always `null`) plus `count`, the number of lines
+skipped, and `first_line`, the line number of the first. Skipped lines never
+make the command fail. Without `--json`, the same messages are printed to
+stderr as `Warning: ...` lines and the exit status is still 0.
 
 ## Doctor responses
 
@@ -338,7 +537,9 @@ Task commands (`task add|edit|move|delete`, `group add|ready`,
 Workspace commands (`workspace create|adopt|remove|prune`) use the
 [workspace envelope](#workspace-responses), whose `workspaces` array holds the
 records the command acted on. A record the command removed is reported as it
-was just before removal, with `state` set to `"removed"`.
+was just before removal, with `state` set to `"removed"`. `query.workspace`
+is that record's ID when exactly one record is returned, otherwise `null`,
+and `summary` describes the board after the change.
 
 Both envelopes then carry a `result` object:
 

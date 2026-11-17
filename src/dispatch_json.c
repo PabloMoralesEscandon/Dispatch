@@ -127,14 +127,65 @@ static json_t *workspace_record_json(const DispatchBoard *board,
     return object;
 }
 
+/* The board object of the workspace, agent, and log envelopes. */
+static json_t *board_ref_json(const DispatchBoard *board) {
+    json_t *board_json = json_object();
+    json_object_set_new(board_json, "name", json_string(board->name));
+    json_object_set_new(board_json, "repo_path",
+                        json_string(board->repo_path ? board->repo_path : "."));
+    return board_json;
+}
+
+static json_t *envelope_json(const DispatchBoard *board, const char *command,
+                             json_t *query, json_t *summary) {
+    json_t *root = json_object();
+    json_object_set_new(root, "schema_version", json_integer(1));
+    json_object_set_new(root, "command", json_string(command));
+    json_object_set_new(root, "board", board_ref_json(board));
+    json_object_set_new(root, "query", query);
+    json_object_set_new(root, "summary", summary);
+    return root;
+}
+
+/* The workspace envelope up to its workspaces array. query.workspace is
+ * the single record's ID when exactly one is returned. */
+static json_t *workspace_envelope_json(const DispatchBoard *board,
+                                       const char *command,
+                                       json_t *workspaces,
+                                       const char *query_workspace) {
+    size_t active = 0;
+    size_t removed = 0;
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        if (board->workspaces.items[i].state == DISPATCH_WORKSPACE_REMOVED)
+            removed++;
+        else
+            active++;
+    }
+
+    json_t *query = json_object();
+    json_object_set_new(query, "workspace", optional_string(query_workspace));
+
+    json_t *summary = json_object();
+    json_object_set_new(summary, "total",
+                        json_integer((json_int_t)board->workspaces.count));
+    json_object_set_new(summary, "returned",
+                        json_integer((json_int_t)json_array_size(workspaces)));
+    json_object_set_new(summary, "active", json_integer((json_int_t)active));
+    json_object_set_new(summary, "removed", json_integer((json_int_t)removed));
+
+    json_t *root = envelope_json(board, command, query, summary);
+    json_object_set_new(root, "workspaces", workspaces);
+    return root;
+}
+
+static int dump_document(FILE *stream, json_t *root);
+
 int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
                                   const char *command,
                                   const DispatchWorkspace *only) {
     json_t *workspaces = json_array();
-    size_t returned = 0;
     if (only) {
         json_array_append_new(workspaces, workspace_record_json(board, only));
-        returned = 1;
     } else {
         for (size_t i = 0; i < board->workspaces.count; i++) {
             const DispatchWorkspace *workspace = &board->workspaces.items[i];
@@ -142,31 +193,137 @@ int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
                 continue;
             json_array_append_new(workspaces,
                                   workspace_record_json(board, workspace));
-            returned++;
         }
     }
+    return dump_document(stream,
+                         workspace_envelope_json(board, command, workspaces,
+                                                 only ? only->id : NULL));
+}
 
-    json_t *board_json = json_object();
-    json_object_set_new(board_json, "name", json_string(board->name));
-    json_object_set_new(board_json, "repo_path",
-                        json_string(board->repo_path ? board->repo_path : "."));
+static json_t *agent_json(const DispatchBoard *board,
+                          const DispatchAgent *agent) {
+    json_t *assigned = json_array();
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        if (task->assigned_to && strcmp(task->assigned_to, agent->name) == 0)
+            json_array_append_new(assigned, json_string(task->id));
+    }
+    json_t *workspaces = json_array();
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        const DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace->state != DISPATCH_WORKSPACE_REMOVED &&
+            strcmp(workspace->actor, agent->name) == 0)
+            json_array_append_new(workspaces, json_string(workspace->id));
+    }
+
+    json_t *object = json_object();
+    json_object_set_new(object, "name", json_string(agent->name));
+    json_object_set_new(object, "runner", json_string(agent->runner));
+    json_object_set_new(object, "model", optional_string(agent->model));
+    json_object_set_new(object, "archived", json_boolean(agent->archived));
+    json_object_set_new(object, "agent_dir", optional_string(agent->agent_dir));
+    json_object_set_new(object, "prompt_path",
+                        optional_string(agent->prompt_path));
+    json_object_set_new(object, "run_script_path",
+                        optional_string(agent->run_script_path));
+    json_object_set_new(object, "session_id",
+                        optional_string(agent->session_id));
+    json_object_set_new(object, "current_task",
+                        optional_string(agent->current_task));
+    json_object_set_new(object, "last_workspace",
+                        optional_string(agent->last_workspace));
+    json_object_set_new(object, "assigned_tasks", assigned);
+    json_object_set_new(object, "workspaces", workspaces);
+    json_object_set_new(object, "created_at", time_or_null(agent->created_at));
+    json_object_set_new(object, "updated_at", time_or_null(agent->updated_at));
+    return object;
+}
+
+int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
+                              const char *command, const DispatchAgent *only,
+                              int include_archived) {
+    json_t *agents = json_array();
+    size_t enabled = 0;
+    size_t archived = 0;
+    size_t with_current_task = 0;
+    for (size_t i = 0; i < board->agents.count; i++) {
+        const DispatchAgent *agent = &board->agents.items[i];
+        if (agent->archived)
+            archived++;
+        else
+            enabled++;
+        if (agent->current_task && agent->current_task[0])
+            with_current_task++;
+        if (only ? agent == only : (include_archived || !agent->archived))
+            json_array_append_new(agents, agent_json(board, agent));
+    }
+
+    json_t *query = json_object();
+    json_object_set_new(query, "name", optional_string(only ? only->name : NULL));
+    json_object_set_new(query, "include_archived",
+                        only ? json_null() : json_boolean(include_archived));
 
     json_t *summary = json_object();
+    json_object_set_new(summary, "total",
+                        json_integer((json_int_t)board->agents.count));
     json_object_set_new(summary, "returned",
-                        json_integer((json_int_t)returned));
+                        json_integer((json_int_t)json_array_size(agents)));
+    json_object_set_new(summary, "enabled", json_integer((json_int_t)enabled));
+    json_object_set_new(summary, "archived",
+                        json_integer((json_int_t)archived));
+    json_object_set_new(summary, "with_current_task",
+                        json_integer((json_int_t)with_current_task));
 
-    json_t *root = json_object();
-    json_object_set_new(root, "schema_version", json_integer(1));
-    json_object_set_new(root, "command", json_string(command));
-    json_object_set_new(root, "board", board_json);
-    json_object_set_new(root, "summary", summary);
-    json_object_set_new(root, "workspaces", workspaces);
+    json_t *root = envelope_json(board, command, query, summary);
+    json_object_set_new(root, "agents", agents);
+    return dump_document(stream, root);
+}
 
-    int result = json_dumpf(root, stream, JSON_INDENT(2));
-    json_decref(root);
-    if (result != 0 || fputc('\n', stream) == EOF)
-        return 0;
-    return 1;
+int dispatch_json_emit_log(FILE *stream, const DispatchBoard *board,
+                           const char *log_path, const DispatchLogQuery *query,
+                           const DispatchLogRead *read) {
+    json_t *query_json_value = json_object();
+    for (int i = 0; i < DISPATCH_LOG_FILTER_COUNT; i++)
+        json_object_set_new(query_json_value, dispatch_log_filter_fields[i],
+                            optional_string(query->filters[i]));
+    json_object_set_new(query_json_value, "limit",
+                        query->limit ? json_integer((json_int_t)query->limit)
+                                     : json_null());
+
+    json_t *summary = json_object();
+    json_object_set_new(summary, "total", json_integer((json_int_t)read->total));
+    json_object_set_new(summary, "matched",
+                        json_integer((json_int_t)read->matched));
+    json_object_set_new(summary, "returned",
+                        json_integer((json_int_t)read->count));
+    json_object_set_new(
+        summary, "skipped",
+        json_integer((json_int_t)(read->malformed + read->unsupported)));
+
+    json_t *records = json_array();
+    for (size_t i = 0; i < read->count; i++)
+        json_array_append(records, read->items[i].record);
+
+    json_t *warnings = json_array();
+    DispatchLogWarning found[2];
+    size_t warning_count = dispatch_log_read_warnings(read, log_path, found);
+    for (size_t i = 0; i < warning_count; i++) {
+        json_t *warning = json_object();
+        json_object_set_new(warning, "code", json_string(found[i].code));
+        json_object_set_new(warning, "message", json_string(found[i].message));
+        json_object_set_new(warning, "task_id", json_null());
+        json_object_set_new(warning, "agent", json_null());
+        json_object_set_new(warning, "count",
+                            json_integer((json_int_t)found[i].count));
+        json_object_set_new(warning, "first_line",
+                            json_integer((json_int_t)found[i].first_line));
+        json_array_append_new(warnings, warning);
+    }
+
+    json_t *root = envelope_json(board, "log", query_json_value, summary);
+    json_object_set_new(root, "records", records);
+    json_object_set_new(root, "warnings", warnings);
+    return dump_document(stream, root);
 }
 
 static json_t *blocked_by_json(const DispatchBoard *board,
@@ -710,21 +867,8 @@ int dispatch_json_emit_workspace_mutation(
         json_array_append_new(workspaces,
                               workspace_record_json(board, &records[i]));
 
-    json_t *board_json = json_object();
-    json_object_set_new(board_json, "name", json_string(board->name));
-    json_object_set_new(board_json, "repo_path",
-                        json_string(board->repo_path ? board->repo_path : "."));
-
-    json_t *summary = json_object();
-    json_object_set_new(summary, "returned",
-                        json_integer((json_int_t)record_count));
-
-    json_t *root = json_object();
-    json_object_set_new(root, "schema_version", json_integer(1));
-    json_object_set_new(root, "command", json_string(command));
-    json_object_set_new(root, "board", board_json);
-    json_object_set_new(root, "summary", summary);
-    json_object_set_new(root, "workspaces", workspaces);
+    json_t *root = workspace_envelope_json(
+        board, command, workspaces, record_count == 1 ? records[0].id : NULL);
     json_object_set_new(root, "result", result_json(board, before, result));
     return dump_document(stream, root);
 }
