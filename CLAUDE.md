@@ -57,9 +57,10 @@ dispatch agent archive <name>
 dispatch agent restore <name>
 dispatch agent command <name> [--print-command]
 dispatch workspace create <TASK-ID> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
+dispatch workspace adopt <TASK-ID> --actor <agent-id> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]
 dispatch workspace list
 dispatch workspace show <TASK-ID-or-workspace>
-dispatch workspace remove <TASK-ID-or-workspace> [--force]
+dispatch workspace remove <TASK-ID-or-workspace> [--force] [--delete-worktree]
 dispatch workspace repair <TASK-ID-or-workspace>
 dispatch workspace prune [--done] [--stale] [--dry-run]
 dispatch ready
@@ -327,6 +328,14 @@ directly:
 ```bash
 dispatch workspace create DE-12 --actor codex-server
 dispatch workspace show DE-12
+```
+
+When another tool such as Orca created the worktree, record it with
+`workspace adopt` instead; Dispatch then never deletes that worktree unless
+`workspace remove --delete-worktree` asks it to:
+
+```bash
+dispatch workspace adopt DE-12 --actor codex-server --path <worktree-dir> --external orca:<workspace-id>
 ```
 
 Then run the agent from the workflow directory and edit only the recorded task

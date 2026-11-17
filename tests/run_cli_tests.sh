@@ -1864,6 +1864,279 @@ assert_contains "No workspace for DE-01"
 expect_ok "$BIN" workspace show DE-02
 expect_ok "$BIN" workspace show DE-03
 
+# GH-4: workspace adopt records a worktree another tool created, without
+# running git worktree add, and remove/prune leave that worktree alone unless
+# asked.
+case_dir="$(make_case_dir workspace-adopt)"
+cd "$case_dir"
+mkdir repo
+
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+for title in One Two Three Four Five Six; do
+    expect_ok "$BIN" task add DE "$title" --no-review
+done
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 --actor user --no-review
+expect_ok "$BIN" task add DE Proposed
+
+# An external tool (Orca, here plain git) creates the worktrees.
+expect_ok git -C repo worktree add -b orca/one ../orca-one HEAD
+expect_ok git -C repo worktree add -b orca/two ../orca-two HEAD
+expect_ok git -C repo worktree add --detach ../orca-detached HEAD
+mkdir plain-dir
+mkdir other-repo
+expect_ok git -C other-repo init
+expect_ok git -C other-repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok git -C other-repo worktree add -b foreign ../foreign-worktree HEAD
+worktrees_before="$(git -C repo worktree list --porcelain | grep -c '^worktree ')"
+
+# Rejections: usage, bad values, and paths that are not worktrees of the
+# board repository.
+expect_fail "$BIN" workspace adopt DE-01 --actor codex
+assert_contains "Usage: dispatch workspace adopt <task-id> --actor <name> --path <dir>"
+expect_fail "$BIN" workspace adopt DE-01 --path orca-one
+assert_contains "Usage: dispatch workspace adopt"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path orca-one --bogus
+assert_contains "Usage: dispatch workspace adopt"
+expect_fail "$BIN" workspace adopt DE-01 --actor bad/name --path orca-one
+assert_contains "Actor must start with an ASCII letter or digit"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path orca-one --external orca
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path orca-one --external "orca:has space"
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace adopt Missing --actor codex --path orca-one
+assert_contains "No task with id Missing"
+expect_fail "$BIN" workspace adopt DE-07 --actor codex --path orca-one
+assert_contains "Task DE-07 must be ready and unassigned"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path no-such-dir
+assert_contains "Workspace path is not an existing directory: no-such-dir"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path plain-dir
+assert_contains "Workspace path is not a git worktree of"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path foreign-worktree
+assert_contains "Workspace path is not a git worktree of"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path repo
+assert_contains "Workspace path must not equal repository path"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path orca-one --branch orca/other
+assert_contains "has branch orca/one checked out, not orca/other"
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path orca-detached
+assert_contains "has a detached HEAD; pass --branch"
+expect_ok "$BIN" workspace list
+assert_line "(no workspaces)"
+expect_json_error usage "$BIN" workspace adopt DE-01 --actor codex --json
+expect_json_error invalid_external_id "$BIN" workspace adopt DE-01 --actor codex --path orca-one --external Bad:x --json
+expect_json_error invalid_path "$BIN" workspace adopt DE-01 --actor codex --path no-such-dir --json
+expect_json_error not_a_worktree "$BIN" workspace adopt DE-01 --actor codex --path plain-dir --json
+expect_json_error branch_mismatch "$BIN" workspace adopt DE-01 --actor codex --path orca-detached --json
+expect_json_error invalid_state "$BIN" workspace adopt DE-07 --actor codex --path orca-one --json
+
+# Adopt takes the branch from the worktree and never adds a worktree.
+expect_ok "$BIN" workspace adopt DE-01 --actor codex --path orca-one --external orca:ws-1
+assert_line "Adopted workspace DE-01 for codex"
+assert_line "  path: $case_dir/orca-one"
+assert_line "  branch: orca/one"
+assert_line "  state: active"
+assert_line "  external: orca:ws-1"
+if [ "$(git -C repo worktree list --porcelain | grep -c '^worktree ')" != "$worktrees_before" ]; then
+    fail "workspace adopt changed the git worktree list"
+fi
+if [ -e repo-agent-codex-DE-01 ]; then
+    fail "workspace adopt created a default worktree"
+fi
+assert_file_contains dispatch.json '"adopted": true'
+assert_file_contains dispatch.json '"external_id": "orca:ws-1"'
+assert_file_contains dispatch.log '"action":"workspace_adopt"'
+assert_file_contains dispatch.log '"external_id":"orca:ws-1"'
+
+expect_ok "$BIN" workspace show DE-01
+assert_line "Workspace state: active"
+assert_line "Branch: orca/one"
+assert_line "Path: $case_dir/orca-one"
+assert_line "Origin: adopted"
+assert_line "External ID: orca:ws-1"
+assert_line "Git worktree: present"
+expect_ok "$BIN" workspace list
+assert_contains "orca/one  $case_dir/orca-one  [adopted orca:ws-1]"
+expect_ok "$BIN" show DE-01
+assert_line "Workspace branch: orca/one"
+assert_line "Workspace origin: adopted orca:ws-1"
+assert_contains "workspace_adopt by codex: path=$case_dir/orca-one branch=orca/one external=orca:ws-1"
+expect_ok "$BIN" workspace show DE-01 --json
+assert_json \
+    workspaces.0.id string DE-01 \
+    workspaces.0.branch string orca/one \
+    workspaces.0.state string active \
+    workspaces.0.adopted boolean true \
+    workspaces.0.external_id string orca:ws-1
+expect_ok "$BIN" show DE-01 --json
+assert_json \
+    tasks.0.workspace.adopted boolean true \
+    tasks.0.workspace.external_id string orca:ws-1
+expect_ok "$BIN" doctor
+assert_contains "[ok] workspace DE-01 path exists"
+
+# The adopted record guards the task like a created one.
+expect_fail "$BIN" workspace adopt DE-01 --actor codex --path orca-two
+assert_contains "Workspace already exists for DE-01"
+expect_fail "$BIN" workspace adopt DE-02 --actor codex --path orca-one
+assert_contains "Workspace path already reserved:"
+expect_fail "$BIN" workspace adopt DE-02 --actor codex --path orca-two --external orca:ws-1
+assert_contains "External ID orca:ws-1 is already recorded for workspace DE-01"
+expect_json_error workspace_conflict "$BIN" workspace adopt DE-02 --actor codex --path orca-two --external orca:ws-1 --json
+expect_fail "$BIN" workspace create DE-02 --actor codex --branch orca/one
+assert_contains "Workspace branch already reserved: orca/one"
+expect_fail "$BIN" start DE-01 --actor other
+assert_contains "Workspace for DE-01 belongs to codex"
+expect_fail "$BIN" workspace repair DE-01
+assert_contains "Workspace DE-01 was adopted"
+
+# --json follows the workspace mutation envelope.
+expect_json_ok "$BIN" workspace adopt DE-02 --actor codex --path "$case_dir/orca-two" --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace adopt" \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-02 \
+    workspaces.0.branch string orca/two \
+    workspaces.0.path string "$case_dir/orca-two" \
+    workspaces.0.adopted boolean true \
+    workspaces.0.external_id null - \
+    result.action string workspace_adopt \
+    result.changed boolean true \
+    result.task string DE-02 \
+    result.workspace string DE-02 \
+    result.external_id null - \
+    result.previous_state string ready \
+    result.new_state string ready
+# A detached worktree is adopted when --branch names its branch.
+expect_ok "$BIN" workspace adopt DE-03 --actor codex --path orca-detached --branch orca/detached
+assert_line "  branch: orca/detached"
+
+# Created workspaces report adopted false, and the board keeps its shape.
+expect_ok "$BIN" workspace create DE-04 --actor codex
+expect_ok "$BIN" workspace show DE-04 --json
+assert_json \
+    workspaces.0.adopted boolean false \
+    workspaces.0.external_id null -
+expect_ok "$BIN" workspace show DE-04
+assert_not_contains "Origin:"
+
+# Remove clears only the record of an adopted workspace, even a dirty one.
+printf 'dirty\n' > orca-one/dirty.txt
+expect_ok "$BIN" workspace remove DE-01
+assert_line "Removed workspace record DE-01; adopted worktree kept"
+if [ ! -e orca-one/dirty.txt ]; then
+    fail "workspace remove deleted an adopted worktree"
+fi
+expect_ok git -C repo worktree list --porcelain
+assert_contains "worktree $case_dir/orca-one"
+expect_fail "$BIN" workspace show DE-01
+assert_contains "No workspace for DE-01"
+assert_file_contains dispatch.log '"worktree_deleted":"false"'
+
+# --delete-worktree removes it like a created workspace, with the same
+# dirty-tree guard.
+expect_ok "$BIN" workspace adopt DE-01 --actor codex --path orca-one
+expect_fail "$BIN" workspace remove DE-01 --delete-worktree
+assert_contains "Workspace has uncommitted changes"
+expect_json_error workspace_dirty "$BIN" workspace remove DE-01 --delete-worktree --json
+rm orca-one/dirty.txt
+expect_json_ok "$BIN" workspace remove DE-01 --delete-worktree --json
+assert_json \
+    command string "workspace remove" \
+    workspaces.0.id string DE-01 \
+    workspaces.0.state string removed \
+    workspaces.0.adopted boolean true \
+    result.action string workspace_remove \
+    result.worktree_deleted boolean true \
+    result.force boolean false
+if [ -e orca-one ]; then
+    fail "workspace remove --delete-worktree left the adopted worktree"
+fi
+expect_fail "$BIN" workspace remove DE-02 --force --force
+assert_contains "Usage: dispatch workspace remove"
+
+# Record-only removal works after the tool already deleted the worktree.
+expect_ok git -C repo worktree add -b orca/five ../orca-five HEAD
+expect_ok "$BIN" workspace adopt DE-05 --actor codex --path orca-five
+expect_ok git -C repo worktree remove ../orca-five
+expect_json_ok "$BIN" workspace remove DE-05 --json
+assert_json \
+    workspaces.0.id string DE-05 \
+    result.worktree_deleted boolean false
+
+# Doctor and prune --stale treat a vanished adopted worktree as stale.
+expect_ok git -C repo worktree add -b orca/six ../orca-six HEAD
+expect_ok "$BIN" workspace adopt DE-06 --actor codex --path orca-six
+rm -rf orca-six
+expect_ok "$BIN" doctor
+assert_contains "[warn] adopted workspace DE-06 path is missing: $case_dir/orca-six"
+assert_not_contains "workspace DE-06 moved to"
+expect_ok "$BIN" workspace prune --stale --dry-run
+assert_line "Would prune stale adopted workspace DE-06: worktree is gone"
+assert_not_contains "DE-02"
+expect_json_ok "$BIN" workspace prune --stale --json
+assert_json \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-06 \
+    workspaces.0.state string removed \
+    workspaces.0.adopted boolean true \
+    result.changed boolean true \
+    result.skipped array_length 0
+expect_fail "$BIN" workspace show DE-06
+
+# prune --done releases a done adopted record without touching its
+# worktree, dirty or not.
+expect_ok "$BIN" start DE-02 --actor codex
+expect_ok "$BIN" finish DE-02 --actor codex
+printf 'dirty\n' > orca-two/dirty.txt
+expect_ok "$BIN" workspace prune --done --dry-run
+assert_line "Would remove done workspace record DE-02; adopted worktree kept"
+expect_ok "$BIN" workspace show DE-02
+expect_ok "$BIN" workspace prune --done
+assert_line "Removed done workspace record DE-02; adopted worktree kept"
+assert_not_contains "Skipped"
+if [ ! -e orca-two/dirty.txt ]; then
+    fail "workspace prune removed an adopted worktree"
+fi
+expect_fail "$BIN" workspace show DE-02
+
+# --sequence covers a linear chain, as with workspace create.
+expect_ok "$BIN" task add DE "Chain one" --no-review
+expect_ok "$BIN" task add DE "Chain two"
+expect_ok "$BIN" dep add DE-08 DE-09
+expect_ok "$BIN" ready DE-08 DE-09 --actor user
+expect_ok git -C repo worktree add -b orca/chain ../orca-chain HEAD
+expect_ok "$BIN" workspace adopt DE-08 --actor codex --path orca-chain --sequence --external orca:chain
+assert_line "  tasks: DE-08,DE-09"
+assert_line "  review gate: DE-09"
+expect_ok "$BIN" workspace show DE-09
+assert_line "Sequence tasks: DE-08,DE-09"
+assert_line "Origin: adopted"
+
+# Completion offers the new subcommand and flags.
+expect_ok "$BIN" completion zsh
+assert_contains "compadd -- create adopt list show remove prune"
+assert_contains "adopt) compadd -- --actor --path --branch --sequence --external ;;"
+assert_contains "remove) compadd -- --force --delete-worktree ;;"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from adopt' -l external -r"
+assert_contains "__fish_seen_subcommand_from remove' -l delete-worktree"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-adopt-completion.bash"
+# shellcheck disable=SC2016
+expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-adopt-completion.bash" dispatch workspace a
+assert_line "adopt"
+# shellcheck disable=SC2016
+expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-adopt-completion.bash" dispatch workspace adopt DE-01 --e
+assert_line "--external"
+# shellcheck disable=SC2016
+expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-adopt-completion.bash" dispatch workspace remove DE-01 --d
+assert_line "--delete-worktree"
+
 case_dir="$(make_case_dir workspace-inspect)"
 cd "$case_dir"
 cp "$ROOT/tests/fixtures/workspace-records-board.json" dispatch.json
@@ -3156,7 +3429,7 @@ cd "$case_dir"
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
 assert_contains "agent create/list/show/command/session/resume"
-assert_contains "workspace create/list/show/remove/repair/prune"
+assert_contains "workspace create/adopt/list/show/remove/repair/prune"
 assert_contains "completion candidates"
 assert_not_contains "--json"
 assert_not_contains "clear"

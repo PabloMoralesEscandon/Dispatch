@@ -213,7 +213,16 @@ int cmd_doctor(int argc, char **argv) {
                  workspace->id);
         if (path_exists(workspace->path))
             doctor_ok(message);
-        else {
+        else if (workspace->adopted) {
+            /* An adopted worktree lives wherever its tool put it, so a
+             * missing path is never treated as a Dispatch relocation. */
+            snprintf(message, sizeof(message),
+                     "adopted workspace %s path is missing: %s",
+                     workspace->id, workspace->path);
+            doctor_warn(&warnings, "workspace_path_missing", workspace->id,
+                        message,
+                        "the tool that created it removed the worktree; clear the record with dispatch workspace remove <id> or dispatch workspace prune --stale");
+        } else {
             char *reanchored_path = workspace_reanchored_path(
                 current_repo_path, workspace->path);
             if (reanchored_path &&
