@@ -542,8 +542,9 @@ and `group show` inspect recorded scopes and per-group task counts (see
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
 Proposed tasks with unmet dependencies are approved but still display as blocked
 until their blockers are done. If `--actor` is omitted, Dispatch records the
-actor as `user`. An agent should still pass its explicit actor name when the
-agent is performing the approval at the user's instruction. Add `--no-review`
+actor as `user`. Approval is the user's decision, so an agent that runs
+`group ready` at the user's explicit instruction records `--actor user` (or the
+person's own name); it never records its own work as `user`. Add `--no-review`
 only when the user approves every readied task as safe to finish without a
 review gate. If `--no-review` is used on a group that is already readied, it
 also applies to ready or blocked tasks in that group that have not been started
@@ -715,8 +716,11 @@ is ready, it summarizes waiting review, proposed, and blocked queues. Use
 a `doing`, `paused`, or `review` task is an explicit revert that clears its
 assignment and start provenance (`assigned_to`, `started_by`, `started_at`) so
 it can be started cleanly again. Omitted actors on user-facing approval and
-review commands default to `user`; agents should still pass their explicit
-actor name when acting on the user's instruction. Add `--no-review` when
+review commands default to `user`. Readying and accepting are the user's
+decisions: an agent acting on the user's explicit instruction records
+`--actor user` (or the person's own name), and uses its own name only for its
+own work or when the user assigned it as the reviewer (see the
+`dispatch-board` skill). Add `--no-review` when
 approving a task that can safely move directly from `doing` to `done` after the
 agent finishes it.
 
@@ -1028,6 +1032,27 @@ dispatch workspace create DE-01 --actor codex-server --sequence
 The agent works through `DE-01`, `DE-02`, and `DE-03` in the same branch, making
 one commit per task. The sequence stops when `DE-03` reaches `review`, and the
 user reviews the final branch state.
+
+## Agent Skills
+
+The `skills/` directory holds three [Agent Skills](https://agentskills.io)
+that teach coding agents to use Dispatch by job, wherever their session
+starts:
+
+| Skill | Use it to |
+| --- | --- |
+| [`dispatch-plan`](skills/dispatch-plan/SKILL.md) | plan, break down or organise work into Dispatch groups, tasks, dependencies and review gates |
+| [`dispatch-work`](skills/dispatch-work/SKILL.md) | start, continue or finish a Dispatch task in its own workspace, with one commit per task |
+| [`dispatch-board`](skills/dispatch-board/SKILL.md) | check, review or tidy the board from the person's own session |
+
+Each skill repeats the critical rules (CLI only, never read or edit
+`dispatch.json`, an explicit actor on every change) and explains how to find
+the workflow directory from a session started in the product repository. To
+use them, copy or link the folders into your runner's skills directory (for
+example `~/.claude/skills/` for Claude Code). `tests/check_skills.sh`, run in
+CI, checks their front matter and that every command they mention matches
+`dispatch --help` and every command is covered; see
+[ADR 0010](docs/adr/0010-agent-skills.md).
 
 ## Planning Example
 
