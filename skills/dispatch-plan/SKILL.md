@@ -8,7 +8,8 @@ description: Plan, break down or organise work into Dispatch tasks. Use when ask
 Dispatch is a command-line workflow board for humans and agents. It organizes
 work into groups, tasks, dependencies, assignment, review gates, and completion
 history. This skill covers turning a request or an issue into Dispatch groups,
-tasks and dependencies. To carry out a task use the `dispatch-work` skill; to
+tasks and dependencies. The full command list is in the `dispatch-board`
+skill's `references/commands.md`. To carry out a task use the `dispatch-work` skill; to
 read, approve or tidy the board use the `dispatch-board` skill.
 
 ## Critical Rules
@@ -17,10 +18,13 @@ read, approve or tidy the board use the `dispatch-board` skill.
 2. Never read `dispatch.json` directly.
 3. Never edit `dispatch.json` directly.
 4. Never infer task state from `dispatch.json`.
-5. Pass an explicit `--actor` on every change that accepts one. When you plan,
-   the actor is your own agent name (for example `claude` or `codex-server`),
-   never `user`. (`group add`, `group edit`, `dep add` and `dep remove` take no
-   actor and are logged as `user`; every `task` command does take one.)
+5. Pass an explicit `--actor` on every change that accepts one. Your own
+   planning changes (`task add`, `task edit`, `task move`) record your own
+   agent name (for example `claude` or `codex-server`), never `user`.
+   Approvals are the user's decisions and record `user` (see "Leave tasks
+   proposed" below). (`group add`, `group edit`, `dep add` and `dep remove`
+   take no actor and are logged as `user`; every `task` command does take
+   one.)
 
 The storage file is an implementation detail. Do not inspect it with `cat`,
 `sed`, `jq`, `rg`, editors, scripts, or JSON parsers. If you need task state,
@@ -164,12 +168,14 @@ duplicates are easy to spot.
 New tasks are `proposed`. Only the user approves them by marking them ready
 (see the `dispatch-board` skill). Do not run `dispatch ready <id>` or
 `dispatch group ready` while planning unless the user explicitly told you to
-ready a specific task or group, and then pass your own actor name. If the user
-has not explicitly delegated readiness approval, leave newly planned tasks
-proposed and tell the user which ones to ready.
+ready a specific task or group. The approval is still the user's decision, so
+record it as theirs: `dispatch ready DE-13 --actor user` or
+`dispatch group ready DE --actor user` (or the person's own name if they give
+one). If the user has not explicitly delegated readiness approval, leave newly
+planned tasks proposed and tell the user which ones to ready.
 
-Never record your own changes as `--actor user`: the history must show that an
-agent created the plan and that the user approved it.
+Never record your own planning changes as `--actor user`: the history must
+show that an agent created the plan and that the user approved it.
 
 ### Scripting
 

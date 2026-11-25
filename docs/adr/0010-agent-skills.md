@@ -46,14 +46,21 @@ down / organise work into Dispatch tasks", "start / continue / finish a
 Dispatch task", "check / review / tidy the Dispatch board") so runners pick
 the right one.
 
-**Actor names.** The skills tell agents to pass their own name as `--actor` on
-every change that accepts one and never to record their own work as `user`.
-In the board skill an agent may record a name the person dictates. The
-template's `dispatch ready <id> --actor user` examples become
-`--actor <actor>`; this matches the README guidance that agents pass their
-explicit actor name when acting on the user's instruction. `group add`,
-`group edit` and `dep add/remove` accept no `--actor`, which the plan skill
-says outright rather than showing commands that would fail.
+**Actor names.** Every change that accepts `--actor` passes one, and the
+actor is whoever made the decision. The skills keep the template's rule:
+readying and accepting tasks are the user's decisions, so when an agent runs
+`ready`, `group ready` or `review` because the user explicitly told it to, it
+records `--actor user` (or the person's own name if they give one). An agent
+records its own name only for its own actions: planning (`task add`, `task
+edit`, `task move`), working (`workspace create`/`adopt`, `start`, `finish`,
+`commit add`), tidying it initiates (`unassign`, `task priority`), and
+`review` when the user explicitly assigned it as the reviewer. It never
+records its own work as `user`. The history therefore shows that an agent
+created a plan and that the user approved it. (The README's note that agents
+should pass their own name when approving at the user's instruction predates
+this decision.) `group add`, `group edit` and `dep add/remove` accept no
+`--actor` and are logged as `user`; that is a product gap tracked separately,
+and the plan skill says so rather than showing commands that would fail.
 
 **Checks.** `tests/check_skills.sh` runs in CI (its own step, and from
 `tests/run_cli_tests.sh`, which also proves it rejects broken copies):

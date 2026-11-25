@@ -8,7 +8,8 @@ description: Start, continue or finish a Dispatch task. Use when asked to do, wo
 Dispatch is a command-line workflow board for humans and agents. This skill is
 the protocol for carrying out tasks on a Dispatch board. To plan new tasks use
 the `dispatch-plan` skill; to read, approve or tidy the board use the
-`dispatch-board` skill.
+`dispatch-board` skill. The full command list is in the `dispatch-board`
+skill's `references/commands.md`.
 
 ## Critical Rules
 
@@ -18,7 +19,9 @@ the `dispatch-plan` skill; to read, approve or tidy the board use the
 4. Never infer task state from `dispatch.json`.
 5. Pass an explicit `--actor <your-agent-name>` on every change that accepts
    one (`workspace create`, `workspace adopt`, `start`, `finish`, `commit add`,
-   `unassign`, ...). Never record your own work as `user`.
+   `unassign`, ...). Never record your own work as `user`; `--actor user` is
+   only for approvals and reviews the user decided (see the `dispatch-board`
+   skill), never for your own changes.
 6. Commit after every completed Dispatch task.
 7. Use the Dispatch task title as the commit message.
 

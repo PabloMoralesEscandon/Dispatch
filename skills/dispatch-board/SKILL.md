@@ -19,9 +19,13 @@ plan new tasks use the `dispatch-plan` skill; to carry out a task use the
 3. Never edit `dispatch.json` directly.
 4. Never infer task state from `dispatch.json`.
 5. Pass an explicit `--actor` on every change that accepts one, so the history
-   shows who acted. Use your own agent name, or the name the person asks you to
-   record (for example their own when they dictate an approval); do not
-   silently fall back to the `user` default.
+   shows who decided. Readying and accepting tasks are the user's decisions:
+   when the user explicitly tells you to run `ready`, `group ready` or
+   `review`, record `--actor user` (or the person's own name if they give
+   one). Use your own agent name only for your own actions: tidying you
+   initiate (`unassign`, `task priority`, `task move`), and `review` when the
+   user explicitly assigned you as the reviewer. Never record your own work as
+   `user`.
 
 The storage file is an implementation detail, and so is `dispatch.log`. Do not
 inspect or edit them with `cat`, `sed`, `jq`, `rg`, editors, scripts, or JSON
@@ -85,16 +89,17 @@ Dispatch repository; ignore unknown fields and match errors on `error.code`.
 Only the user approves proposed tasks by marking them ready. Agents ready a
 task or group only when the user explicitly instructs it, for that specific
 task or group. All readiness changes must include an actor so the approval is
-visible in task history.
+visible in task history, and the approval is the user's, so record `user` (or
+the person's own name if they give one):
 
 ```bash
-dispatch ready DE-13 DE-14 --actor <actor>
-dispatch group ready DE --actor <actor>
+dispatch ready DE-13 DE-14 --actor user
+dispatch group ready DE --actor user
 ```
 
-Use `dispatch ready <id> --actor <actor> --no-review` only when the user
+Use `dispatch ready <id> --actor user --no-review` only when the user
 approves the task as safe to finish without a review gate. Use
-`dispatch group ready <group> --actor <actor> --no-review` only when the user
+`dispatch group ready <group> --actor user --no-review` only when the user
 approves every readied task in the group as safe to finish without review.
 When used again on an already readied group, it also marks ready or blocked
 tasks that have not been started yet as no-review.
@@ -103,7 +108,7 @@ Readying a task that is `doing` or `review` is an explicit revert: it clears
 the assignment so the task can be started cleanly again. Confirm with the
 person before doing that.
 
-`dispatch task priority <TASK-ID> <value> --actor <actor>` (from `-99` to `99`,
+`dispatch task priority <TASK-ID> <value> --actor <your-agent-name>` (from `-99` to `99`,
 default `0`) moves a task up or down the ready queue without changing
 dependencies.
 
@@ -116,8 +121,11 @@ to, or when they explicitly assigned you as the reviewer.
 dispatch reviews
 dispatch show DE-13             # check the work and its recorded commits
 dispatch commit show DE-13
-dispatch review DE-13 --actor <actor>
-dispatch review DE-13 DE-15 --actor <actor> --close-issue
+# The user said "accept DE-13": record the user's decision.
+dispatch review DE-13 --actor user
+dispatch review DE-13 DE-15 --actor user --close-issue
+# The user explicitly assigned you as reviewer: record your own name.
+dispatch review DE-13 --actor <your-agent-name>
 ```
 
 `--close-issue` closes each accepted task's linked GitHub issue through `gh`
@@ -142,7 +150,7 @@ dispatch normalize              # recompute derived state, repair invariants
 - `doctor` reports problems with suggested fixes; `normalize` is the safe
   repair for derived state and stale assignments.
 - A stuck or abandoned assignment (an agent died mid-task) is cleared with
-  `dispatch unassign <TASK-ID> --actor <actor>`: a `doing` task returns to
+  `dispatch unassign <TASK-ID> --actor <your-agent-name>`: a `doing` task returns to
   `ready` (or `blocked`). It refuses `review` and `done` tasks and leaves
   workspaces alone.
 - Workspaces: `dispatch workspace prune --done --dry-run` previews cleaning up
@@ -152,7 +160,7 @@ dispatch normalize              # recompute derived state, repair invariants
   (adopted worktrees keep their files unless `--delete-worktree`), and
   `dispatch workspace repair <TASK-ID>` updates paths after the workflow
   directory moved (`doctor` points it out).
-- Tasks: `dispatch task move <TASK-ID> <group> --actor <actor>` moves a task to
+- Tasks: `dispatch task move <TASK-ID> <group> --actor <your-agent-name>` moves a task to
   the group whose scope fits, keeping its ID; `dispatch task delete <TASK-ID>`
   removes one (refused when other tasks depend on it unless `--force`).
 - Agents: `dispatch agent show <name>`, `dispatch agent archive <name>` hides
