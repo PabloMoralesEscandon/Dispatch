@@ -56,6 +56,13 @@ void dispatch_cli_print_help(void) {
     puts("  task add/edit/move/delete/priority, dep add/remove, commit add/list/show,");
     puts("  completion candidates/bash/zsh/fish/install, ready, reviews, proposed, start,");
     puts("  finish, review, unassign, normalize, status, doctor, log, tui, list, show, blocked");
+    puts("");
+    puts("JSON output:");
+    puts("  Pass --json to read commands (list, show, ready, blocked, reviews, proposed, status, doctor,");
+    puts("  agent list/show, workspace list/show, log) and mutating commands (init, repo set, normalize,");
+    puts("  task add/edit/move/delete/priority, group add/ready/edit, dep add/remove, commit add,");
+    puts("  ready <id>, start, finish, review, unassign, agent create/archive/restore/session/command/resume,");
+    puts("  workspace create/adopt/remove/repair/prune).");
 }
 
 int dispatch_cli_is_command(const char *command) {
@@ -72,21 +79,22 @@ static void scaffold_workflow_dir(void);
 
 static int cmd_init(int argc, char **argv) {
     if (argc > 3) {
-        fprintf(stderr, "Usage: dispatch init [repo-path]\n");
+        cli_error("usage", NULL, "Usage: dispatch init [repo-path]\n");
         return 1;
     }
 
     const char *repo_arg = argc == 3 ? argv[2] : ".";
     char *repo_path = dispatch_resolve_path(".", repo_arg);
     if (!repo_path) {
-        fprintf(stderr, "Repo path %s does not exist\n", repo_arg);
+        cli_error("invalid_path", NULL, "Repo path %s does not exist\n",
+                  repo_arg);
         return 1;
     }
     char error[256] = {0};
     DispatchStoreLock lock = {0};
     if (!dispatch_store_lock_acquire(&lock, DISPATCH_STORE_FILE, 1000, error,
                                      sizeof(error))) {
-        fprintf(stderr, "%s\n", error);
+        cli_error("board_locked", NULL, "%s\n", error);
         free(repo_path);
         return 1;
     }
@@ -100,21 +108,36 @@ static int cmd_init(int argc, char **argv) {
 
     if (!dispatch_store_init_file(DISPATCH_STORE_FILE, repo_path, error,
                                   sizeof(error))) {
-        fprintf(stderr, "Could not initialize %s: %s\n", DISPATCH_STORE_FILE,
-                error);
+        cli_error("board_save_failed", NULL, "Could not initialize %s: %s\n",
+                  DISPATCH_STORE_FILE, error);
         dispatch_store_lock_release(&lock);
         free(repo_path);
         return 1;
     }
 
     if (existed) {
-        printf("%s already exists\n", DISPATCH_STORE_FILE);
         dispatch_store_lock_release(&lock);
         free(repo_path);
+        if (cli_json()) {
+            DispatchBoard board;
+            if (!load_board_or_error(&board))
+                return 1;
+            DispatchJsonResult *json_result = dispatch_json_result_new("init");
+            dispatch_json_result_set_changed(json_result, 0);
+            dispatch_json_result_set_bool(json_result, "created", 0);
+            dispatch_json_result_set_string(
+                json_result, "repo_path",
+                board.repo_path ? board.repo_path : ".");
+            int status = cli_json_emit_tasks(&board, NULL, json_result);
+            dispatch_board_free(&board);
+            return status;
+        }
+        printf("%s already exists\n", DISPATCH_STORE_FILE);
         return 0;
     }
 
-    printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
+    if (!cli_json())
+        printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
     scaffold_workflow_dir();
     DispatchLogField targets[] = {
         {"repo_path", repo_path},
@@ -122,8 +145,23 @@ static int cmd_init(int argc, char **argv) {
     append_dispatch_log("user", "init", "init", targets, 1, NULL, 0,
                         "Created dispatch.json");
     dispatch_store_lock_release(&lock);
+
+    int status = 0;
+    if (cli_json()) {
+        DispatchBoard board;
+        if (!load_board_or_error(&board)) {
+            status = 1;
+        } else {
+            DispatchJsonResult *json_result = dispatch_json_result_new("init");
+            dispatch_json_result_set_bool(json_result, "created", 1);
+            dispatch_json_result_set_string(json_result, "repo_path",
+                                            repo_path);
+            status = cli_json_emit_tasks(&board, NULL, json_result);
+            dispatch_board_free(&board);
+        }
+    }
     free(repo_path);
-    return 0;
+    return status;
 }
 
 static int board_file_exists(void) {
@@ -315,8 +353,13 @@ void append_dispatch_log(const char *actor, const char *command,
     char error[256] = {0};
     if (!dispatch_store_log_append(DISPATCH_LOG_FILE, &record, error,
                                    sizeof(error))) {
-        fprintf(stderr, "Warning: could not append %s: %s\n",
-                DISPATCH_LOG_FILE, error);
+        if (cli_json()) {
+            cli_warning("log_append_failed", NULL, NULL,
+                        "could not append %s: %s", DISPATCH_LOG_FILE, error);
+        } else {
+            fprintf(stderr, "Warning: could not append %s: %s\n",
+                    DISPATCH_LOG_FILE, error);
+        }
     }
 }
 
@@ -379,8 +422,8 @@ int create_agent_dirs(const char *agent_dir, char **scratch_dir,
     if (!make_dir_if_needed(".dispatch") ||
         !make_dir_if_needed(".dispatch/agents") ||
         !make_dir_if_needed(agent_dir)) {
-        fprintf(stderr, "Could not create agent directory %s: %s\n", agent_dir,
-                strerror(errno));
+        cli_error("io_failed", NULL, "Could not create agent directory %s: %s\n",
+                  agent_dir, strerror(errno));
         return 0;
     }
 
@@ -388,8 +431,9 @@ int create_agent_dirs(const char *agent_dir, char **scratch_dir,
     *decisions_dir = join_path2(agent_dir, "decisions");
     if (!make_dir_if_needed(*scratch_dir) ||
         !make_dir_if_needed(*decisions_dir)) {
-        fprintf(stderr, "Could not create agent support directories: %s\n",
-                strerror(errno));
+        cli_error("io_failed", NULL,
+                  "Could not create agent support directories: %s\n",
+                  strerror(errno));
         return 0;
     }
     return 1;
@@ -405,12 +449,18 @@ static void scaffold_workflow_file(const char *path, const char *content) {
     }
     file = fopen(path, "w");
     if (!file) {
-        fprintf(stderr, "Could not create %s: %s\n", path, strerror(errno));
+        if (cli_json()) {
+            cli_warning("scaffold_failed", NULL, NULL,
+                        "could not create %s: %s", path, strerror(errno));
+        } else {
+            fprintf(stderr, "Could not create %s: %s\n", path, strerror(errno));
+        }
         return;
     }
     fputs(content, file);
     fclose(file);
-    printf("Created %s\n", path);
+    if (!cli_json())
+        printf("Created %s\n", path);
 }
 
 /* On a fresh init, create the .dispatch/ tree and the workflow instruction
@@ -418,8 +468,14 @@ static void scaffold_workflow_file(const char *path, const char *content) {
 static void scaffold_workflow_dir(void) {
     if (!make_dir_if_needed(".dispatch") ||
         !make_dir_if_needed(".dispatch/agents")) {
-        fprintf(stderr, "Could not create .dispatch directories: %s\n",
-                strerror(errno));
+        if (cli_json()) {
+            cli_warning("scaffold_failed", NULL, NULL,
+                        "could not create .dispatch directories: %s",
+                        strerror(errno));
+        } else {
+            fprintf(stderr, "Could not create .dispatch directories: %s\n",
+                    strerror(errno));
+        }
     }
     scaffold_workflow_file("AGENTS.md", dispatch_template_agents_md);
     scaffold_workflow_file("CLAUDE.md", dispatch_template_claude_md);
@@ -455,19 +511,37 @@ int dispatch_cli_dispatch(int argc, char **argv) {
     return cli_json_end(run_command(command, argc, argv));
 }
 
-/* Mutating (sub)commands that accept --json and report a result object.
- * `ready <id>` is handled in cmd_ready because `ready --json` is a read. */
+/* (Sub)commands that accept --json. Read and mutating commands share one
+ * dispatcher path so every failure in JSON mode emits a coded error document. */
 static const struct {
     const char *command;
     const char *subcommand;
     const char *json_name;
-} json_mutations[] = {
+} json_commands[] = {
+    {"list", NULL, "list"},
+    {"show", NULL, "show"},
+    {"ready", NULL, "ready"},
+    {"blocked", NULL, "blocked"},
+    {"reviews", NULL, "reviews"},
+    {"proposed", NULL, "proposed"},
+    {"status", NULL, "status"},
+    {"doctor", NULL, "doctor"},
+    {"log", NULL, "log"},
+    {"agent", "list", "agent list"},
+    {"agent", "show", "agent show"},
+    {"workspace", "list", "workspace list"},
+    {"workspace", "show", "workspace show"},
+    {"init", NULL, "init"},
+    {"repo", "set", "repo set"},
+    {"normalize", NULL, "normalize"},
     {"task", "add", "task add"},
     {"task", "edit", "task edit"},
     {"task", "move", "task move"},
     {"task", "delete", "task delete"},
+    {"task", "priority", "task priority"},
     {"group", "add", "group add"},
     {"group", "ready", "group ready"},
+    {"group", "edit", "group edit"},
     {"dep", "add", "dep add"},
     {"dep", "remove", "dep remove"},
     {"start", NULL, "start"},
@@ -475,24 +549,31 @@ static const struct {
     {"review", NULL, "review"},
     {"unassign", NULL, "unassign"},
     {"commit", "add", "commit add"},
+    {"agent", "create", "agent create"},
+    {"agent", "archive", "agent archive"},
+    {"agent", "restore", "agent restore"},
+    {"agent", "session", "agent session"},
+    {"agent", "command", "agent command"},
+    {"agent", "resume", "agent resume"},
     {"workspace", "create", "workspace create"},
     {"workspace", "adopt", "workspace adopt"},
     {"workspace", "remove", "workspace remove"},
+    {"workspace", "repair", "workspace repair"},
     {"workspace", "prune", "workspace prune"},
 };
 
-/* Strips --json from a supported mutating command and enters JSON result
- * mode. Returns 0 when --json was repeated, after entering JSON mode so the
- * usage error is reported as JSON. */
-static int begin_json_mutation(int *argc, char **argv) {
-    for (size_t i = 0; i < sizeof(json_mutations) / sizeof(json_mutations[0]);
+/* Strips --json from a supported command and enters JSON mode. Returns 0
+ * when --json was repeated, after entering JSON mode so the usage error is
+ * reported as JSON. */
+static int begin_json_command(int *argc, char **argv) {
+    for (size_t i = 0; i < sizeof(json_commands) / sizeof(json_commands[0]);
          i++) {
-        if (strcmp(argv[1], json_mutations[i].command) != 0)
+        if (strcmp(argv[1], json_commands[i].command) != 0)
             continue;
         int first_arg = 2;
-        if (json_mutations[i].subcommand) {
+        if (json_commands[i].subcommand) {
             if (*argc < 3 ||
-                strcmp(argv[2], json_mutations[i].subcommand) != 0)
+                strcmp(argv[2], json_commands[i].subcommand) != 0)
                 continue;
             first_arg = 3;
         }
@@ -501,7 +582,7 @@ static int begin_json_mutation(int *argc, char **argv) {
         int ok = dispatch_cli_extract_json_flag(argc, argv, first_arg,
                                                 &json_output);
         if (json_output)
-            cli_json_begin(json_mutations[i].json_name);
+            cli_json_begin(json_commands[i].json_name);
         return ok;
     }
     return 1;
@@ -509,7 +590,7 @@ static int begin_json_mutation(int *argc, char **argv) {
 
 static int run_command(const DispatchCliCommand *command, int argc,
                        char **argv) {
-    if (!begin_json_mutation(&argc, argv)) {
+    if (!begin_json_command(&argc, argv)) {
         cli_error("usage", NULL, "--json may only be given once\n");
         return 1;
     }
@@ -533,7 +614,7 @@ static int run_command(const DispatchCliCommand *command, int argc,
     if (strcmp(command->name, "completion") == 0)
         return cmd_completion(argc, argv);
     if (strcmp(command->name, "normalize") == 0)
-        return cmd_normalize();
+        return cmd_normalize(argc, argv);
     if (strcmp(command->name, "list") == 0)
         return cmd_list(argc, argv);
     if (strcmp(command->name, "show") == 0)

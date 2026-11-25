@@ -73,12 +73,11 @@ static void print_log_record(json_t *record) {
 }
 
 int cmd_log(int argc, char **argv) {
-    int json_output = 0;
+    int json_output = cli_json();
     DispatchLogQuery query;
     memset(&query, 0, sizeof(query));
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output) ||
-        !parse_log_args(argc, argv, &query)) {
-        fprintf(stderr, LOG_USAGE);
+    if (!parse_log_args(argc, argv, &query)) {
+        cli_error("usage", NULL, LOG_USAGE);
         return 1;
     }
 
@@ -90,17 +89,16 @@ int cmd_log(int argc, char **argv) {
     char error[256] = {0};
     if (!dispatch_log_read(DISPATCH_LOG_FILE, &query, &read, error,
                            sizeof(error))) {
-        fprintf(stderr, "Could not read %s: %s\n", DISPATCH_LOG_FILE, error);
+        cli_error("log_unreadable", NULL, "Could not read %s: %s\n",
+                  DISPATCH_LOG_FILE, error);
         dispatch_board_free(&board);
         return 1;
     }
 
     int status = 0;
     if (json_output) {
-        status = dispatch_json_emit_log(stdout, &board, DISPATCH_LOG_FILE,
-                                        &query, &read)
-                     ? 0
-                     : 1;
+        status = cli_json_finish_emit(dispatch_json_emit_log(
+            stdout, &board, DISPATCH_LOG_FILE, &query, &read));
     } else {
         if (read.missing)
             printf("(no %s)\n", DISPATCH_LOG_FILE);

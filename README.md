@@ -763,10 +763,12 @@ dispatch log --task DE-01 --limit 20 --json
 [JSON Results For Mutating Commands](#json-results-for-mutating-commands)).
 
 A successful JSON command writes one versioned JSON object and a trailing
-newline to stdout. It does not include headings, color escapes, empty-queue
-hints, or other human text. Errors keep their existing non-zero exit status and
-text on stderr without writing a partial JSON document. Omitting `--json`
-retains the normal human-readable output.
+newline to stdout and nothing to stderr. It does not include headings, color
+escapes, empty-queue hints, or other human text. Errors keep their existing
+non-zero exit status, write nothing to stdout, and write a coded JSON error
+document to stderr (except `doctor --json` when the board itself cannot be
+loaded, which emits its `board_load_failed` check on stdout with empty stderr).
+Omitting `--json` retains the normal human-readable output.
 
 Every task response uses the same top-level envelope:
 
@@ -816,11 +818,14 @@ JSON `null`.
 Task objects also carry `issue`: `null`, or the linked GitHub issue as
 `{"repo": "acme/widgets", "number": 12, "url": "https://github.com/acme/widgets/issues/12"}`.
 
-Only `status` populates `warnings`. Warning objects contain a stable `code`, a
-human-readable `message`, and nullable `task_id` and `agent` fields. Version 1
-reports missing commits, assignment/state mismatches, agent sessions that
-reference missing tasks, and tasks that link the same issue as an earlier
-task.
+Among task read commands, only `status` populates `warnings`. Warning objects
+contain a stable `code`, a human-readable `message`, and nullable `task_id` and
+`agent` fields. Version 1 reports missing commits, assignment/state mismatches,
+agent sessions that reference missing tasks, and tasks that link the same issue
+as an earlier task. Mutating commands also use `warnings` for non-fatal
+operational warnings (such as a failed `dispatch.log` append, scaffolding
+failure during `init`, or a non-git path on `repo set`) instead of printing
+stray text to stderr.
 
 Agent, workspace, and log responses keep `schema_version`, `command`,
 `board` (`name` and `repo_path`), `query`, and `summary`, and put their
@@ -850,18 +855,21 @@ are in [the JSON output contract](docs/json-output-contract.md).
 
 ### JSON Results For Mutating Commands
 
-These commands also accept `--json`, anywhere after the subcommand (or after
-the command name for commands without one):
+All mutating commands also accept `--json`, anywhere after the subcommand (or
+after the command name for commands without one):
 
 ```text
-task add|edit|move|delete   group add|ready   dep add|remove
+init   repo set   normalize
+task add|edit|move|delete|priority   group add|ready|edit   dep add|remove
 ready <id>...   start   finish   review   unassign   commit add
-workspace create|adopt|remove|prune
+agent create|archive|restore|session|command|resume
+workspace create|adopt|remove|repair|prune
 ```
 
 On success they print the same envelope as the read commands (workspace
-commands use the `workspace list` envelope) plus a `result` object, so a tool
-learns the outcome without a second query:
+commands use the workspace envelope and agent commands use the agent envelope)
+plus `warnings` and a `result` object, so a tool learns the outcome without a
+second query:
 
 ```bash
 dispatch finish DE-01 --actor codex --json
@@ -884,8 +892,8 @@ dispatch finish DE-01 --actor codex --json
 `changed` is `false` for successful no-ops, such as recording a commit that is
 already recorded. `newly_ready` lists every task that became ready.
 
-With `--json`, a failing mutation keeps its non-zero exit status, prints
-nothing on stdout, and prints a JSON error document on stderr:
+With `--json`, any failing command (read or mutating) keeps its non-zero exit
+status, prints nothing on stdout, and prints a JSON error document on stderr:
 
 ```json
 {
@@ -900,9 +908,8 @@ nothing on stdout, and prints a JSON error document on stderr:
 ```
 
 Match on `error.code`; the message is human text and may change. The actions,
-extra fields, and the full list of error codes are in
+extra fields, operational warning codes, and full list of error codes are in
 [the JSON output contract](docs/json-output-contract.md#mutation-results).
-Read commands keep reporting errors as text.
 
 ## Agent Workflow
 

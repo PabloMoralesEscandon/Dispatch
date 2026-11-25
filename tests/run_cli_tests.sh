@@ -974,22 +974,65 @@ assert_json \
     workspaces.0.task_id string DE-07 \
     workspaces.0.actor string json-agent
 
-expect_fail "$BIN" workspace list --json --json
-assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" workspace show --json
-assert_contains "Usage: dispatch workspace show <task-id-or-workspace> [--json]"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" workspace show Missing --json
-assert_contains "No workspace for Missing"
-assert_not_contains '"schema_version"'
+expect_json_error usage "$BIN" workspace list --json --json
+assert_json command string "workspace list" error.task_id null -
+expect_json_error usage "$BIN" workspace show --json
+assert_json command string "workspace show" error.task_id null -
+expect_json_error workspace_not_found "$BIN" workspace show Missing --json
+assert_json command string "workspace show" error.task_id null -
 
-expect_fail "$BIN" status --json --json
-assert_contains "Usage: dispatch status [--json]"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" show Missing --json
-assert_contains "No task with id Missing"
-assert_not_contains '"schema_version"'
+expect_json_error usage "$BIN" status --json --json
+assert_json command string status error.task_id null -
+expect_json_error usage "$BIN" status extra --json
+assert_json command string status error.task_id null -
+expect_json_error task_not_found "$BIN" show Missing --json
+assert_json command string show error.task_id string Missing
+expect_json_error usage "$BIN" show --json
+assert_json command string show error.task_id null -
+expect_json_error group_not_found "$BIN" list Missing --json
+assert_json command string list error.task_id null -
+expect_json_error usage "$BIN" list a b --json
+assert_json command string list error.task_id null -
+expect_json_error usage "$BIN" list --json --json
+assert_json command string list error.task_id null -
+expect_json_error usage "$BIN" blocked extra --json
+assert_json command string blocked error.task_id null -
+expect_json_error usage "$BIN" reviews extra --json
+assert_json command string reviews error.task_id null -
+expect_json_error usage "$BIN" proposed extra --json
+assert_json command string proposed error.task_id null -
+
+# Read commands also emit board_missing as a JSON error outside a board dir.
+empty_read_dir="$(make_case_dir json-read-errors-empty)"
+(
+    cd "$empty_read_dir"
+    for cmd in list "show DE-01" ready blocked reviews proposed status \
+        "agent list" "agent show worker" "workspace list" \
+        "workspace show DE-01"; do
+        cmd_name="${cmd%% DE-01}"
+        cmd_name="${cmd_name%% worker}"
+        # shellcheck disable=SC2086
+        expect_json_error board_missing "$BIN" $cmd --json
+        assert_json command string "$cmd_name" error.task_id null -
+    done
+    # doctor --json keeps its documented board_load_failed JSON on stdout and
+    # prints no stray text on stderr.
+    run_split "$BIN" doctor --json
+    if [ "$RUN_STATUS" -eq 0 ]; then
+        fail "expected doctor --json without a board to exit non-zero"
+    fi
+    if [ -n "$RUN_STDERR" ]; then
+        fail "expected empty stderr from doctor --json on board_load_failed"
+    fi
+    RUN_OUTPUT="$RUN_STDOUT"
+    assert_json \
+        schema_version integer 1 \
+        command string doctor \
+        board null - \
+        summary.warnings integer 1 \
+        checks.0.status string warn \
+        checks.0.kind string board_load_failed
+)
 
 expect_ok "$BIN" list
 assert_output_equals "$human_list"
@@ -1063,9 +1106,8 @@ assert_json error.task_id string Missing \
     error.message string "Could not mark Missing ready"
 expect_json_error usage "$BIN" ready DE-01 --bogus --json
 expect_json_error usage "$BIN" ready DE-01 --json --json
-expect_fail "$BIN" ready --json --json
-assert_contains "Usage: dispatch ready [--json]"
-assert_not_contains '"schema_version"'
+expect_json_error usage "$BIN" ready --json --json
+assert_json command string ready error.task_id null -
 
 # start: single-target result and the state-specific error codes.
 expect_json_ok "$BIN" start DE-01 --actor json-agent --json
@@ -1365,10 +1407,359 @@ assert_json \
     result.skipped array_length 0
 expect_json_error usage "$BIN" workspace prune --bogus --json
 
-# Out-of-scope subcommands keep rejecting --json as before.
-expect_fail "$BIN" task priority DE-01 5 --json
-assert_contains "Unknown task priority option: --json"
-assert_not_contains '"schema_version"'
+# Remaining mutating commands and non-fatal warnings in JSON mode (issue #12).
+# task priority: update, no-op, and coded errors.
+expect_json_ok "$BIN" task priority DE-01 5 --actor json-agent --json
+assert_json \
+    schema_version integer 1 \
+    command string "task priority" \
+    query.task_id string DE-01 \
+    tasks array_length 1 \
+    tasks.0.id string DE-01 \
+    tasks.0.priority integer 5 \
+    warnings array_length 0 \
+    result.action string task_priority \
+    result.changed boolean true \
+    result.task string DE-01 \
+    result.previous_priority integer 0 \
+    result.priority integer 5
+expect_json_ok "$BIN" task priority DE-01 5 --json
+assert_json \
+    result.action string task_priority \
+    result.changed boolean false \
+    result.previous_priority integer 5 \
+    result.priority integer 5
+expect_json_error invalid_priority "$BIN" task priority DE-01 abc --json
+expect_json_error invalid_priority "$BIN" task priority DE-01 100 --json
+expect_json_error invalid_priority "$BIN" task priority DE-01 "" --json
+expect_json_error invalid_actor "$BIN" task priority DE-01 1 --actor "bad actor" --json
+expect_json_error task_not_found "$BIN" task priority Missing 1 --json
+assert_json error.task_id string Missing
+expect_json_error usage "$BIN" task priority DE-01 1 --bogus --json
+expect_json_error usage "$BIN" task priority DE-01 --json
+expect_json_error usage "$BIN" task priority DE-01 1 --json --json
+
+# group edit: update, no-op, and coded errors.
+expect_json_ok "$BIN" group edit DE --description "Core development" --json
+assert_json \
+    command string "group edit" \
+    query.group string DE \
+    board.groups.0.description string "Core development" \
+    tasks array_length 0 \
+    warnings array_length 0 \
+    result.action string group_edit \
+    result.changed boolean true \
+    result.group string DE \
+    result.description string "Core development"
+expect_json_ok "$BIN" group edit DE --description "Core development" --json
+assert_json \
+    result.action string group_edit \
+    result.changed boolean false
+expect_json_error group_not_found "$BIN" group edit Missing --description "Nope" --json
+expect_json_error usage "$BIN" group edit DE --json
+expect_json_error usage "$BIN" group edit DE --description "X" --json --json
+
+# agent create/archive/restore/session/command/resume in JSON mode.
+expect_json_ok "$BIN" agent create --name json-worker --runner codex \
+    --model gpt-test --print-command --json
+assert_json \
+    schema_version integer 1 \
+    command string "agent create" \
+    query.name string json-worker \
+    query.include_archived null - \
+    summary.returned integer 1 \
+    agents array_length 1 \
+    agents.0.name string json-worker \
+    agents.0.runner string codex \
+    agents.0.model string gpt-test \
+    agents.0.archived boolean false \
+    warnings array_length 0 \
+    result.action string agent_create \
+    result.changed boolean true \
+    result.agent string json-worker \
+    result.scratch_dir string .dispatch/agents/json-worker/scratch \
+    result.decisions_dir string .dispatch/agents/json-worker/decisions \
+    result.command string "*"
+expect_json_error agent_exists "$BIN" agent create --name json-worker \
+    --runner codex --json
+expect_json_error invalid_agent "$BIN" agent create --name "bad/name" \
+    --runner codex --json
+expect_json_error invalid_agent "$BIN" agent create --runner codex --json
+expect_json_error invalid_runner "$BIN" agent create --name other-worker \
+    --runner bogus --json
+expect_json_error usage "$BIN" agent create --bogus --json
+
+expect_json_ok "$BIN" agent command json-worker --json
+assert_json \
+    command string "agent command" \
+    agents array_length 1 \
+    agents.0.name string json-worker \
+    warnings array_length 0 \
+    result.action string agent_command \
+    result.changed boolean false \
+    result.agent string json-worker \
+    result.command string "*"
+expect_json_error agent_not_found "$BIN" agent command missing-agent --json
+expect_json_error usage "$BIN" agent command json-worker --bogus --json
+
+expect_json_ok "$BIN" agent session json-worker --session-id "  sess-42  " \
+    --current-task DE-01 --json
+assert_json \
+    command string "agent session" \
+    agents.0.session_id string sess-42 \
+    agents.0.current_task string DE-01 \
+    warnings array_length 0 \
+    result.action string agent_session \
+    result.changed boolean true \
+    result.agent string json-worker
+expect_json_ok "$BIN" agent session json-worker --session-id "sess-42" --json
+assert_json result.changed boolean false
+expect_json_error agent_active "$BIN" agent archive json-worker --json
+assert_json error.task_id string DE-01
+expect_json_ok "$BIN" agent session json-worker --clear-current-task \
+    --clear-session --json
+assert_json \
+    agents.0.session_id null - \
+    agents.0.current_task null - \
+    result.changed boolean true
+expect_json_ok "$BIN" agent session json-worker --clear-session --json
+assert_json result.changed boolean false
+expect_json_error task_not_found "$BIN" agent session json-worker \
+    --current-task Missing --json
+assert_json error.task_id string Missing
+expect_json_error workspace_not_found "$BIN" agent session json-worker \
+    --last-workspace Missing --json
+expect_json_error usage "$BIN" agent session json-worker \
+    --session-id a --clear-session --json
+expect_json_error usage "$BIN" agent session json-worker --json
+
+expect_json_ok "$BIN" agent archive json-worker --json
+assert_json \
+    command string "agent archive" \
+    agents.0.archived boolean true \
+    warnings array_length 0 \
+    result.action string agent_archive \
+    result.changed boolean true \
+    result.agent string json-worker \
+    result.archived boolean true
+expect_json_ok "$BIN" agent archive json-worker --json
+assert_json result.changed boolean false result.archived boolean true
+expect_json_error agent_archived "$BIN" agent command json-worker --json
+expect_json_error agent_archived "$BIN" agent session json-worker \
+    --session-id s --json
+expect_json_error agent_archived "$BIN" agent resume json-worker --json
+expect_json_ok "$BIN" agent restore json-worker --json
+assert_json \
+    command string "agent restore" \
+    agents.0.archived boolean false \
+    result.action string agent_restore \
+    result.changed boolean true \
+    result.agent string json-worker \
+    result.archived boolean false
+expect_json_ok "$BIN" agent restore json-worker --json
+assert_json result.changed boolean false result.archived boolean false
+expect_json_error agent_not_found "$BIN" agent archive missing-agent --json
+expect_json_error usage "$BIN" agent archive --json
+
+# agent resume: codex (no board change) vs claude (mints UUID on first run).
+expect_json_ok "$BIN" agent resume json-worker --json
+assert_json \
+    command string "agent resume" \
+    agents.0.name string json-worker \
+    warnings array_length 0 \
+    result.action string agent_resume \
+    result.changed boolean false \
+    result.agent string json-worker \
+    result.command string "*" \
+    result.resume_script_path null - \
+    result.session_generated boolean false
+expect_json_ok "$BIN" agent create --name json-claude --runner claude \
+    --no-run-script --json
+expect_json_ok "$BIN" agent resume json-claude --json
+assert_json \
+    command string "agent resume" \
+    agents.0.session_id string "*" \
+    result.action string agent_resume \
+    result.changed boolean true \
+    result.agent string json-claude \
+    result.resume_script_path string .dispatch/agents/json-claude/resume.sh \
+    result.session_generated boolean true
+expect_json_ok "$BIN" agent resume json-claude --json
+assert_json \
+    result.changed boolean false \
+    result.session_generated boolean false
+expect_json_error agent_not_found "$BIN" agent resume missing-agent --json
+expect_json_error usage "$BIN" agent resume json-claude --bogus --json
+
+# init, repo set, normalize, workspace repair, and non-fatal JSON warnings.
+json_extra_dir="$(make_case_dir json-init-repo-repair)"
+json_extra_moved="$TMP_ROOT/json-init-repo-repair-moved"
+mkdir -p "$json_extra_dir/repo" "$json_extra_dir/plain-dir"
+expect_ok git -C "$json_extra_dir/repo" init
+expect_ok git -C "$json_extra_dir/repo" -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit --allow-empty -m init
+(
+    cd "$json_extra_dir"
+    expect_json_error invalid_path "$BIN" init missing-repo --json
+    assert_json command string init
+    expect_json_error usage "$BIN" init repo extra --json
+    expect_json_error usage "$BIN" init --json --json
+
+    expect_json_ok "$BIN" init repo --json
+    assert_json \
+        schema_version integer 1 \
+        command string init \
+        board.repo_path string "$json_extra_dir/repo" \
+        tasks array_length 0 \
+        warnings array_length 0 \
+        result.action string init \
+        result.changed boolean true \
+        result.created boolean true \
+        result.repo_path string "$json_extra_dir/repo"
+    expect_json_ok "$BIN" init repo --json
+    assert_json \
+        command string init \
+        result.action string init \
+        result.changed boolean false \
+        result.created boolean false
+
+    # repo set: non-git path puts repo_not_git in warnings with empty stderr.
+    expect_json_ok "$BIN" repo set plain-dir --json
+    assert_json \
+        command string "repo set" \
+        board.repo_path string "$json_extra_dir/plain-dir" \
+        warnings array_length 1 \
+        warnings.0.code string repo_not_git \
+        warnings.0.task_id null - \
+        warnings.0.agent null - \
+        result.action string repo_set \
+        result.changed boolean true \
+        result.previous_repo_path string "$json_extra_dir/repo" \
+        result.repo_path string "$json_extra_dir/plain-dir" \
+        result.is_git_repo boolean false
+    expect_json_ok "$BIN" repo set plain-dir --json
+    assert_json result.changed boolean false warnings array_length 1
+    expect_json_ok "$BIN" repo set repo --json
+    assert_json \
+        warnings array_length 0 \
+        result.changed boolean true \
+        result.is_git_repo boolean true
+    expect_json_error invalid_path "$BIN" repo set missing-repo --json
+    assert_json command string "repo set"
+    expect_json_error usage "$BIN" repo set --json
+    expect_json_error usage "$BIN" repo set repo --json --json
+
+    # workspace repair: relocate workflow dir + worktree, repair, then no-op.
+    expect_ok "$BIN" group add Development --prefix DE
+    expect_ok "$BIN" task add DE Relocate
+    expect_ok "$BIN" task add DE Adopted
+    expect_ok "$BIN" ready DE-01 DE-02 --actor user
+    expect_ok "$BIN" workspace create DE-01 --actor codex
+    expect_ok git -C repo worktree add -b ext/adopted ../ext-adopted HEAD
+    expect_ok "$BIN" workspace adopt DE-02 --actor codex --path ext-adopted \
+        --external orca:repair-test
+)
+mv "$json_extra_dir" "$json_extra_moved"
+(
+    cd "$json_extra_moved"
+    expect_json_ok "$BIN" repo set repo --json
+    expect_json_ok "$BIN" workspace repair DE-01 --json
+    assert_json \
+        schema_version integer 1 \
+        command string "workspace repair" \
+        query.workspace string DE-01 \
+        workspaces array_length 1 \
+        workspaces.0.id string DE-01 \
+        workspaces.0.path string "$json_extra_moved/repo-agent-codex-DE-01" \
+        warnings array_length 0 \
+        result.action string workspace_repair \
+        result.changed boolean true \
+        result.task string DE-01 \
+        result.workspace string DE-01 \
+        result.old_path string "$json_extra_dir/repo-agent-codex-DE-01" \
+        result.path string "$json_extra_moved/repo-agent-codex-DE-01" \
+        result.old_repo_path string "$json_extra_dir/repo" \
+        result.repo_path string "$json_extra_moved/repo"
+    expect_json_ok "$BIN" workspace repair DE-01 --json
+    assert_json \
+        result.action string workspace_repair \
+        result.changed boolean false \
+        warnings array_length 0
+    expect_json_error workspace_adopted "$BIN" workspace repair DE-02 --json
+    assert_json command string "workspace repair" error.task_id string DE-02
+    expect_json_error workspace_not_found "$BIN" workspace repair Missing --json
+    expect_json_error usage "$BIN" workspace repair --json
+    expect_json_error usage "$BIN" workspace repair DE-01 --json --json
+
+    # Failed dispatch.log append goes into warnings instead of stderr text
+    # across task, workspace, and agent mutations.
+    expect_ok "$BIN" agent create --name log-warn-agent --runner codex \
+        --no-run-script
+    mv dispatch.log dispatch.log.saved
+    mkdir dispatch.log
+    expect_json_ok "$BIN" task add DE "Warn on log failure" --json
+    assert_json \
+        warnings array_length 1 \
+        warnings.0.code string log_append_failed \
+        warnings.0.task_id null - \
+        warnings.0.agent null -
+    expect_json_ok "$BIN" workspace remove DE-02 --json
+    assert_json \
+        warnings array_length 1 \
+        warnings.0.code string log_append_failed
+    expect_json_ok "$BIN" agent archive log-warn-agent --json
+    assert_json \
+        warnings array_length 1 \
+        warnings.0.code string log_append_failed
+    rmdir dispatch.log
+    mv dispatch.log.saved dispatch.log
+)
+
+# init scaffold_failed warning when .dispatch cannot be created as a directory.
+scaffold_warn_dir="$(make_case_dir json-init-scaffold-warn)"
+mkdir -p "$scaffold_warn_dir/repo"
+printf 'blocking file\n' > "$scaffold_warn_dir/.dispatch"
+(
+    cd "$scaffold_warn_dir"
+    expect_json_ok "$BIN" init repo --json
+    assert_json \
+        command string init \
+        result.changed boolean true \
+        result.created boolean true \
+        warnings array_length 1 \
+        warnings.0.code string scaffold_failed \
+        warnings.0.task_id null - \
+        warnings.0.agent null -
+)
+
+# normalize --json: reports repair counts, then changed:false on clean board.
+norm_json_dir="$(make_case_dir json-normalize)"
+mkdir -p "$norm_json_dir/repo"
+cp "$ROOT/tests/fixtures/zombie-assignment-board.json" \
+    "$norm_json_dir/dispatch.json"
+(
+    cd "$norm_json_dir"
+    expect_json_ok "$BIN" normalize --json
+    assert_json \
+        schema_version integer 1 \
+        command string normalize \
+        tasks array_length 0 \
+        warnings array_length 0 \
+        result.action string normalize \
+        result.changed boolean true \
+        result.state_updates integer 0 \
+        result.assignment_repairs integer 1 \
+        result.session_updates integer 0 \
+        result.prompt_updates integer 0
+    expect_json_ok "$BIN" normalize --json
+    assert_json \
+        command string normalize \
+        result.action string normalize \
+        result.changed boolean false \
+        result.assignment_repairs integer 0
+    expect_json_error usage "$BIN" normalize extra --json
+    expect_json_error usage "$BIN" normalize --json --json
+)
 
 case_dir="$(make_case_dir task-edit)"
 cd "$case_dir"
@@ -2130,9 +2521,9 @@ assert_line "Origin: adopted"
 
 # Completion offers the new subcommand and flags.
 expect_ok "$BIN" completion zsh
-assert_contains "compadd -- create adopt list show remove prune"
-assert_contains "adopt) compadd -- --actor --path --branch --sequence --external ;;"
-assert_contains "remove) compadd -- --force --delete-worktree ;;"
+assert_contains "compadd -- create adopt list show remove repair prune"
+assert_contains "adopt) compadd -- --actor --path --branch --sequence --external --json ;;"
+assert_contains "remove) compadd -- --force --delete-worktree --json ;;"
 expect_ok "$BIN" completion fish
 assert_contains "__fish_seen_subcommand_from adopt' -l external -r"
 assert_contains "__fish_seen_subcommand_from remove' -l delete-worktree"
@@ -2449,9 +2840,9 @@ assert_contains 'dispatch completion candidates "$1"'
 assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
 assert_contains "_dispatch_compadd_candidates runners"
-assert_contains "compadd -- add edit delete"
-assert_contains "add) compadd -- --description --actor --no-review --issue --from-issue ;;"
-assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor ;;"
+assert_contains "compadd -- add edit move delete priority"
+assert_contains "add) compadd -- --description --actor --no-review --issue --from-issue --json ;;"
+assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor --json ;;"
 
 expect_fail "$BIN" completion zsh extra
 assert_contains "Usage: dispatch completion candidates"
@@ -2737,8 +3128,10 @@ assert_contains '"kind": "dep_missing_reference"'
 assert_contains '"kind": "dep_self"'
 assert_contains '"kind": "dep_duplicate"'
 assert_contains '"subject": "DE-02"'
-expect_fail "$BIN" doctor --json --json
-assert_contains "Usage: dispatch doctor [--json]"
+expect_json_error usage "$BIN" doctor --json --json
+assert_json command string doctor error.task_id null -
+expect_json_error usage "$BIN" doctor extra --json
+assert_json command string doctor error.task_id null -
 # A healthy board reports the new checks as ok.
 rm dispatch.json
 expect_ok "$BIN" init repo
@@ -3473,7 +3866,8 @@ assert_contains "group add/ready/edit/list/show"
 assert_contains "task add/edit/move/delete/priority"
 assert_contains "completion candidates/bash/zsh/fish/install"
 assert_contains "finish, review, unassign, normalize"
-assert_not_contains "--json"
+assert_contains "--json"
+assert_contains "agent create/archive/restore/session/command/resume"
 assert_not_contains "clear"
 assert_not_contains "project"
 assert_not_contains "recurrence"
@@ -3799,9 +4193,8 @@ case_dir="$(make_case_dir json-reads)"
 cd "$case_dir"
 mkdir repo
 
-expect_fail "$BIN" log --json
-assert_contains "No dispatch board in this directory"
-assert_not_contains '"schema_version"'
+expect_json_error board_missing "$BIN" log --json
+assert_json command string log error.task_id null -
 
 expect_ok "$BIN" init repo
 expect_ok git -C repo init
@@ -3898,16 +4291,14 @@ assert_json \
 expect_ok "$BIN" agent show worker
 assert_line "Name: worker"
 
-expect_fail "$BIN" agent show missing --json
-assert_contains "No agent named missing"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" agent list --json --json
-assert_contains "Usage: dispatch agent list [--all] [--json]"
-expect_fail "$BIN" agent list --archived --json
-assert_contains "Usage: dispatch agent list [--all] [--json]"
-expect_fail "$BIN" agent show --json
-assert_contains "Usage: dispatch agent show <name> [--json]"
-assert_not_contains '"schema_version"'
+expect_json_error agent_not_found "$BIN" agent show missing --json
+assert_json command string "agent show" error.task_id null -
+expect_json_error usage "$BIN" agent list --json --json
+assert_json command string "agent list" error.task_id null -
+expect_json_error usage "$BIN" agent list --archived --json
+assert_json command string "agent list" error.task_id null -
+expect_json_error usage "$BIN" agent show --json
+assert_json command string "agent show" error.task_id null -
 
 # The workspace envelope carries query and board-wide record counts.
 expect_ok "$BIN" workspace list --json
@@ -4087,13 +4478,22 @@ assert_json summary.total integer 0 records array_length 0 warnings array_length
 mv dispatch.log.saved dispatch.log
 
 for bad_args in "--limit 0" "--limit -1" "--limit abc" "--limit" \
-    "--task" "--task DE-01 --task DE-02" "--task ''" "--since 1" "extra" \
-    "--json --json"; do
+    "--task" "--task DE-01 --task DE-02" "--task ''" "--since 1" "extra"; do
     eval "set -- $bad_args"
     expect_fail "$BIN" log "$@"
     assert_contains "Usage: dispatch log [--task <id>]"
     assert_not_contains '"schema_version"'
 done
+expect_json_error usage "$BIN" log --json --json
+assert_json command string log error.task_id null -
+expect_json_error usage "$BIN" log --limit 0 --json
+assert_json command string log error.task_id null -
+mv dispatch.log dispatch.log.saved
+mkdir dispatch.log
+expect_json_error log_unreadable "$BIN" log --json
+assert_json command string log error.task_id null -
+rmdir dispatch.log
+mv dispatch.log.saved dispatch.log
 
 # Completion offers the new command and flags.
 expect_ok "$BIN" completion candidates commands
@@ -4123,6 +4523,51 @@ log_complete dispatch agent list --j
 assert_line "--json"
 log_complete dispatch workspace show DE-01 --j
 assert_line "--json"
+# Mutating commands offer --json in bash, zsh, and fish completions.
+for mut_args in \
+    "init repo" \
+    "repo set repo" \
+    "normalize" \
+    "task add DE Title" \
+    "task edit DE-01" \
+    "task move DE-01 DE" \
+    "task delete DE-01" \
+    "task priority DE-01 5" \
+    "group add QA" \
+    "group ready DE" \
+    "group edit DE" \
+    "dep add DE-01 DE-02" \
+    "dep remove DE-01 DE-02" \
+    "commit add DE-01 abc1234" \
+    "ready DE-01" \
+    "start DE-01" \
+    "finish DE-01" \
+    "review DE-01" \
+    "unassign DE-01" \
+    "agent create" \
+    "agent archive worker" \
+    "agent restore worker" \
+    "agent session worker" \
+    "agent command worker" \
+    "agent resume worker" \
+    "workspace create DE-01" \
+    "workspace adopt DE-01" \
+    "workspace remove DE-01" \
+    "workspace repair DE-01" \
+    "workspace prune"; do
+    # shellcheck disable=SC2086
+    log_complete dispatch $mut_args --j
+    assert_line "--json"
+done
+expect_ok "$BIN" completion zsh
+assert_contains "move|priority) compadd -- --actor --json ;;"
+assert_contains "repair) compadd -- --json ;;"
+assert_contains "start|finish|review|unassign)"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from add edit move delete priority' -l json"
+assert_contains "__fish_seen_subcommand_from create adopt remove repair prune' -l json"
+assert_contains "__fish_seen_subcommand_from create archive restore session command resume' -l json"
+assert_contains "__fish_seen_subcommand_from init normalize list show ready blocked reviews proposed status doctor start finish review unassign' -l json"
 
 case_dir="$(make_case_dir issue-tui)"
 cd "$case_dir"
@@ -4458,21 +4903,26 @@ assert_json \
 # Usage and format errors for workspace list --external.
 expect_fail "$BIN" workspace list --external
 assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
-expect_fail "$BIN" workspace list --external --json
-assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_json_error usage "$BIN" workspace list --external --json
+assert_json command string "workspace list" error.task_id null -
 expect_fail "$BIN" workspace list --external orca:ws-1 --external orca:ws-2
 assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_json_error usage "$BIN" workspace list --external orca:ws-1 --external orca:ws-2 --json
+assert_json command string "workspace list" error.task_id null -
 expect_fail "$BIN" workspace list --external orca:ws-1 extra
 assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_json_error usage "$BIN" workspace list --external orca:ws-1 extra --json
+assert_json command string "workspace list" error.task_id null -
 expect_fail "$BIN" workspace list --external orca
 assert_contains "External ID must be <tool>:<id>"
 expect_fail "$BIN" workspace list --external ""
 assert_contains "External ID must be <tool>:<id>"
 expect_fail "$BIN" workspace list --external "orca:has space"
 assert_contains "External ID must be <tool>:<id>"
-expect_fail "$BIN" workspace list --external Bad:ws-1 --json
-assert_contains "External ID must be <tool>:<id>"
-assert_not_contains '"schema_version"'
+expect_json_error invalid_external_id "$BIN" workspace list --external Bad:ws-1 --json
+assert_json command string "workspace list" error.task_id null -
+expect_json_error invalid_external_id "$BIN" workspace list --external "orca:has space" --json
+assert_json command string "workspace list" error.task_id null -
 
 # Completion offers --external on workspace list across zsh, fish, and bash.
 expect_ok "$BIN" completion zsh

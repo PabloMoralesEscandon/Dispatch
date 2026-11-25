@@ -6,29 +6,31 @@ This document defines version 1 of the machine-readable output produced when
 - the read commands `list`, `show`, `ready`, `blocked`, `reviews`,
   `proposed`, `status`, `doctor`, `agent list`, `agent show`,
   `workspace list`, `workspace show`, and `log`;
-- the mutating commands `task add|edit|move|delete`, `group add|ready`,
+- the mutating commands `init`, `repo set`, `normalize`,
+  `task add|edit|move|delete|priority`, `group add|ready|edit`,
   `dep add|remove`, `ready <id>`, `start`, `finish`, `review`, `unassign`,
-  `commit add`, and `workspace create|adopt|remove|prune`, described in
+  `commit add`, `agent create|archive|restore|session|command|resume`, and
+  `workspace create|adopt|remove|repair|prune`, described in
   [Mutation results](#mutation-results).
 
 ## General rules
 
-- A successful command writes one JSON object followed by a newline to stdout.
+- A successful command writes one JSON object followed by a newline to stdout
+  and nothing to stderr.
 - JSON mode never emits headings, color escapes, hints, or other human text.
-- Read command errors retain the existing non-zero exit status and text on
-  stderr. They do not produce a partial JSON document on stdout.
-- Mutating command errors retain the existing non-zero exit status, write
-  nothing to stdout, and write one JSON error document to stderr (see
-  [Error documents](#error-documents)).
-- For read commands, `--json` may appear anywhere after the command name, or
-  after the subcommand for `agent list|show` and `workspace list|show`. For
-  mutating commands it may appear anywhere after the subcommand, or after the
-  command name for `ready`, `start`, `finish`, `review`, and `unassign`
-  (`task add DE Title --json`, `start --json DE-01 --actor a`). `ready` without a
-  task ID is the read-only queue form; `ready <id>... --json` is the mutating
-  form.
-- `--json` may be given once. A repeated `--json` on a mutating command is a
-  `usage` error.
+- Failing commands (both read and mutating) retain their existing non-zero exit
+  status, write nothing to stdout, and write one JSON error document to stderr
+  (see [Error documents](#error-documents)). The one exception is
+  `doctor --json` when the board itself cannot be loaded, which emits its
+  documented `board_load_failed` check on stdout with empty stderr.
+- Non-fatal warnings that occur after a successful mutation (such as a failed
+  `dispatch.log` append) are placed in the document's `warnings` array rather
+  than printed as text on stderr.
+- `--json` may appear anywhere after the command name, or after the subcommand
+  for commands with subcommands (`agent`, `workspace`, `task`, `group`, `dep`,
+  `commit`, `repo set`). `ready` without a task ID is the read-only queue form;
+  `ready <id>... --json` is the mutating form.
+- `--json` may be given once. A repeated `--json` is a `usage` error.
 - Without `--json`, command arguments and human-readable output are unchanged.
 - New optional fields may be added in a compatible release. Removing a field,
   changing its type, or changing its meaning requires a schema version change.
@@ -210,10 +212,11 @@ preserve board or stored order; `blocks` follows board task order.
 All task selections retain board order. An empty successful selection returns
 `"tasks": []`; informational empty-queue hints from human output are omitted.
 
-## Status warnings
+## Status and operational warnings
 
-`warnings` is empty for every command except `status`. Status emits structured
-versions of its existing diagnostics in board order:
+Among read commands, `warnings` is empty for every task command except `status`
+(and `log` reports skipped-line warnings in its own `warnings` array). `status`
+emits structured versions of its existing diagnostics in board order:
 
 ```json
 {
@@ -235,6 +238,17 @@ The version 1 warning codes are:
 
 Each warning always contains `code`, `message`, `task_id`, and `agent`. Fields
 that do not apply are `null`.
+
+Mutating commands also populate `warnings` with the same object shape whenever
+a non-fatal warning occurs after a successful mutation, instead of printing
+text to stderr:
+
+- `log_append_failed` when appending to `dispatch.log` fails after the board
+  has been saved.
+- `scaffold_failed` when `init` cannot create `.dispatch` directories or
+  workflow instruction files (`AGENTS.md`, `CLAUDE.md`).
+- `repo_not_git` when `repo set` points at a directory that is not a Git
+  repository.
 
 ## Workspace responses
 
@@ -510,7 +524,9 @@ a machine-stable `kind`, an optional `subject` (the task ID, agent name,
 workspace ID, or shell the warning refers to), and a `fix` hint. `ok` checks
 carry `null` for `kind`, `subject`, and `fix`. If the board itself cannot be
 loaded, `board` is `null` and the single `board_load_failed` warning is
-emitted with exit status 1.
+emitted on stdout with exit status 1 and empty stderr. Usage errors (such as
+extra arguments or a repeated `--json`) emit a JSON error document on stderr
+like other read commands.
 
 The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
 `agents_md_missing`, `dispatch_not_on_path`, `workflow_entry_missing`,
@@ -536,28 +552,37 @@ change has been saved. Human confirmation lines such as `Started DE-01` are
 not printed. Workflow state, task history, and `dispatch.log` records are
 identical to the text form.
 
-Task commands (`task add|edit|move|delete`, `group add|ready`,
+Task and board commands (`init`, `repo set`, `normalize`,
+`task add|edit|move|delete|priority`, `group add|ready|edit`,
 `dep add|remove`, `ready <id>`, `start`, `finish`, `review`, `unassign`, and
 `commit add`) use the [task envelope](#response-envelope), with:
 
 - `command` set to the full command name, such as `"task add"` or `"start"`;
 - `tasks` holding the target tasks that still exist after the change, read
-  from the saved board, in target order (`task delete` returns `[]`);
+  from the saved board, in target order (`task delete`, `group add|edit`,
+  `init`, `repo set`, and `normalize` return `[]`);
 - `query.task_id` set to the target ID when there is exactly one target,
-  otherwise `null`; `query.group` set to the group ID for `group add` and
-  `group ready`, otherwise `null`; `query.include_done` `null`; and
-  `query.states` `[]`;
+  otherwise `null`; `query.group` set to the group ID for `group add`,
+  `group ready`, and `group edit`, otherwise `null`; `query.include_done`
+  `null`; and `query.states` `[]`;
 - `summary` describing the board after the change; and
-- `warnings` always `[]`.
+- `warnings` holding any non-fatal warnings that occurred during the command,
+  otherwise `[]`.
 
-Workspace commands (`workspace create|adopt|remove|prune`) use the
+Workspace commands (`workspace create|adopt|remove|repair|prune`) use the
 [workspace envelope](#workspace-responses), whose `workspaces` array holds the
-records the command acted on. A record the command removed is reported as it
-was just before removal, with `state` set to `"removed"`. `query.workspace`
-is that record's ID when exactly one record is returned, otherwise `null`,
-and `summary` describes the board after the change.
+records the command acted on, plus `warnings` and `result`. A record the
+command removed is reported as it was just before removal, with `state` set to
+`"removed"`. `query.workspace` is that record's ID when exactly one record is
+returned, otherwise `null`, and `summary` describes the board after the change.
 
-Both envelopes then carry a `result` object:
+Agent commands (`agent create|archive|restore|session|command|resume`) use the
+[agent envelope](#agent-responses), with `query.name` set to the agent name,
+`query.include_archived` `null`, `agents` holding the agent record after the
+command as a one-element array, `summary` describing the board after the
+change, plus `warnings` and `result`.
+
+All three envelopes then carry a `result` object:
 
 ```json
 "result": {
@@ -597,12 +622,17 @@ do not know.
 
 | Command | `action` | Targets | Extra fields |
 | --- | --- | --- | --- |
+| `init` | `init` | None | `created` (boolean), `repo_path` (string) |
+| `repo set` | `repo_set` | None | `previous_repo_path` (string), `repo_path` (string), `is_git_repo` (boolean) |
+| `normalize` | `normalize` | None | `state_updates`, `assignment_repairs`, `session_updates`, `prompt_updates` (integers) |
 | `task add` | `task_add` | The new task | — |
 | `task edit` | `task_edit` | The edited task | — |
 | `task move` | `task_move` | The moved task | `from_group`, `to_group` (group IDs) |
 | `task delete` | `task_delete` | The deleted task | `force` (boolean) |
+| `task priority` | `task_priority` | The updated task | `previous_priority`, `priority` (integers) |
 | `group add` | `group_add` | None | `group` (new group ID) |
 | `group ready` | `group_ready` | Tasks readied, then tasks whose review gate was cleared | `group` (group ID), `no_review` (boolean) |
+| `group edit` | `group_edit` | None | `group` (group ID), `description` (string) |
 | `dep add` | `dependency_add` | The dependent | `dependency`, `dependent` (task IDs) |
 | `dep remove` | `dependency_remove` | The dependent | `dependency`, `dependent` (task IDs) |
 | `ready <id>...` | `ready` | Each named task | — |
@@ -611,16 +641,30 @@ do not know.
 | `review` | `review` | The accepted task | — |
 | `unassign` | `unassign` | The unassigned task | `previous_assignee` (string or null) |
 | `commit add` | `commit_add` | The task | `commit` (the recorded ref) |
+| `agent create` | `agent_create` | None | `agent` (name), `scratch_dir`, `decisions_dir`, `command` (strings) |
+| `agent archive` | `agent_archive` | None | `agent` (name), `archived` (boolean, `true`) |
+| `agent restore` | `agent_restore` | None | `agent` (name), `archived` (boolean, `false`) |
+| `agent session` | `agent_session` | None | `agent` (name) |
+| `agent command` | `agent_command` | None | `agent` (name), `command` (string) |
+| `agent resume` | `agent_resume` | None | `agent` (name), `command` (string), `resume_script_path` (string or null), `session_generated` (boolean) |
 | `workspace create` | `workspace_create` | The workspace's task | `workspace` (workspace ID) |
 | `workspace adopt` | `workspace_adopt` | The workspace's task | `workspace` (workspace ID), `external_id` (string or null) |
 | `workspace remove` | `workspace_remove` | The workspace's task | `workspace` (workspace ID), `force` (boolean), `worktree_deleted` (boolean: `false` when only the record of an adopted workspace was cleared) |
+| `workspace repair` | `workspace_repair` | The workspace's task | `workspace` (workspace ID), `old_path`, `path`, `old_repo_path`, `repo_path` (strings) |
 | `workspace prune` | `workspace_prune` | None | `dry_run` (boolean), `skipped` (array) |
 
-`changed` is `false` for successful no-ops: `commit add` of a ref the task
-already records, `dep add` of an existing dependency, `task edit` that only
-re-links the current issue or clears an absent one, `group ready` that
-readies nothing and clears no review gate, and `workspace prune` that removes
-nothing (always, with `--dry-run`). Every other success reports `true`.
+`changed` is `false` for successful no-ops: `init` when `dispatch.json` already
+exists, `repo set` to the current path, `normalize` when no task state,
+assignment, session ID, or agent prompt needed repair, `task priority` to the
+task's current priority, `group edit` with the existing description,
+`commit add` of a ref the task already records, `dep add` of an existing
+dependency, `task edit` that only re-links the current issue or clears an
+absent one, `group ready` that readies nothing and clears no review gate,
+`agent archive` / `restore` / `session` that leave the record unchanged,
+`agent command`, `agent resume` when no Claude session UUID was generated,
+`workspace repair` when the workspace is already anchored, and `workspace prune`
+that removes nothing (always, with `--dry-run`). Every other success reports
+`true`.
 
 `workspace prune` lists the pruned records in `workspaces` (with `--dry-run`,
 the records that would be pruned, in their current state) and every
@@ -641,9 +685,11 @@ records are never skipped:
 
 ## Error documents
 
-When a mutating command passed `--json` fails, it keeps its existing non-zero
-exit status, writes nothing to stdout, and writes one JSON document to stderr
-in place of the human error text:
+When any command passed `--json` (read or mutating) fails, it keeps its
+existing non-zero exit status, writes nothing to stdout, and writes one JSON
+document to stderr in place of the human error text (the only exception is
+`doctor --json` failing to load the board, which emits `board_load_failed` on
+stdout and leaves stderr empty):
 
 ```json
 {
@@ -664,9 +710,9 @@ lines (for example an error followed by a usage line), they are joined with
 `task_id` names the task the error is about, or is `null`. When a command
 reports several errors, the first one sets `code` and `task_id`.
 
-A non-fatal warning that is not the cause of the failure, such as a failure
-to append to `dispatch.log` after a successful save, may still be printed to
-stderr as text.
+Non-fatal warnings that are not the cause of a failure, such as a failed
+`dispatch.log` append after a successful save, are not printed to stderr in
+JSON mode; they are returned in the document's `warnings` array.
 
 The version 1 error codes are:
 
@@ -677,10 +723,13 @@ The version 1 error codes are:
 | `board_locked` | The board lock could not be acquired |
 | `board_unreadable` | The board could not be read or failed validation |
 | `board_save_failed` | The changed board could not be saved |
+| `log_unreadable` | `dispatch.log` could not be opened or read |
+| `io_failed` | A local support directory or file (agent prompt, run script, resume script) could not be created or written |
 | `output_failed` | The JSON result could not be written to stdout |
 | `internal_error` | An unexpected failure, such as running out of memory |
 | `invalid_actor` | The actor name is not valid |
 | `invalid_title` | The task title is empty or contains a Dispatch task ID |
+| `invalid_priority` | The `task priority` value is not an integer between -99 and 99 |
 | `invalid_issue` | The `--issue` or `--from-issue` value is not a valid GitHub issue reference, or refers to a pull request |
 | `issue_unresolvable` | A bare issue number cannot be resolved: no GitHub `origin` remote |
 | `issue_not_found` | The requested GitHub issue or repository does not exist |
@@ -690,24 +739,30 @@ The version 1 error codes are:
 | `invalid_commit` | The commit ref is not a 4–64 character hex SHA |
 | `invalid_group` | The group name is empty or too long |
 | `invalid_prefix` | The group prefix is not valid |
-| `invalid_path` | The workspace `--dir` cannot be resolved, or the `adopt --path` is not an existing directory |
+| `invalid_agent` | The agent name is empty, too long, or contains invalid characters |
+| `invalid_runner` | The agent runner is not one of the supported runners |
+| `invalid_path` | The path argument does not exist or cannot be resolved |
 | `invalid_external_id` | The `--external` value is not `<tool>:<id>` |
 | `task_not_found` | A named task does not exist |
 | `group_not_found` | A named group does not exist |
+| `agent_not_found` | A named agent does not exist |
 | `workspace_not_found` | No workspace matches the task or workspace ID |
 | `group_exists` | A group with that name or prefix already exists |
+| `agent_exists` | An agent with that name already exists |
 | `invalid_state` | The task's state does not allow the transition |
 | `already_assigned` | The task is assigned to another actor |
 | `not_assigned` | `unassign` on a task with no assignee |
-| `agent_archived` | The actor is an archived agent |
+| `agent_archived` | The actor or agent is archived |
+| `agent_active` | `agent archive` on an agent with an active task or active workspace |
 | `workspace_owner_mismatch` | The task's workspace belongs to another actor |
 | `already_in_group` | `task move` to the task's current group |
 | `has_dependents` | `task delete` without `--force` on a task other tasks depend on |
 | `dependency_cycle` | The dependency would depend a task on itself or create a cycle |
 | `dependency_not_found` | `dep remove` of a dependency that is not recorded |
 | `workspace_exists` | The task already has an active workspace |
+| `workspace_adopted` | `workspace repair` on an adopted workspace |
 | `invalid_sequence` | The tasks do not form a valid `--sequence` chain |
-| `workspace_conflict` | The workspace path, branch, or external ID is already in use |
+| `workspace_conflict` | The workspace path, branch, or external ID is already in use, or changed concurrently |
 | `repo_not_git` | The board repository is not a git repository |
 | `workspace_dirty` | `workspace remove` without `--force` on a worktree with changes |
 | `not_a_worktree` | The workspace path is not a registered git worktree (for `adopt`, of the board repository) |
@@ -716,8 +771,3 @@ The version 1 error codes are:
 
 New codes may be added in a compatible release; treat an unknown code as a
 generic failure.
-
-Read commands report errors as text even with `--json`. Mutating commands
-outside the list above, such as `task priority`, `group edit`,
-`workspace repair`, `repo`, `agent`, `normalize`, and `init`, do not accept
-`--json` and report errors as text.

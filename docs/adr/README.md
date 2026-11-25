@@ -14,3 +14,4 @@ the old one.
 | [0005](0005-portable-tui-goldens.md) | Portable TUI golden frames | Accepted |
 | [0006](0006-adopted-workspace-followups.md) | Adopted workspace TUI markers, doctor checks, and external lookup | Accepted |
 | [0007](0007-task-from-github-issue.md) | Create a task from a GitHub issue | Accepted |
+| [0009](0009-json-errors-warnings-and-remaining-mutations.md) | JSON errors on reads, non-fatal warnings, and remaining mutations | Accepted |
