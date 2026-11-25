@@ -5414,6 +5414,53 @@ assert_line "--close-issue"
 
 cd "$ROOT"
 
+# Agent skills (ADR 0010): front matter and drift against dispatch --help.
+expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh"
+assert_contains "PASS: agent skills"
+
+# The skills check rejects broken front matter and command drift.
+skills_case="$TMP_ROOT/skills-check"
+broken_skill() { # start from a fresh copy of skills/ to break
+    rm -rf "$skills_case"
+    cp -R "$ROOT/skills" "$skills_case"
+}
+rewrite_file() { # file awk-program
+    awk "$2" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
+broken_skill
+rm "$skills_case/dispatch-work/SKILL.md"
+expect_fail env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh" "$skills_case"
+assert_contains "dispatch-work: SKILL.md is missing"
+
+broken_skill
+rewrite_file "$skills_case/dispatch-plan/SKILL.md" '/^name:/ { print "name: dispatch-planner"; next } { print }'
+expect_fail env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh" "$skills_case"
+assert_contains "front matter name 'dispatch-planner' differs from folder name 'dispatch-plan'"
+
+broken_skill
+rewrite_file "$skills_case/dispatch-board/SKILL.md" '!/^description:/'
+rewrite_file "$skills_case/dispatch-work/SKILL.md" '!/^name:/'
+expect_fail env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh" "$skills_case"
+assert_contains "dispatch-board: front matter has no description"
+assert_contains "dispatch-work: front matter has no name"
+
+broken_skill
+printf '\nRun `dispatch frobnicate`, `dispatch task frob DE-01` and `dispatch agent`.\n' \
+    >> "$skills_case/dispatch-board/SKILL.md"
+expect_fail env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh" "$skills_case"
+assert_contains "'dispatch frobnicate' is not a command in dispatch --help"
+assert_contains "'dispatch task frob' is not a subcommand in dispatch --help"
+assert_contains "'dispatch agent' needs a subcommand"
+
+broken_skill
+for skill_file in $(find "$skills_case" -name '*.md'); do
+    rewrite_file "$skill_file" '{ gsub(/dispatch tui/, "dispatch"); print }'
+done
+expect_fail env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh" "$skills_case"
+assert_contains "'dispatch tui' is listed in dispatch --help but no skill mentions it"
+rm -rf "$skills_case"
+
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
 assert_contains "PASS: TUI golden frames"
 

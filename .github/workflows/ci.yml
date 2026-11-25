@@ -21,6 +21,9 @@ jobs:
           cc nob.c -o nob
           ./nob
 
+      - name: Check agent skills
+        run: bash tests/check_skills.sh
+
       - name: Run tests
         run: bash tests/run_cli_tests.sh
 
