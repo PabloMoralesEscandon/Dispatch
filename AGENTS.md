@@ -50,6 +50,8 @@ if working from another directory.
 
 ```bash
 dispatch init repo
+dispatch repo
+dispatch repo set <path>
 dispatch agent create --name <name> --runner codex|claude|opencode [--model <name>] [--no-run-script] [--print-command]
 dispatch agent list [--all]
 dispatch agent show <name>
@@ -58,7 +60,7 @@ dispatch agent restore <name>
 dispatch agent command <name> [--print-command]
 dispatch workspace create <TASK-ID> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
 dispatch workspace adopt <TASK-ID> --actor <agent-id> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]
-dispatch workspace list
+dispatch workspace list [--external <tool>:<id>]
 dispatch workspace show <TASK-ID-or-workspace>
 dispatch workspace remove <TASK-ID-or-workspace> [--force] [--delete-worktree]
 dispatch workspace repair <TASK-ID-or-workspace>
@@ -83,6 +85,7 @@ dispatch group show <prefix>
 dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review] [--issue <ref>]
 dispatch task add <group> --from-issue <ref> [--actor <agent-id>] [--no-review]
 dispatch task edit <TASK-ID> --issue <ref>|--clear-issue [--actor <agent-id>]
+dispatch task priority <TASK-ID> <value> [--actor <agent-id>]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
 dispatch commit add <TASK-ID> <sha> [--actor <agent-id>]

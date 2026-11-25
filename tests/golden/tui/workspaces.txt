@@ -3,8 +3,8 @@ Frame: workspaces 100x30
 
 1 active workspaces
 
-  Task     State    WS        Actor                    Dirty Git     Branch / Path
- >DE-01    ready    active    golden                   clean git     agent/golden/DE-01  <workspace>
+  Task     State    WS        Actor                    Dirty Git     Origin  Branch / Path
+ >DE-01    ready    active    golden                   clean git     created agent/golden/DE-01  <tm
 
 
 

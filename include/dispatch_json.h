@@ -31,6 +31,14 @@ int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
                                   const char *command,
                                   const DispatchWorkspace *only);
 
+/* Like dispatch_json_emit_workspaces, optionally filtering live records by
+ * exact external_id and recording it in query.external_id. */
+int dispatch_json_emit_workspaces_filtered(FILE *stream,
+                                           const DispatchBoard *board,
+                                           const char *command,
+                                           const DispatchWorkspace *only,
+                                           const char *external_id);
+
 /* Writes the agent envelope. When only is non-NULL, emits just that agent
  * (archived or not); otherwise every agent, skipping archived ones unless
  * include_archived is set. */

@@ -128,7 +128,9 @@ int cmd_doctor(int argc, char **argv) {
     }
     doctor_ok("board loaded");
 
-    if (board.repo_path && dispatch_path_is_git_repository(board.repo_path)) {
+    int repo_is_git =
+        board.repo_path && dispatch_path_is_git_repository(board.repo_path);
+    if (repo_is_git) {
         doctor_ok("configured repository is a git repository");
     } else {
         doctor_warn(&warnings, "repo_not_git", NULL,
@@ -208,12 +210,53 @@ int cmd_doctor(int argc, char **argv) {
         DispatchWorkspace *workspace = &board.workspaces.items[i];
         if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
             continue;
-        char message[512];
+        char message[1024];
         snprintf(message, sizeof(message), "workspace %s path exists",
                  workspace->id);
-        if (path_exists(workspace->path))
+        if (path_exists(workspace->path)) {
             doctor_ok(message);
-        else if (workspace->adopted) {
+            if (workspace->adopted && repo_is_git && current_repo_path) {
+                int is_worktree = 0;
+                char *worktree_branch = NULL;
+                if (workspace_git_worktree_inspect(current_repo_path,
+                                                   workspace->path,
+                                                   &is_worktree,
+                                                   &worktree_branch)) {
+                    if (!is_worktree) {
+                        char fix[256];
+                        snprintf(message, sizeof(message),
+                                 "adopted workspace %s path is not a git "
+                                 "worktree of %s: %s",
+                                 workspace->id, current_repo_path,
+                                 workspace->path);
+                        snprintf(fix, sizeof(fix),
+                                 "clear the record with dispatch workspace "
+                                 "remove %s and adopt a valid worktree if "
+                                 "needed",
+                                 workspace->id);
+                        doctor_warn(&warnings, "workspace_not_a_worktree",
+                                    workspace->id, message, fix);
+                    } else if (worktree_branch &&
+                               strcmp(worktree_branch, workspace->branch) !=
+                                   0) {
+                        char fix[512];
+                        snprintf(message, sizeof(message),
+                                 "adopted workspace %s is on branch %s, "
+                                 "expected %s",
+                                 workspace->id, worktree_branch,
+                                 workspace->branch);
+                        snprintf(fix, sizeof(fix),
+                                 "check out %s in the worktree, or remove the "
+                                 "record with dispatch workspace remove %s "
+                                 "and adopt it again",
+                                 workspace->branch, workspace->id);
+                        doctor_warn(&warnings, "workspace_branch_mismatch",
+                                    workspace->id, message, fix);
+                    }
+                    free(worktree_branch);
+                }
+            }
+        } else if (workspace->adopted) {
             /* An adopted worktree lives wherever its tool put it, so a
              * missing path is never treated as a Dispatch relocation. */
             snprintf(message, sizeof(message),

@@ -1,4 +1,4 @@
-# 0006: Create a task from a GitHub issue
+# 0007: Create a task from a GitHub issue
 
 - **Status:** Accepted
 - **Date:** 2026-11-25

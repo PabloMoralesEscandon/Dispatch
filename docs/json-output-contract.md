@@ -114,6 +114,7 @@ Every entry in `tasks` has the same shape:
   "state": "blocked",
   "stored_state": "blocked",
   "requires_review": true,
+  "priority": 0,
   "assigned_to": null,
   "started_by": null,
   "completed_by": null,
@@ -146,6 +147,9 @@ Every entry in `tasks` has the same shape:
 remains `proposed`; otherwise this is the effective state after dependencies
 are evaluated. `stored_state` is the persisted lifecycle state and can differ
 from `state` when derived state has not yet been normalized and persisted.
+`priority` is an integer from `-99` to `99` (default `0`, set with
+`task priority`); higher values surface first in human `ready` listings, while
+JSON `tasks` arrays always retain board order.
 
 `depends_on` contains all direct dependency IDs. `blocked_by` contains only
 dependencies that are not effectively done. `blocks` contains IDs of all tasks
@@ -234,31 +238,35 @@ that do not apply are `null`.
 
 ## Workspace responses
 
-`workspace list --json` and `workspace show <id> --json` use a workspace
-envelope instead of the task envelope:
+`workspace list [--external <tool>:<id>] --json` and `workspace show <id> --json`
+use a workspace envelope instead of the task envelope:
 
 ```json
 {
   "schema_version": 1,
   "command": "workspace list",
   "board": { "name": "Dispatch", "repo_path": "repo" },
-  "query": { "workspace": null },
+  "query": { "workspace": null, "external_id": null },
   "summary": { "total": 2, "returned": 1, "active": 1, "removed": 1 },
   "workspaces": [ ... ]
 }
 ```
 
-`workspace list` returns every non-removed record in board order;
-`workspace show` returns the selected record as a one-element array. An empty
-successful listing returns `"workspaces": []`.
+`workspace list` returns every non-removed record in board order, or only the
+non-removed record whose `external_id` matches `--external <tool>:<id>` exactly
+when that option is given; `workspace show` returns the selected record as a
+one-element array. An empty successful listing — including an `--external`
+lookup that matches no active workspace — returns `"workspaces": []`.
 
 `query.workspace` is the ID of the record `workspace show` selected (the
 argument may name its task instead), and `null` for `workspace list`.
+`query.external_id` is the `--external` value for a filtered `workspace list`,
+and `null` otherwise.
 `summary.returned` is the length of `workspaces`; `total`, `active`, and
 `removed` count every stored workspace record, where a record is active
 unless its state is `removed`, as in the task envelope's
-`summary.workspaces`. `query` and the `summary` counts other than `returned`
-were added in a compatible release.
+`summary.workspaces`. `query`, `query.external_id`, and the `summary` counts
+other than `returned` were added in compatible releases.
 
 Each workspace record contains:
 
@@ -509,11 +517,17 @@ The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
 `workflow_entry_unexpected_type`, `completion_home_unset`,
 `completion_missing`, `agent_prompt_missing`,
 `agent_run_script_not_executable`, `missing_current_task`,
-`workspace_path_missing`, `workspace_path_moved`, `orphaned_workspace`, `missing_commits`,
+`workspace_path_missing`, `workspace_path_moved`, `workspace_not_a_worktree`,
+`workspace_branch_mismatch`, `orphaned_workspace`, `missing_commits`,
 `dep_self`, `dep_missing_reference`, `dep_duplicate`,
 `assignment_state_mismatch`, and `start_provenance_mismatch`. Kinds shared
 with status warnings (`missing_commits`, `missing_current_task`,
 `assignment_state_mismatch`) describe the same conditions.
+`workspace_not_a_worktree` fires when an adopted workspace path exists on disk
+but is no longer a live linked git worktree of the board repository;
+`workspace_branch_mismatch` fires when an adopted worktree has a different
+branch checked out than the recorded branch (detached HEADs are not flagged,
+matching `workspace adopt`'s acceptance of detached worktrees with `--branch`).
 
 ## Mutation results
 
@@ -705,5 +719,5 @@ generic failure.
 
 Read commands report errors as text even with `--json`. Mutating commands
 outside the list above, such as `task priority`, `group edit`,
-`workspace repair`, `agent`, `normalize`, and `init`, do not accept `--json`
-and report errors as text.
+`workspace repair`, `repo`, `agent`, `normalize`, and `init`, do not accept
+`--json` and report errors as text.
