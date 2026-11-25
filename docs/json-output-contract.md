@@ -91,6 +91,8 @@ none is configured.
   not meaningful to a command.
 - `states` contains presentation-state names selected by queue commands. It is
   empty when no state filter applies.
+- For `status` only, `query` also includes `check_issues` (boolean), recording
+  whether `--check-issues` was given.
 
 `summary.total` and every `summary.states` count cover the complete board,
 regardless of the command filter. `summary.returned` equals the length of
@@ -205,7 +207,7 @@ preserve board or stored order; `blocks` follows board task order.
 | `blocked` | Tasks in presentation state `blocked` | `states: ["blocked"]`, `include_done: null` |
 | `reviews` | Tasks in presentation state `review` | `states: ["review"]`, `include_done: null` |
 | `proposed` | Tasks in presentation state `proposed` | `states: ["proposed"]`, `include_done: null` |
-| `status` | Tasks in presentation state `ready` or `review` | `states: ["ready", "review"]`, `include_done: null` |
+| `status` | Tasks in presentation state `ready` or `review` | `states: ["ready", "review"]`, `include_done: null`, `check_issues: false` (`true` with `--check-issues`) |
 
 All task selections retain board order. An empty successful selection returns
 `"tasks": []`; informational empty-queue hints from human output are omitted.
@@ -233,8 +235,31 @@ The version 1 warning codes are:
   board order. Repos compare case-insensitively. `task_id` names the later
   task, and the message names the earlier one.
 
+When `--check-issues` is passed to `status`, Dispatch queries GitHub via `gh`
+for each unique linked issue on the board (deduplicated case-insensitively on
+`owner/repo`, skipped entirely when no task links an issue) and appends any
+live issue warnings after the offline warnings above. These checks are
+non-fatal: `status --check-issues` still exits `0` and emits the complete JSON
+document when `gh` is missing, unauthenticated, or fails on an issue.
+
+The `--check-issues` warning codes are:
+
+- `issue_still_open` for a `done` task whose linked GitHub issue is still
+  `OPEN`. Includes `issue` (`"owner/repo#N"`).
+- `issue_already_closed` for a non-`done` task (`proposed`, `ready`, `blocked`,
+  `doing`, `review`, or `paused`) whose linked GitHub issue is `CLOSED`.
+  Includes `issue` (`"owner/repo#N"`).
+- The shared GitHub CLI codes defined under [Error documents](#error-documents):
+  `gh_missing` and `gh_not_authenticated` are emitted once as board-level
+  warnings (`task_id: null`, `agent: null`) and stop further queries;
+  `issue_not_found` and `gh_failed` are emitted per affected task with
+  `task_id` and `issue` (`"owner/repo#N"`).
+
 Each warning always contains `code`, `message`, `task_id`, and `agent`. Fields
-that do not apply are `null`.
+that do not apply are `null`. Per-task `--check-issues` warnings
+(`issue_still_open`, `issue_already_closed`, `issue_not_found`, and
+`gh_failed`) also include `issue`, because `status`'s `tasks` array only
+returns `ready` and `review` tasks.
 
 ## Workspace responses
 
@@ -608,7 +633,7 @@ do not know.
 | `ready <id>...` | `ready` | Each named task | — |
 | `start` | `start` | The started task | — |
 | `finish` | `finish` | The finished task | `review_required` (boolean) |
-| `review` | `review` | The accepted task | — |
+| `review` | `review` | The accepted task | With `--close-issue`: `closed_issues` (array of `{"task", "issue"}`), `issue_close_errors` (array of `{"task", "issue", "code", "message"}`) |
 | `unassign` | `unassign` | The unassigned task | `previous_assignee` (string or null) |
 | `commit add` | `commit_add` | The task | `commit` (the recorded ref) |
 | `workspace create` | `workspace_create` | The workspace's task | `workspace` (workspace ID) |
@@ -638,6 +663,15 @@ records are never skipped:
 | `not_a_worktree` | A `--done` candidate whose path is not a registered git worktree |
 | `dirty` | A `--done` candidate with uncommitted changes |
 | `remove_failed` | `git worktree remove` failed for a `--done` candidate |
+
+When `review` is called with `--close-issue`, the accepted task(s) are saved
+first and then each unique linked issue is closed via `gh` with a comment.
+Because the board update has already succeeded, issue-close failures are
+non-fatal: `review --close-issue --json` exits `0` with empty stderr and lists
+each failure in `result.issue_close_errors`, reusing the shared GitHub CLI
+error codes (`gh_missing`, `gh_not_authenticated`, `issue_not_found`, or
+`gh_failed`). Without `--close-issue`, `closed_issues` and
+`issue_close_errors` are omitted.
 
 ## Error documents
 

@@ -201,7 +201,7 @@ dispatch init [repo-path]
 dispatch repo
 dispatch repo set <path>
 dispatch normalize
-dispatch status [--json]
+dispatch status [--check-issues] [--json]
 dispatch doctor [--json]
 dispatch log [--task <id>] [--actor <name>] [--agent <name>] [--workspace <id>] [--command <name>] [--action <name>] [--limit <n>] [--json]
 ```
@@ -235,7 +235,12 @@ another process updates it.
 `status` prints a compact board overview: task counts by state, ready and review
 queues, blocked count, enabled/archived agent counts, workspace counts, and
 warnings such as completed tasks without recorded commits or several tasks
-linking the same GitHub issue.
+linking the same GitHub issue. Plain `status` never touches the network; pass
+`--check-issues` to query GitHub via `gh` and also warn when a done task's
+linked issue is still open or an open task's linked issue is closed. When `gh`
+is missing, not logged in, or fails on an individual issue, `status
+--check-issues` emits a non-fatal warning and still reports the rest of the
+board.
 `doctor` checks board readability, repository layout, PATH/symlink setup,
 completion installation, generated agent prompt/run files, and workspace paths.
 `log` prints the `dispatch.log` audit trail; see [Dispatch Log](#dispatch-log).
@@ -593,10 +598,14 @@ without a GitHub `origin` are rejected without changing the board.
 Linking a different issue replaces the current one. Each change appends an
 `issue_link` or `issue_unlink` entry to task history and `dispatch.log`, with
 the ref in the history note and in the log record's `context.issue`. Several
-tasks may link the same issue; `status` warns about it so accidental
-duplicates are easy to spot. `show` prints the linked issue and its URL, `list`
-adds `issue:#123` to the task line, and JSON task objects carry an `issue`
-object (see [JSON Output](#json-output)).
+tasks may link the same issue; `status` warns about it offline so accidental
+duplicates are easy to spot. Pass `--check-issues` to `status` to opt into
+checking linked issue states on GitHub via `gh` (warning when a done task's
+issue is still open or an open task's issue is closed), and pass `--close-issue`
+to `review` to close each accepted task's linked issue with a comment; see
+[ADR 0008](docs/adr/0008-check-linked-issues.md). `show` prints the linked
+issue and its URL, `list` adds `issue:#123` to the task line, and JSON task
+objects carry an `issue` object (see [JSON Output](#json-output)).
 
 To create a task directly from an existing GitHub issue, use `--from-issue`:
 
@@ -683,7 +692,7 @@ dispatch reviews [--json]
 dispatch proposed [--json]
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
-dispatch review <id> [<id> ...] [--actor <name>]
+dispatch review <id> [<id> ...] [--actor <name>] [--close-issue]
 dispatch unassign <id> --actor <name>
 ```
 
@@ -716,7 +725,11 @@ for approval.
 
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to
-`review` or `done`. `review` accepts one or more review tasks as done.
+`review` or `done`. `review` accepts one or more review tasks as done; add
+`--close-issue` to also close each task's linked GitHub issue via `gh` with a
+comment citing the task, actor, and recorded commits (recording an `issue_close`
+entry in `dispatch.log` and warning without failing the review if `gh` cannot
+close the issue).
 
 `unassign` clears an abandoned or stuck task assignment (`assigned_to`,
 `started_by`, and `started_at`) without editing `dispatch.json`. `--actor` is
@@ -753,6 +766,7 @@ dispatch list all Development --json
 dispatch show --json DE-01
 dispatch ready --json
 dispatch status --json
+dispatch status --check-issues --json
 dispatch agent list --all --json
 dispatch workspace show DE-01 --json
 dispatch log --task DE-01 --limit 20 --json
@@ -817,10 +831,11 @@ Task objects also carry `issue`: `null`, or the linked GitHub issue as
 `{"repo": "acme/widgets", "number": 12, "url": "https://github.com/acme/widgets/issues/12"}`.
 
 Only `status` populates `warnings`. Warning objects contain a stable `code`, a
-human-readable `message`, and nullable `task_id` and `agent` fields. Version 1
-reports missing commits, assignment/state mismatches, agent sessions that
-reference missing tasks, and tasks that link the same issue as an earlier
-task.
+human-readable `message`, and nullable `task_id` and `agent` fields (plus
+`issue` on per-task issue check warnings). Version 1 reports missing commits,
+assignment/state mismatches, agent sessions that reference missing tasks, and
+tasks that link the same issue as an earlier task, plus GitHub issue drift and
+shared `gh` error warnings when `--check-issues` is passed.
 
 Agent, workspace, and log responses keep `schema_version`, `command`,
 `board` (`name` and `repo_path`), `query`, and `summary`, and put their
