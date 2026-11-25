@@ -51,9 +51,11 @@ void dispatch_cli_print_help(void) {
         printf("  %-10s %s\n", commands[i].name, commands[i].summary);
     puts("");
     puts("Implemented now:");
-    puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/adopt/list/show/remove/repair/prune,");
-    puts("  group add/ready, task add/edit/move/delete, dep add/remove, commit add/list/show, completion candidates,");
-    puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, log, tui, list, show, blocked");
+    puts("  init, repo [set], agent create/list/show/command/session/resume/archive/restore,");
+    puts("  workspace create/adopt/list/show/remove/repair/prune, group add/ready/edit/list/show,");
+    puts("  task add/edit/move/delete/priority, dep add/remove, commit add/list/show,");
+    puts("  completion candidates/bash/zsh/fish/install, ready, reviews, proposed, start,");
+    puts("  finish, review, unassign, normalize, status, doctor, log, tui, list, show, blocked");
 }
 
 int dispatch_cli_is_command(const char *command) {
