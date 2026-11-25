@@ -2,6 +2,8 @@
 
 #include <stdarg.h>
 
+#include <jansson.h>
+
 /* Per-process --json state for read and mutating commands. The dispatcher
  * begins it before running a command and ends it afterwards, so every
  * failing path produces one JSON error document on stderr. */
@@ -168,6 +170,28 @@ int cli_json_emit_agent(const DispatchBoard *board, const DispatchAgent *agent,
         context.warnings, context.warning_count);
     dispatch_json_result_free(result);
     return cli_json_finish_emit(ok);
+}
+
+int cli_json_emit_object(void *object) {
+    json_t *root = object;
+    json_t *warnings = json_array();
+    for (size_t i = 0; i < context.warning_count; i++) {
+        const DispatchJsonWarning *item = &context.warnings[i];
+        json_t *warning = json_object();
+        json_object_set_new(warning, "code", json_string(item->code));
+        json_object_set_new(warning, "message", json_string(item->message));
+        json_object_set_new(warning, "task_id",
+                            item->task_id ? json_string(item->task_id)
+                                          : json_null());
+        json_object_set_new(warning, "agent",
+                            item->agent ? json_string(item->agent)
+                                        : json_null());
+        json_array_append_new(warnings, warning);
+    }
+    json_object_set_new(root, "warnings", warnings);
+    int result = json_dumpf(root, stdout, JSON_INDENT(2));
+    json_decref(root);
+    return cli_json_finish_emit(result == 0 && fputc('\n', stdout) != EOF);
 }
 
 int cli_json_end(int status) {

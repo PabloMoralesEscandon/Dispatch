@@ -58,8 +58,47 @@ int cli_json_emit_workspaces(const DispatchBoard *board,
                              DispatchJsonResult *result);
 int cli_json_emit_agent(const DispatchBoard *board, const DispatchAgent *agent,
                         DispatchJsonResult *result);
+/* Emit a JSON object built by the caller (jansson json_t *), adding the
+ * collected warnings array, then free it; return the exit status. */
+int cli_json_emit_object(void *root);
 /* Emit the JSON error document when status is non-zero; reset state. */
 int cli_json_end(int status);
+
+/* Agent skills (dispatch_cli_skills.c, ADR 0011). */
+typedef enum {
+    SKILL_MISSING,
+    SKILL_CURRENT,
+    SKILL_OUTDATED,
+    SKILL_NEWER,
+    SKILL_MODIFIED,
+    SKILL_UNMANAGED,
+} SkillStatus;
+
+typedef struct {
+    const char *skill;
+    const char *runner;
+    const char *scope;
+    char *path;
+    SkillStatus status;
+    char *installed_version;
+    const char *action;
+} SkillTarget;
+
+typedef struct {
+    SkillTarget *items;
+    size_t count;
+} SkillTargets;
+
+int cmd_skills(int argc, char **argv);
+const char *skill_status_name(SkillStatus status);
+size_t skills_bundled_names(const char ***names_out);
+int skills_runner_is_valid(const char *runner);
+int skills_collect_targets(int project, int global, const char *runner,
+                           SkillTargets *out);
+void skills_targets_free(SkillTargets *targets);
+/* Install the project skills for every runner during init, never replacing
+ * a protected copy. */
+int skills_install_for_init(size_t *changed, size_t *skipped);
 
 char *agent_prompt_path_for(const char *agent_dir, const char *name);
 void append_dispatch_log(const char *actor, const char *command, const char *action, const DispatchLogField *targets, size_t target_count, const DispatchLogField *context, size_t context_count, const char *message);

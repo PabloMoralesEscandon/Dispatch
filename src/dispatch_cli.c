@@ -13,6 +13,7 @@ const DispatchCliCommand commands[] = {
     {"dep", "Manage dependencies"},
     {"commit", "Manage task commit references"},
     {"completion", "Print shell completion candidates"},
+    {"skills", "List, install and update the agent skills"},
     {"ready", "List ready work or mark a task ready"},
     {"reviews", "List tasks waiting for review"},
     {"proposed", "List tasks waiting for approval"},
@@ -54,22 +55,25 @@ void dispatch_cli_print_help(void) {
     puts("  init, repo [set], agent create/list/show/command/session/resume/archive/restore,");
     puts("  workspace create/adopt/list/show/remove/repair/prune, group add/ready/edit/list/show,");
     puts("  task add/edit/move/delete/priority, dep add/remove, commit add/list/show,");
-    puts("  completion candidates/bash/zsh/fish/install, ready, reviews, proposed, start,");
-    puts("  finish, review, unassign, normalize, status, doctor, log, tui, list, show, blocked");
+    puts("  completion candidates/bash/zsh/fish/install, skills list/install/update,");
+    puts("  ready, reviews, proposed, start, finish, review, unassign, normalize, status,");
+    puts("  doctor, log, tui, list, show, blocked");
     puts("");
     puts("JSON output:");
     puts("  Pass --json to read commands (list, show, ready, blocked, reviews, proposed, status, doctor,");
     puts("  agent list/show, workspace list/show, log) and mutating commands (init, repo set, normalize,");
     puts("  task add/edit/move/delete/priority, group add/ready/edit, dep add/remove, commit add,");
     puts("  ready <id>, start, finish, review, unassign, agent create/archive/restore/session/command/resume,");
-    puts("  workspace create/adopt/remove/repair/prune).");
+    puts("  workspace create/adopt/remove/repair/prune, skills list/install/update).");
+    puts("");
+    printf("Version: %s (dispatch --version)\n", DISPATCH_VERSION);
 }
 
 int dispatch_cli_is_command(const char *command) {
     if (!command)
         return 0;
     if (strcmp(command, "--help") == 0 || strcmp(command, "-h") == 0 ||
-        strcmp(command, "help") == 0) {
+        strcmp(command, "help") == 0 || strcmp(command, "--version") == 0) {
         return 1;
     }
     return find_command(command) != NULL;
@@ -118,13 +122,23 @@ static int cmd_init(int argc, char **argv) {
     if (existed) {
         dispatch_store_lock_release(&lock);
         free(repo_path);
+        /* Re-init brings missing or outdated project skills in line, and
+         * never replaces a copy the user edited. */
+        size_t skills_changed = 0, skills_skipped = 0;
+        if (!skills_install_for_init(&skills_changed, &skills_skipped))
+            return 1;
         if (cli_json()) {
             DispatchBoard board;
             if (!load_board_or_error(&board))
                 return 1;
             DispatchJsonResult *json_result = dispatch_json_result_new("init");
-            dispatch_json_result_set_changed(json_result, 0);
+            dispatch_json_result_set_changed(json_result,
+                                             skills_changed > 0);
             dispatch_json_result_set_bool(json_result, "created", 0);
+            dispatch_json_result_set_int(json_result, "skills_installed",
+                                         (long)skills_changed);
+            dispatch_json_result_set_int(json_result, "skills_skipped",
+                                         (long)skills_skipped);
             dispatch_json_result_set_string(
                 json_result, "repo_path",
                 board.repo_path ? board.repo_path : ".");
@@ -139,6 +153,8 @@ static int cmd_init(int argc, char **argv) {
     if (!cli_json())
         printf("Created %s for repo %s\n", DISPATCH_STORE_FILE, repo_path);
     scaffold_workflow_dir();
+    size_t skills_changed = 0, skills_skipped = 0;
+    int skills_ok = skills_install_for_init(&skills_changed, &skills_skipped);
     DispatchLogField targets[] = {
         {"repo_path", repo_path},
     };
@@ -146,8 +162,8 @@ static int cmd_init(int argc, char **argv) {
                         "Created dispatch.json");
     dispatch_store_lock_release(&lock);
 
-    int status = 0;
-    if (cli_json()) {
+    int status = skills_ok ? 0 : 1;
+    if (status == 0 && cli_json()) {
         DispatchBoard board;
         if (!load_board_or_error(&board)) {
             status = 1;
@@ -156,6 +172,10 @@ static int cmd_init(int argc, char **argv) {
             dispatch_json_result_set_bool(json_result, "created", 1);
             dispatch_json_result_set_string(json_result, "repo_path",
                                             repo_path);
+            dispatch_json_result_set_int(json_result, "skills_installed",
+                                         (long)skills_changed);
+            dispatch_json_result_set_int(json_result, "skills_skipped",
+                                         (long)skills_skipped);
             status = cli_json_emit_tasks(&board, NULL, json_result);
             dispatch_board_free(&board);
         }
@@ -501,6 +521,10 @@ int dispatch_cli_dispatch(int argc, char **argv) {
         dispatch_cli_print_help();
         return 0;
     }
+    if (strcmp(argv[1], "--version") == 0) {
+        printf("dispatch %s\n", DISPATCH_VERSION);
+        return 0;
+    }
 
     const DispatchCliCommand *command = find_command(argv[1]);
     if (!command) {
@@ -560,6 +584,9 @@ static const struct {
     {"workspace", "remove", "workspace remove"},
     {"workspace", "repair", "workspace repair"},
     {"workspace", "prune", "workspace prune"},
+    {"skills", "list", "skills list"},
+    {"skills", "install", "skills install"},
+    {"skills", "update", "skills update"},
 };
 
 /* Strips --json from a supported command and enters JSON mode. Returns 0
@@ -613,6 +640,8 @@ static int run_command(const DispatchCliCommand *command, int argc,
         return cmd_commit(argc, argv);
     if (strcmp(command->name, "completion") == 0)
         return cmd_completion(argc, argv);
+    if (strcmp(command->name, "skills") == 0)
+        return cmd_skills(argc, argv);
     if (strcmp(command->name, "normalize") == 0)
         return cmd_normalize(argc, argv);
     if (strcmp(command->name, "list") == 0)
