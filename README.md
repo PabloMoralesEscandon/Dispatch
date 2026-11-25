@@ -209,7 +209,10 @@ dispatch log [--task <id>] [--actor <name>] [--agent <name>] [--workspace <id>] 
 `init` resolves `[repo-path]` (which must exist, defaulting to `.`) to an
 absolute path and creates `dispatch.json` if it does not already exist. Pass
 the repository path, normally `repo`, when using the recommended parent
-workflow layout.
+workflow layout. It also scaffolds `AGENTS.md` and `CLAUDE.md` and installs the
+[agent skills](#agent-skills) for every runner in the workflow directory, and
+says so. Running `init` again on an existing board installs skills that are
+missing or older than the binary, and leaves skills you edited alone.
 
 `repo` prints the board's configured repository path (`Repo: <path>`) and warns
 if it is not a Git repository; there is no `repo show` subcommand.
@@ -242,7 +245,9 @@ is missing, not logged in, or fails on an individual issue, `status
 --check-issues` emits a non-fatal warning and still reports the rest of the
 board.
 `doctor` checks board readability, repository layout, PATH/symlink setup,
-completion installation, generated agent prompt/run files, and workspace paths.
+completion installation, agent skills (warning when a skill is installed for
+no runner, or a copy is older than the binary, with the `dispatch skills`
+command that fixes it), generated agent prompt/run files, and workspace paths.
 `log` prints the `dispatch.log` audit trail; see [Dispatch Log](#dispatch-log).
 
 ### Completion
@@ -263,6 +268,41 @@ table instead of the board, so it also answers outside a workflow directory.
 `completion install <shell>` writes the generated completion script to the
 shell-specific user directory, checks whether `dispatch` is on `PATH`, and
 prints the reload command.
+
+### Skills
+
+```bash
+dispatch skills list [--project | --global] [--runner claude|codex|opencode|all] [--json]
+dispatch skills install [--project | --global] [--runner claude|codex|opencode|all] [--force] [--json]
+dispatch skills update [--project | --global] [--runner claude|codex|opencode|all] [--force] [--json]
+dispatch --version
+```
+
+The [agent skills](#agent-skills) are built into the binary, so the skills a
+build installs always describe that build's commands. `skills install` writes
+them for each selected runner (default `all`):
+
+| Runner | `--project` (default): workflow directory | `--global`: user directory |
+| --- | --- | --- |
+| `claude` (Claude Code) | `.claude/skills/<name>/` | `~/.claude/skills/<name>/` |
+| `codex` (Codex) | `.agents/skills/<name>/` | `~/.agents/skills/<name>/` |
+| `opencode` | `.opencode/skills/<name>/` | `$XDG_CONFIG_HOME/opencode/skills/<name>/` (default `~/.config/opencode/skills/`) |
+
+Project installs need the workflow directory (where `dispatch.json` lives).
+Each installed skill gets a `.dispatch-skill.json` file recording the Dispatch
+version that installed it and a SHA-256 of every file it wrote. A skill whose
+files changed since (you edited it), a skill folder Dispatch did not install,
+or one installed by a newer Dispatch is never overwritten: the command prints
+a warning and skips it, and `--force` replaces it. Re-running `install` is
+idempotent.
+
+`skills update` refreshes the copies that are already installed and older
+than the binary, in the workflow directory (when run there) and globally,
+with the same protection; it never installs missing skills. `skills list`
+prints each bundled skill and its version, and every location with its status:
+`missing`, `current`, `outdated` (installed by an older build), `modified`
+(edited), `unmanaged` (not installed by Dispatch), or `newer`. All three accept
+`--json`; see [ADR 0011](docs/adr/0011-skills-install.md).
 
 ### Agents
 
@@ -884,12 +924,14 @@ task add|edit|move|delete|priority   group add|ready|edit   dep add|remove
 ready <id>...   start   finish   review   unassign   commit add
 agent create|archive|restore|session|command|resume
 workspace create|adopt|remove|repair|prune
+skills install|update
 ```
 
 On success they print the same envelope as the read commands (workspace
-commands use the workspace envelope and agent commands use the agent envelope)
-plus `warnings` and a `result` object, so a tool learns the outcome without a
-second query:
+commands use the workspace envelope and agent commands use the agent envelope;
+`skills list|install|update` use their own skills envelope, which needs no
+board) plus `warnings` and a `result` object, so a tool learns the outcome
+without a second query:
 
 ```bash
 dispatch finish DE-01 --actor codex --json
@@ -1047,9 +1089,11 @@ starts:
 
 Each skill repeats the critical rules (CLI only, never read or edit
 `dispatch.json`, an explicit actor on every change) and explains how to find
-the workflow directory from a session started in the product repository. To
-use them, copy or link the folders into your runner's skills directory (for
-example `~/.claude/skills/` for Claude Code). `tests/check_skills.sh`, run in
+the workflow directory from a session started in the product repository.
+`dispatch init` installs them in the workflow directory for Claude Code, Codex
+and opencode; `dispatch skills install --global` installs them for every
+session of a runner, and `dispatch skills update` keeps installed copies in
+step with the binary (see [Skills](#skills)). `tests/check_skills.sh`, run in
 CI, checks their front matter and that every command they mention matches
 `dispatch --help` and every command is covered; see
 [ADR 0010](docs/adr/0010-agent-skills.md).
