@@ -101,6 +101,9 @@ int workspace_covers_task(const DispatchWorkspace *workspace, const char *task_i
 char *workspace_reanchored_path(const char *repo_path,
                                 const char *workspace_path);
 int workspace_git_worktree_present_at(const char *path);
+int workspace_git_worktree_inspect(const char *repo_path,
+                                   const char *workspace_path,
+                                   int *is_worktree, char **branch);
 int write_agent_prompt(const char *path, const char *name, const char *runner, const char *model, const char *agent_dir, const char *scratch_dir, const char *decisions_dir);
 int write_agent_run_script(const char *path, const char *command);
 
