@@ -1,0 +1,31 @@
+Frame: workspaces 100x30
+ DISPATCH   Workspaces                                                   actor:user  board:Dispatch
+
+2 active workspaces
+
+  Task     State    WS        Actor                    Dirty Git     Origin  Branch / Path
+ >DE-01    ready    active    golden                   clean git     created agent/golden/DE-01  <tm
+  DE-02    ready    active    orca-agent               clean git     adopted orca/ws-2  <tmp>/orca
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Ready                                         b board   a agents   n create   x/X remove   P prune
