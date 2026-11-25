@@ -453,13 +453,26 @@ int dispatch_cli_dispatch(int argc, char **argv) {
     return cli_json_end(run_command(command, argc, argv));
 }
 
-/* Mutating (sub)commands that accept --json and report a result object.
- * `ready <id>` is handled in cmd_ready because `ready --json` is a read. */
+/* (Sub)commands that accept --json. Read and mutating commands share one
+ * dispatcher path so every failure in JSON mode emits a coded error document. */
 static const struct {
     const char *command;
     const char *subcommand;
     const char *json_name;
-} json_mutations[] = {
+} json_commands[] = {
+    {"list", NULL, "list"},
+    {"show", NULL, "show"},
+    {"ready", NULL, "ready"},
+    {"blocked", NULL, "blocked"},
+    {"reviews", NULL, "reviews"},
+    {"proposed", NULL, "proposed"},
+    {"status", NULL, "status"},
+    {"doctor", NULL, "doctor"},
+    {"log", NULL, "log"},
+    {"agent", "list", "agent list"},
+    {"agent", "show", "agent show"},
+    {"workspace", "list", "workspace list"},
+    {"workspace", "show", "workspace show"},
     {"task", "add", "task add"},
     {"task", "edit", "task edit"},
     {"task", "move", "task move"},
@@ -479,18 +492,18 @@ static const struct {
     {"workspace", "prune", "workspace prune"},
 };
 
-/* Strips --json from a supported mutating command and enters JSON result
- * mode. Returns 0 when --json was repeated, after entering JSON mode so the
- * usage error is reported as JSON. */
-static int begin_json_mutation(int *argc, char **argv) {
-    for (size_t i = 0; i < sizeof(json_mutations) / sizeof(json_mutations[0]);
+/* Strips --json from a supported command and enters JSON mode. Returns 0
+ * when --json was repeated, after entering JSON mode so the usage error is
+ * reported as JSON. */
+static int begin_json_command(int *argc, char **argv) {
+    for (size_t i = 0; i < sizeof(json_commands) / sizeof(json_commands[0]);
          i++) {
-        if (strcmp(argv[1], json_mutations[i].command) != 0)
+        if (strcmp(argv[1], json_commands[i].command) != 0)
             continue;
         int first_arg = 2;
-        if (json_mutations[i].subcommand) {
+        if (json_commands[i].subcommand) {
             if (*argc < 3 ||
-                strcmp(argv[2], json_mutations[i].subcommand) != 0)
+                strcmp(argv[2], json_commands[i].subcommand) != 0)
                 continue;
             first_arg = 3;
         }
@@ -499,7 +512,7 @@ static int begin_json_mutation(int *argc, char **argv) {
         int ok = dispatch_cli_extract_json_flag(argc, argv, first_arg,
                                                 &json_output);
         if (json_output)
-            cli_json_begin(json_mutations[i].json_name);
+            cli_json_begin(json_commands[i].json_name);
         return ok;
     }
     return 1;
@@ -507,7 +520,7 @@ static int begin_json_mutation(int *argc, char **argv) {
 
 static int run_command(const DispatchCliCommand *command, int argc,
                        char **argv) {
-    if (!begin_json_mutation(&argc, argv)) {
+    if (!begin_json_command(&argc, argv)) {
         cli_error("usage", NULL, "--json may only be given once\n");
         return 1;
     }

@@ -104,10 +104,10 @@ static void doctor_check_completion(size_t *warnings, const char *shell_name) {
 }
 
 int cmd_doctor(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output) ||
-        argc != 2) {
-        fprintf(stderr, "Usage: dispatch doctor [--json]\n");
+    (void)argv;
+    int json_output = cli_json();
+    if (argc != 2) {
+        cli_error("usage", NULL, "Usage: dispatch doctor [--json]\n");
         return 1;
     }
 
@@ -122,8 +122,14 @@ int cmd_doctor(int argc, char **argv) {
         doctor_warn(&warnings, "board_load_failed", NULL,
                     "could not load Dispatch board",
                     "run dispatch normalize after resolving the load error");
-        if (json_output)
-            doctor_json_finish(NULL, warnings);
+        if (json_output) {
+            if (doctor_json_finish(NULL, warnings)) {
+                cli_json_suppress_error();
+            } else {
+                cli_json_reset_error();
+                cli_json_finish_emit(0);
+            }
+        }
         return 1;
     }
     doctor_ok("board loaded");
@@ -363,9 +369,9 @@ int cmd_doctor(int argc, char **argv) {
         doctor_ok("no assignment invariant violations");
 
     if (json_output) {
-        int ok = doctor_json_finish(&board, warnings);
+        int status = cli_json_finish_emit(doctor_json_finish(&board, warnings));
         dispatch_board_free(&board);
-        return ok ? 0 : 1;
+        return status;
     }
     printf("Summary: %zu warning%s\n", warnings, warnings == 1 ? "" : "s");
     dispatch_board_free(&board);

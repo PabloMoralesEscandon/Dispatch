@@ -1171,10 +1171,10 @@ static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
 }
 
 static int cmd_workspace_list(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
-        argc != 3) {
-        fprintf(stderr, "Usage: dispatch workspace list [--json]\n");
+    (void)argv;
+    int json_output = cli_json();
+    if (argc != 3) {
+        cli_error("usage", NULL, "Usage: dispatch workspace list [--json]\n");
         return 1;
     }
 
@@ -1183,10 +1183,10 @@ static int cmd_workspace_list(int argc, char **argv) {
         return 1;
 
     if (json_output) {
-        int ok = dispatch_json_emit_workspaces(stdout, &board,
-                                               "workspace list", NULL);
+        int status = cli_json_finish_emit(dispatch_json_emit_workspaces(
+            stdout, &board, "workspace list", NULL));
         dispatch_board_free(&board);
-        return ok ? 0 : 1;
+        return status;
     }
 
     if (board.workspaces.count == 0) {
@@ -1220,12 +1220,11 @@ static int cmd_workspace_list(int argc, char **argv) {
 }
 
 static int cmd_workspace_show(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
-        argc != 4) {
-        fprintf(stderr,
-                "Usage: dispatch workspace show <task-id-or-workspace> "
-                "[--json]\n");
+    int json_output = cli_json();
+    if (argc != 4) {
+        cli_error("usage", NULL,
+                  "Usage: dispatch workspace show <task-id-or-workspace> "
+                  "[--json]\n");
         return 1;
     }
 
@@ -1236,15 +1235,16 @@ static int cmd_workspace_show(int argc, char **argv) {
     DispatchWorkspace *workspace = live_workspace_for_task(&board, argv[3]);
     if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
         dispatch_board_free(&board);
-        fprintf(stderr, "No workspace for %s\n", argv[3]);
+        cli_error("workspace_not_found", NULL, "No workspace for %s\n",
+                  argv[3]);
         return 1;
     }
 
     if (json_output) {
-        int ok = dispatch_json_emit_workspaces(stdout, &board,
-                                               "workspace show", workspace);
+        int status = cli_json_finish_emit(dispatch_json_emit_workspaces(
+            stdout, &board, "workspace show", workspace));
         dispatch_board_free(&board);
-        return ok ? 0 : 1;
+        return status;
     }
 
     DispatchTask *task = dispatch_board_find_task(&board, workspace->task_id);

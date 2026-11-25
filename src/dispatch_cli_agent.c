@@ -513,13 +513,13 @@ static int cmd_agent_create(int argc, char **argv) {
 }
 
 static int cmd_agent_list(int argc, char **argv) {
-    int json_output = 0;
+    int json_output = cli_json();
     int include_archived = 0;
-    int args_ok = dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output);
-    if (args_ok && argc == 4 && strcmp(argv[3], "--all") == 0)
+    if (argc == 4 && strcmp(argv[3], "--all") == 0) {
         include_archived = 1;
-    else if (!args_ok || argc != 3) {
-        fprintf(stderr, "Usage: dispatch agent list [--all] [--json]\n");
+    } else if (argc != 3) {
+        cli_error("usage", NULL,
+                  "Usage: dispatch agent list [--all] [--json]\n");
         return 1;
     }
 
@@ -528,10 +528,10 @@ static int cmd_agent_list(int argc, char **argv) {
         return 1;
 
     if (json_output) {
-        int ok = dispatch_json_emit_agents(stdout, &board, "agent list", NULL,
-                                           include_archived);
+        int status = cli_json_finish_emit(dispatch_json_emit_agents(
+            stdout, &board, "agent list", NULL, include_archived));
         dispatch_board_free(&board);
-        return ok ? 0 : 1;
+        return status;
     }
 
     if (board.agents.count == 0) {
@@ -557,10 +557,10 @@ static int cmd_agent_list(int argc, char **argv) {
 }
 
 static int cmd_agent_show(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
-        argc != 4) {
-        fprintf(stderr, "Usage: dispatch agent show <name> [--json]\n");
+    int json_output = cli_json();
+    if (argc != 4) {
+        cli_error("usage", NULL,
+                  "Usage: dispatch agent show <name> [--json]\n");
         return 1;
     }
 
@@ -571,15 +571,15 @@ static int cmd_agent_show(int argc, char **argv) {
     DispatchAgent *agent = dispatch_board_find_agent(&board, argv[3]);
     if (!agent) {
         dispatch_board_free(&board);
-        fprintf(stderr, "No agent named %s\n", argv[3]);
+        cli_error("agent_not_found", NULL, "No agent named %s\n", argv[3]);
         return 1;
     }
 
     if (json_output) {
-        int ok = dispatch_json_emit_agents(stdout, &board, "agent show", agent,
-                                           0);
+        int status = cli_json_finish_emit(dispatch_json_emit_agents(
+            stdout, &board, "agent show", agent, 0));
         dispatch_board_free(&board);
-        return ok ? 0 : 1;
+        return status;
     }
 
     printf("Name: %s\n", agent->name);

@@ -210,13 +210,10 @@ static void print_list_for_group(const DispatchBoard *board,
 }
 
 int cmd_list(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        fprintf(stderr, "Usage: dispatch list [all] [group] [--json]\n");
-        return 1;
-    }
+    int json_output = cli_json();
     if (argc != 2 && argc != 3 && argc != 4) {
-        fprintf(stderr, "Usage: dispatch list [all] [group] [--json]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch list [all] [group] [--json]\n");
         return 1;
     }
 
@@ -227,7 +224,8 @@ int cmd_list(int argc, char **argv) {
         group_arg = 3;
     }
     if (argc == 4 && !include_done) {
-        fprintf(stderr, "Usage: dispatch list [all] [group] [--json]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch list [all] [group] [--json]\n");
         return 1;
     }
 
@@ -240,8 +238,9 @@ int cmd_list(int argc, char **argv) {
             dispatch_board_find_group(&board, argv[group_arg]);
         if (!group) {
             dispatch_board_free(&board);
-            fprintf(stderr, "No group with id, prefix, or name %s\n",
-                    argv[group_arg]);
+            cli_error("group_not_found", NULL,
+                      "No group with id, prefix, or name %s\n",
+                      argv[group_arg]);
             return 1;
         }
         if (json_output) {
@@ -250,7 +249,8 @@ int cmd_list(int argc, char **argv) {
                 .group = group->id,
                 .include_done = include_done,
             };
-            int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+            int result =
+                cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
             dispatch_board_free(&board);
             return result;
         }
@@ -264,7 +264,8 @@ int cmd_list(int argc, char **argv) {
             .command = "list",
             .include_done = include_done,
         };
-        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        int result =
+            cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
         dispatch_board_free(&board);
         return result;
     }
@@ -281,13 +282,9 @@ int cmd_list(int argc, char **argv) {
 }
 
 int cmd_show(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        fprintf(stderr, "Usage: dispatch show <id> [--json]\n");
-        return 1;
-    }
+    int json_output = cli_json();
     if (argc != 3) {
-        fprintf(stderr, "Usage: dispatch show <id> [--json]\n");
+        cli_error("usage", NULL, "Usage: dispatch show <id> [--json]\n");
         return 1;
     }
 
@@ -298,7 +295,7 @@ int cmd_show(int argc, char **argv) {
     DispatchTask *task = dispatch_board_find_task(&board, argv[2]);
     if (!task) {
         dispatch_board_free(&board);
-        fprintf(stderr, "No task with id %s\n", argv[2]);
+        cli_error("task_not_found", argv[2], "No task with id %s\n", argv[2]);
         return 1;
     }
 
@@ -308,7 +305,8 @@ int cmd_show(int argc, char **argv) {
             .task_id = task->id,
             .include_done = -1,
         };
-        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        int result =
+            cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
         dispatch_board_free(&board);
         return result;
     }
@@ -575,7 +573,8 @@ int cmd_ready_list(int json_output) {
             .include_done = -1,
             .state_mask = DISPATCH_JSON_STATE(DISPATCH_STATE_READY),
         };
-        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        int result =
+            cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
         dispatch_board_free(&board);
         return result;
     }
@@ -606,13 +605,10 @@ int cmd_ready_list(int json_output) {
 
 int cmd_queue_list(int argc, char **argv, DispatchState state,
                           const char *label) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        fprintf(stderr, "Usage: dispatch %s [--json]\n", label);
-        return 1;
-    }
+    (void)argv;
+    int json_output = cli_json();
     if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch %s [--json]\n", label);
+        cli_error("usage", NULL, "Usage: dispatch %s [--json]\n", label);
         return 1;
     }
 
@@ -626,7 +622,8 @@ int cmd_queue_list(int argc, char **argv, DispatchState state,
             .include_done = -1,
             .state_mask = DISPATCH_JSON_STATE(state),
         };
-        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        int result =
+            cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
         dispatch_board_free(&board);
         return result;
     }
@@ -640,13 +637,10 @@ int cmd_queue_list(int argc, char **argv, DispatchState state,
 }
 
 int cmd_blocked(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        fprintf(stderr, "Usage: dispatch blocked [--json]\n");
-        return 1;
-    }
+    (void)argv;
+    int json_output = cli_json();
     if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch blocked [--json]\n");
+        cli_error("usage", NULL, "Usage: dispatch blocked [--json]\n");
         return 1;
     }
 
@@ -660,7 +654,8 @@ int cmd_blocked(int argc, char **argv) {
             .include_done = -1,
             .state_mask = DISPATCH_JSON_STATE(DISPATCH_STATE_BLOCKED),
         };
-        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        int result =
+            cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
         dispatch_board_free(&board);
         return result;
     }
@@ -688,13 +683,10 @@ int cmd_blocked(int argc, char **argv) {
 }
 
 int cmd_status(int argc, char **argv) {
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        fprintf(stderr, "Usage: dispatch status [--json]\n");
-        return 1;
-    }
+    (void)argv;
+    int json_output = cli_json();
     if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch status [--json]\n");
+        cli_error("usage", NULL, "Usage: dispatch status [--json]\n");
         return 1;
     }
 
@@ -710,7 +702,8 @@ int cmd_status(int argc, char **argv) {
                           DISPATCH_JSON_STATE(DISPATCH_STATE_REVIEW),
             .include_warnings = 1,
         };
-        int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        int result =
+            cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
         dispatch_board_free(&board);
         return result;
     }

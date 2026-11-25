@@ -623,11 +623,7 @@ int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
     json_object_set_new(root, "warnings",
                         warnings_json(board, request->include_warnings));
 
-    int result = json_dumpf(root, stream, JSON_INDENT(2));
-    json_decref(root);
-    if (result != 0 || fputc('\n', stream) == EOF)
-        return 0;
-    return 1;
+    return dump_document(stream, root);
 }
 
 static int dump_document(FILE *stream, json_t *root) {

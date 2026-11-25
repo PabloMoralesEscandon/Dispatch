@@ -2,13 +2,14 @@
 
 #include <stdarg.h>
 
-/* Per-process --json state for mutating commands. The dispatcher begins
- * it before running a command and ends it afterwards, so every failing
- * path produces exactly one JSON error document on stderr. */
+/* Per-process --json state for read and mutating commands. The dispatcher
+ * begins it before running a command and ends it afterwards, so every
+ * failing path produces one JSON error document on stderr. */
 typedef struct {
     int active;
     const char *command;
     int has_error;
+    int suppress_error;
     char code[48];
     char task_id[128];
     char *message;
@@ -79,7 +80,7 @@ void cli_json_snapshot(const DispatchBoard *board) {
     context.snapshot_taken = 1;
 }
 
-static int finish_emit(int ok) {
+int cli_json_finish_emit(int ok) {
     if (ok)
         return 0;
     cli_error("output_failed", NULL, "Could not write JSON result: %s\n",
@@ -87,12 +88,25 @@ static int finish_emit(int ok) {
     return 1;
 }
 
+void cli_json_suppress_error(void) {
+    context.suppress_error = 1;
+}
+
+void cli_json_reset_error(void) {
+    context.has_error = 0;
+    context.suppress_error = 0;
+    context.code[0] = '\0';
+    context.task_id[0] = '\0';
+    free(context.message);
+    context.message = NULL;
+}
+
 int cli_json_emit_tasks(const DispatchBoard *board, const char *group,
                         DispatchJsonResult *result) {
     int ok = dispatch_json_emit_mutation(stdout, board, context.command, group,
                                          &context.before, result);
     dispatch_json_result_free(result);
-    return finish_emit(ok);
+    return cli_json_finish_emit(ok);
 }
 
 int cli_json_emit_workspaces(const DispatchBoard *board,
@@ -102,11 +116,11 @@ int cli_json_emit_workspaces(const DispatchBoard *board,
         stdout, board, context.command, records, count, &context.before,
         result);
     dispatch_json_result_free(result);
-    return finish_emit(ok);
+    return cli_json_finish_emit(ok);
 }
 
 int cli_json_end(int status) {
-    if (context.active && status != 0) {
+    if (context.active && status != 0 && !context.suppress_error) {
         dispatch_json_emit_error(
             stderr, context.command,
             context.has_error ? context.code : "internal_error",

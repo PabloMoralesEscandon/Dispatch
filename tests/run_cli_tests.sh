@@ -966,22 +966,65 @@ assert_json \
     workspaces.0.task_id string DE-07 \
     workspaces.0.actor string json-agent
 
-expect_fail "$BIN" workspace list --json --json
-assert_contains "Usage: dispatch workspace list [--json]"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" workspace show --json
-assert_contains "Usage: dispatch workspace show <task-id-or-workspace> [--json]"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" workspace show Missing --json
-assert_contains "No workspace for Missing"
-assert_not_contains '"schema_version"'
+expect_json_error usage "$BIN" workspace list --json --json
+assert_json command string "workspace list" error.task_id null -
+expect_json_error usage "$BIN" workspace show --json
+assert_json command string "workspace show" error.task_id null -
+expect_json_error workspace_not_found "$BIN" workspace show Missing --json
+assert_json command string "workspace show" error.task_id null -
 
-expect_fail "$BIN" status --json --json
-assert_contains "Usage: dispatch status [--json]"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" show Missing --json
-assert_contains "No task with id Missing"
-assert_not_contains '"schema_version"'
+expect_json_error usage "$BIN" status --json --json
+assert_json command string status error.task_id null -
+expect_json_error usage "$BIN" status extra --json
+assert_json command string status error.task_id null -
+expect_json_error task_not_found "$BIN" show Missing --json
+assert_json command string show error.task_id string Missing
+expect_json_error usage "$BIN" show --json
+assert_json command string show error.task_id null -
+expect_json_error group_not_found "$BIN" list Missing --json
+assert_json command string list error.task_id null -
+expect_json_error usage "$BIN" list a b --json
+assert_json command string list error.task_id null -
+expect_json_error usage "$BIN" list --json --json
+assert_json command string list error.task_id null -
+expect_json_error usage "$BIN" blocked extra --json
+assert_json command string blocked error.task_id null -
+expect_json_error usage "$BIN" reviews extra --json
+assert_json command string reviews error.task_id null -
+expect_json_error usage "$BIN" proposed extra --json
+assert_json command string proposed error.task_id null -
+
+# Read commands also emit board_missing as a JSON error outside a board dir.
+empty_read_dir="$(make_case_dir json-read-errors-empty)"
+(
+    cd "$empty_read_dir"
+    for cmd in list "show DE-01" ready blocked reviews proposed status \
+        "agent list" "agent show worker" "workspace list" \
+        "workspace show DE-01"; do
+        cmd_name="${cmd%% DE-01}"
+        cmd_name="${cmd_name%% worker}"
+        # shellcheck disable=SC2086
+        expect_json_error board_missing "$BIN" $cmd --json
+        assert_json command string "$cmd_name" error.task_id null -
+    done
+    # doctor --json keeps its documented board_load_failed JSON on stdout and
+    # prints no stray text on stderr.
+    run_split "$BIN" doctor --json
+    if [ "$RUN_STATUS" -eq 0 ]; then
+        fail "expected doctor --json without a board to exit non-zero"
+    fi
+    if [ -n "$RUN_STDERR" ]; then
+        fail "expected empty stderr from doctor --json on board_load_failed"
+    fi
+    RUN_OUTPUT="$RUN_STDOUT"
+    assert_json \
+        schema_version integer 1 \
+        command string doctor \
+        board null - \
+        summary.warnings integer 1 \
+        checks.0.status string warn \
+        checks.0.kind string board_load_failed
+)
 
 expect_ok "$BIN" list
 assert_output_equals "$human_list"
@@ -1055,9 +1098,8 @@ assert_json error.task_id string Missing \
     error.message string "Could not mark Missing ready"
 expect_json_error usage "$BIN" ready DE-01 --bogus --json
 expect_json_error usage "$BIN" ready DE-01 --json --json
-expect_fail "$BIN" ready --json --json
-assert_contains "Usage: dispatch ready [--json]"
-assert_not_contains '"schema_version"'
+expect_json_error usage "$BIN" ready --json --json
+assert_json command string ready error.task_id null -
 
 # start: single-target result and the state-specific error codes.
 expect_json_ok "$BIN" start DE-01 --actor json-agent --json
@@ -2726,8 +2768,10 @@ assert_contains '"kind": "dep_missing_reference"'
 assert_contains '"kind": "dep_self"'
 assert_contains '"kind": "dep_duplicate"'
 assert_contains '"subject": "DE-02"'
-expect_fail "$BIN" doctor --json --json
-assert_contains "Usage: dispatch doctor [--json]"
+expect_json_error usage "$BIN" doctor --json --json
+assert_json command string doctor error.task_id null -
+expect_json_error usage "$BIN" doctor extra --json
+assert_json command string doctor error.task_id null -
 # A healthy board reports the new checks as ok.
 rm dispatch.json
 expect_ok "$BIN" init repo
@@ -3776,9 +3820,8 @@ case_dir="$(make_case_dir json-reads)"
 cd "$case_dir"
 mkdir repo
 
-expect_fail "$BIN" log --json
-assert_contains "No dispatch board in this directory"
-assert_not_contains '"schema_version"'
+expect_json_error board_missing "$BIN" log --json
+assert_json command string log error.task_id null -
 
 expect_ok "$BIN" init repo
 expect_ok git -C repo init
@@ -3875,16 +3918,14 @@ assert_json \
 expect_ok "$BIN" agent show worker
 assert_line "Name: worker"
 
-expect_fail "$BIN" agent show missing --json
-assert_contains "No agent named missing"
-assert_not_contains '"schema_version"'
-expect_fail "$BIN" agent list --json --json
-assert_contains "Usage: dispatch agent list [--all] [--json]"
-expect_fail "$BIN" agent list --archived --json
-assert_contains "Usage: dispatch agent list [--all] [--json]"
-expect_fail "$BIN" agent show --json
-assert_contains "Usage: dispatch agent show <name> [--json]"
-assert_not_contains '"schema_version"'
+expect_json_error agent_not_found "$BIN" agent show missing --json
+assert_json command string "agent show" error.task_id null -
+expect_json_error usage "$BIN" agent list --json --json
+assert_json command string "agent list" error.task_id null -
+expect_json_error usage "$BIN" agent list --archived --json
+assert_json command string "agent list" error.task_id null -
+expect_json_error usage "$BIN" agent show --json
+assert_json command string "agent show" error.task_id null -
 
 # The workspace envelope carries query and board-wide record counts.
 expect_ok "$BIN" workspace list --json
@@ -4064,13 +4105,22 @@ assert_json summary.total integer 0 records array_length 0 warnings array_length
 mv dispatch.log.saved dispatch.log
 
 for bad_args in "--limit 0" "--limit -1" "--limit abc" "--limit" \
-    "--task" "--task DE-01 --task DE-02" "--task ''" "--since 1" "extra" \
-    "--json --json"; do
+    "--task" "--task DE-01 --task DE-02" "--task ''" "--since 1" "extra"; do
     eval "set -- $bad_args"
     expect_fail "$BIN" log "$@"
     assert_contains "Usage: dispatch log [--task <id>]"
     assert_not_contains '"schema_version"'
 done
+expect_json_error usage "$BIN" log --json --json
+assert_json command string log error.task_id null -
+expect_json_error usage "$BIN" log --limit 0 --json
+assert_json command string log error.task_id null -
+mv dispatch.log dispatch.log.saved
+mkdir dispatch.log
+expect_json_error log_unreadable "$BIN" log --json
+assert_json command string log error.task_id null -
+rmdir dispatch.log
+mv dispatch.log.saved dispatch.log
 
 # Completion offers the new command and flags.
 expect_ok "$BIN" completion candidates commands

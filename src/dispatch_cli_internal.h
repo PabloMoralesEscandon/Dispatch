@@ -34,7 +34,7 @@ typedef struct {
 
 extern const DispatchCliCommand commands[];
 
-/* --json result mode for mutating commands; see
+/* --json mode for read and mutating commands; see
  * docs/json-output-contract.md. cli_error prints fmt to stderr unchanged
  * in human mode and records a coded error in JSON mode. The board loaders
  * snapshot task states on the first load of a JSON-mode command. */
@@ -43,6 +43,9 @@ int cli_json(void);
 void cli_error(const char *code, const char *task_id, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 void cli_json_snapshot(const DispatchBoard *board);
+int cli_json_finish_emit(int ok);
+void cli_json_suppress_error(void);
+void cli_json_reset_error(void);
 /* Emit a success document and free result; return the exit status. */
 int cli_json_emit_tasks(const DispatchBoard *board, const char *group,
                         DispatchJsonResult *result);
