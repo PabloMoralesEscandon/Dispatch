@@ -34,6 +34,15 @@ static int child_main(int argc, char **argv) {
         puts(buffer);
         return 0;
     }
+    if (argc >= 3 && strcmp(argv[2], "both") == 0) {
+        /* Emit more than a typical pipe buffer to both streams to verify
+         * concurrent draining does not deadlock. */
+        for (int i = 0; i < 4000; i++) {
+            fputs("stdout-line-0123456789\n", stdout);
+            fputs("stderr-line-9876543210\n", stderr);
+        }
+        return 3;
+    }
     return 2;
 }
 
@@ -120,5 +129,27 @@ int main(int argc, char **argv) {
             "test executable should be available");
     require(!dispatch_exec_command_available("dispatch-missing-command-xyz"),
             "missing command reported available");
+
+    const char *both_argv[] = {argv[0], "--child", "both", NULL};
+    char *both_out = NULL;
+    char *both_err = NULL;
+    size_t both_out_size = 0;
+    size_t both_err_size = 0;
+    require(dispatch_exec_capture_streams(both_argv, NULL, &both_out,
+                                          &both_out_size, &both_err,
+                                          &both_err_size, &result),
+            "capture streams failed");
+    require(dispatch_exec_result_status(&result) == 3,
+            "capture streams wrong exit status");
+    require(both_out_size == 4000 * strlen("stdout-line-0123456789\n"),
+            "capture streams stdout size mismatch");
+    require(both_err_size == 4000 * strlen("stderr-line-9876543210\n"),
+            "capture streams stderr size mismatch");
+    require(strstr(both_out, "stderr-line") == NULL,
+            "stderr leaked into stdout");
+    require(strstr(both_err, "stdout-line") == NULL,
+            "stdout leaked into stderr");
+    free(both_out);
+    free(both_err);
     return 0;
 }

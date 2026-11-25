@@ -1,5 +1,6 @@
 #include "dispatch_cli_internal.h"
 
+#include "dispatch_gh.h"
 #include "dispatch_issue.h"
 
 static void print_invalid_issue_ref(const char *input) {
@@ -18,12 +19,13 @@ static int issue_ref_is_well_formed(const char *input) {
     return 1;
 }
 
-/* Turns --issue input into a canonical owner/repo#number. A bare number
- * resolves against the board repo's origin remote; reading the remote is a
- * local git call, so linking never touches the network. */
-static int resolve_issue_ref(const DispatchBoard *board, const char *input,
-                             char *canonical, size_t canonical_size) {
-    DispatchIssueRef ref;
+/* Turns --issue / --from-issue input into a resolved DispatchIssueRef. A bare
+ * number resolves against the board repo's origin remote; reading the remote
+ * is a local git call, never the network. */
+static int resolve_issue_ref_struct(const DispatchBoard *board,
+                                    const char *input,
+                                    DispatchIssueRef *out_ref) {
+    DispatchIssueRef ref = {0};
     DispatchIssueParse parsed = dispatch_issue_parse(input, &ref);
     if (parsed == DISPATCH_ISSUE_PARSE_INVALID) {
         print_invalid_issue_ref(input);
@@ -67,8 +69,90 @@ static int resolve_issue_ref(const DispatchBoard *board, const char *input,
         free(trimmed);
     }
 
+    *out_ref = ref;
+    return 1;
+}
+
+static int resolve_issue_ref(const DispatchBoard *board, const char *input,
+                             char *canonical, size_t canonical_size) {
+    DispatchIssueRef ref;
+    if (!resolve_issue_ref_struct(board, input, &ref))
+        return 0;
     dispatch_issue_format(&ref, canonical, canonical_size);
     return 1;
+}
+
+static void report_gh_issue_error(DispatchGhStatus status,
+                                  const char *requested_ref,
+                                  const DispatchGhResult *gh_result) {
+    const char *code = dispatch_gh_error_code(status);
+    switch (status) {
+    case DISPATCH_GH_MISSING:
+        cli_error(code, NULL,
+                  "GitHub CLI (gh) is not installed or not on PATH; install "
+                  "gh and run 'gh auth login'\n");
+        break;
+    case DISPATCH_GH_NOT_AUTHENTICATED:
+        cli_error(code, NULL,
+                  "GitHub CLI (gh) is not logged in; run 'gh auth login'\n");
+        break;
+    case DISPATCH_GH_NOT_FOUND:
+        cli_error(code, NULL, "GitHub issue %s was not found\n",
+                  requested_ref);
+        break;
+    case DISPATCH_GH_NOT_AN_ISSUE:
+        cli_error(code, NULL,
+                  "GitHub reference %s is a pull request, not an issue (%s)\n",
+                  requested_ref, gh_result->detail);
+        break;
+    case DISPATCH_GH_INVALID_JSON:
+        cli_error(code, NULL, "Could not read GitHub issue %s from gh: %s\n",
+                  requested_ref,
+                  gh_result->detail[0] ? gh_result->detail
+                                       : "unexpected JSON output");
+        break;
+    case DISPATCH_GH_FAILED:
+    case DISPATCH_GH_OK:
+        cli_error(code, NULL, "Could not fetch GitHub issue %s with gh: %s\n",
+                  requested_ref,
+                  gh_result->detail[0] ? gh_result->detail
+                                       : "gh command failed");
+        break;
+    }
+}
+
+static void print_task_usage(FILE *stream) {
+    fprintf(stream,
+            "Usage: dispatch task add <group> <title> [--description <text>] "
+            "[--actor <name>] [--no-review] [--issue <ref>]\n");
+    fprintf(stream,
+            "       dispatch task add <group> --from-issue <ref> "
+            "[--actor <name>] [--no-review]\n");
+    fprintf(stream,
+            "       dispatch task edit <id> [--title <text>] [--description "
+            "<text>] [--issue <ref>|--clear-issue] [--actor <name>]\n");
+    fprintf(stream,
+            "       dispatch task move <id> <group> [--actor <name>]\n");
+    fprintf(stream, "       dispatch task delete <id> [--force]\n");
+    fprintf(stream,
+            "       dispatch task priority <id> <value> [--actor <name>]\n");
+}
+
+static void print_task_usage_error(void) {
+    cli_error("usage", NULL,
+              "Usage: dispatch task add <group> <title> [--description <text>] "
+              "[--actor <name>] [--no-review] [--issue <ref>]\n");
+    cli_error("usage", NULL,
+              "       dispatch task add <group> --from-issue <ref> "
+              "[--actor <name>] [--no-review]\n");
+    cli_error("usage", NULL,
+              "       dispatch task edit <id> [--title <text>] [--description "
+              "<text>] [--issue <ref>|--clear-issue] [--actor <name>]\n");
+    cli_error("usage", NULL,
+              "       dispatch task move <id> <group> [--actor <name>]\n");
+    cli_error("usage", NULL, "       dispatch task delete <id> [--force]\n");
+    cli_error("usage", NULL,
+              "       dispatch task priority <id> <value> [--actor <name>]\n");
 }
 
 static void log_issue_change(const char *actor, const char *task_id,
@@ -493,6 +577,21 @@ int cmd_group(int argc, char **argv) {
 }
 
 int cmd_task(int argc, char **argv) {
+    if (!cli_json() && argc == 3 &&
+        (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+        print_task_usage(stdout);
+        return 0;
+    }
+    if (!cli_json() && argc == 4 && strcmp(argv[2], "add") == 0 &&
+        (strcmp(argv[3], "--help") == 0 || strcmp(argv[3], "-h") == 0)) {
+        fprintf(stdout,
+                "Usage: dispatch task add <group> <title> [--description "
+                "<text>] [--actor <name>] [--no-review] [--issue <ref>]\n"
+                "       dispatch task add <group> --from-issue <ref> "
+                "[--actor <name>] [--no-review]\n");
+        return 0;
+    }
+
     if (argc >= 4 && strcmp(argv[2], "edit") == 0) {
         const char *task_id = argv[3];
         const char *title = NULL;
@@ -848,48 +947,82 @@ int cmd_task(int argc, char **argv) {
         return 0;
     }
 
-    if (argc < 5 || strcmp(argv[2], "add") != 0) {
-        cli_error("usage", NULL,
-                  "Usage: dispatch task add <group> <title> [--description "
-                  "text] [--actor <name>] [--no-review] [--issue <ref>]\n");
-        cli_error("usage", NULL,
-                  "       dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]\n");
-        cli_error("usage", NULL,
-                  "       dispatch task move <id> <group> [--actor <name>]\n");
-        cli_error("usage", NULL, "       dispatch task delete <id> [--force]\n");
-        cli_error("usage", NULL,
-                  "       dispatch task priority <id> <value> [--actor <name>]\n");
+    if (argc < 5 || strcmp(argv[2], "add") != 0 ||
+        strncmp(argv[3], "--", 2) == 0) {
+        print_task_usage_error();
         return 1;
     }
 
     const char *group = argv[3];
-    const char *title = argv[4];
+    const char *title = NULL;
     const char *description = "";
+    int has_description = 0;
     const char *actor = "user";
     const char *issue = NULL;
+    const char *from_issue = NULL;
     int requires_review = 1;
 
-    if (title_starts_with_dispatch_id(title)) {
-        cli_error("invalid_title", NULL,
-                  "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
-        return 1;
-    }
-
-    for (int i = 5; i < argc; i++) {
+    for (int i = 4; i < argc; i++) {
         if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
             description = argv[++i];
+            has_description = 1;
         } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
             actor = argv[++i];
         } else if (strcmp(argv[i], "--no-review") == 0) {
             requires_review = 0;
         } else if (strcmp(argv[i], "--issue") == 0 && (i + 1) < argc) {
             issue = argv[++i];
+        } else if (strcmp(argv[i], "--from-issue") == 0) {
+            if ((i + 1) >= argc) {
+                cli_error("usage", NULL,
+                          "Option --from-issue requires an issue reference\n");
+                return 1;
+            }
+            if (from_issue) {
+                cli_error("usage", NULL,
+                          "--from-issue may only be given once\n");
+                return 1;
+            }
+            from_issue = argv[++i];
+        } else if (!title && strncmp(argv[i], "--", 2) != 0) {
+            title = argv[i];
         } else {
             cli_error("usage", NULL, "Unknown task option: %s\n", argv[i]);
             return 1;
         }
     }
+
+    if (from_issue && issue) {
+        cli_error("usage", NULL,
+                  "Use either --from-issue or --issue, not both\n");
+        return 1;
+    }
+    if (from_issue && title) {
+        cli_error("usage", NULL,
+                  "Cannot pass both a title and --from-issue; omit the title "
+                  "to use the issue's title, or use --issue instead\n");
+        return 1;
+    }
+    if (from_issue && has_description) {
+        cli_error("usage", NULL,
+                  "Cannot combine --description with --from-issue; use --issue "
+                  "with a title and description, or edit the task after adding "
+                  "it\n");
+        return 1;
+    }
+    if (!from_issue && !title) {
+        print_task_usage_error();
+        return 1;
+    }
+
+    if (!from_issue && title_starts_with_dispatch_id(title)) {
+        cli_error("invalid_title", NULL,
+                  "Task titles should not include Dispatch IDs; use a human-readable title without a prefix like DE-01\n");
+        return 1;
+    }
     if (issue && !issue_ref_is_well_formed(issue))
+        return 1;
+    if (from_issue && !issue_ref_is_well_formed(from_issue))
         return 1;
     if (!dispatch_actor_label_is_valid(actor)) {
         cli_error("invalid_actor", NULL,
@@ -897,16 +1030,80 @@ int cmd_task(int argc, char **argv) {
         return 1;
     }
 
+    DispatchGhIssue fetched = {0};
+    char canonical[DISPATCH_ISSUE_TEXT_MAX] = "";
+    int link_issue = 0;
+
+    if (from_issue) {
+        /* Validate the group and resolve bare refs before calling gh, and
+         * release the board lock during the network call. */
+        DispatchBoard preview;
+        if (!load_board_or_error(&preview))
+            return 1;
+        if (!dispatch_board_find_group(&preview, group)) {
+            dispatch_board_free(&preview);
+            cli_error("group_not_found", NULL,
+                      "No group with id, prefix, or name %s\n", group);
+            return 1;
+        }
+        DispatchIssueRef issue_ref = {0};
+        if (!resolve_issue_ref_struct(&preview, from_issue, &issue_ref)) {
+            dispatch_board_free(&preview);
+            return 1;
+        }
+        dispatch_board_free(&preview);
+        cli_json_snapshot_reset();
+
+        char requested_ref[DISPATCH_ISSUE_TEXT_MAX];
+        dispatch_issue_format(&issue_ref, requested_ref, sizeof(requested_ref));
+
+        DispatchGhResult gh_result = {0};
+        DispatchGhStatus gh_status =
+            dispatch_gh_issue_view(&issue_ref, &fetched, &gh_result);
+        if (gh_status != DISPATCH_GH_OK) {
+            report_gh_issue_error(gh_status, requested_ref, &gh_result);
+            dispatch_gh_result_free(&gh_result);
+            dispatch_gh_issue_free(&fetched);
+            return 1;
+        }
+        dispatch_gh_result_free(&gh_result);
+
+        if (fetched.title[0] == '\0') {
+            cli_error("invalid_title", NULL,
+                      "GitHub issue %s has an empty title\n",
+                      fetched.canonical);
+            dispatch_gh_issue_free(&fetched);
+            return 1;
+        }
+        if (title_starts_with_dispatch_id(fetched.title)) {
+            cli_error("invalid_title", NULL,
+                      "GitHub issue %s title '%s' starts with a Dispatch ID; "
+                      "add it with an explicit title and --issue %s instead\n",
+                      fetched.canonical, fetched.title, fetched.canonical);
+            dispatch_gh_issue_free(&fetched);
+            return 1;
+        }
+
+        title = fetched.title;
+        description = fetched.body;
+        snprintf(canonical, sizeof(canonical), "%s", fetched.canonical);
+        link_issue = 1;
+    }
+
     LockedBoard locked;
-    if (!locked_board_load_or_error(&locked))
+    if (!locked_board_load_or_error(&locked)) {
+        dispatch_gh_issue_free(&fetched);
         return 1;
+    }
     DispatchBoard *board = &locked.board;
 
-    char canonical[DISPATCH_ISSUE_TEXT_MAX] = "";
-    if (issue &&
-        !resolve_issue_ref(board, issue, canonical, sizeof(canonical))) {
-        locked_board_close(&locked);
-        return 1;
+    if (issue) {
+        if (!resolve_issue_ref(board, issue, canonical, sizeof(canonical))) {
+            locked_board_close(&locked);
+            dispatch_gh_issue_free(&fetched);
+            return 1;
+        }
+        link_issue = 1;
     }
 
     DispatchTask *task =
@@ -916,14 +1113,16 @@ int cmd_task(int argc, char **argv) {
         const char *code = dispatch_board_find_group(board, group)
                                ? "invalid_title"
                                : "group_not_found";
-        locked_board_close(&locked);
         cli_error(code, NULL, "Could not add task '%s' to group '%s'\n", title,
                   group);
+        locked_board_close(&locked);
+        dispatch_gh_issue_free(&fetched);
         return 1;
     }
     task->requires_review = requires_review;
-    if (issue && !dispatch_task_link_issue(task, canonical, actor)) {
+    if (link_issue && !dispatch_task_link_issue(task, canonical, actor)) {
         locked_board_close(&locked);
+        dispatch_gh_issue_free(&fetched);
         return 1;
     }
 
@@ -931,6 +1130,7 @@ int cmd_task(int argc, char **argv) {
     if (!locked_board_save_or_error(&locked)) {
         free(task_id);
         locked_board_close(&locked);
+        dispatch_gh_issue_free(&fetched);
         return 1;
     }
 
@@ -948,7 +1148,7 @@ int cmd_task(int argc, char **argv) {
     snprintf(message, sizeof(message), "Added task %s", task_id);
     append_dispatch_log(actor, "task", "add", targets, 2, context, 2,
                         message);
-    if (issue) {
+    if (link_issue) {
         if (!cli_json())
             printf("Linked %s to %s\n", task_id, canonical);
         log_issue_change(actor, task_id, 1, canonical);
@@ -961,6 +1161,7 @@ int cmd_task(int argc, char **argv) {
     }
     free(task_id);
     locked_board_close(&locked);
+    dispatch_gh_issue_free(&fetched);
     return status;
 }
 

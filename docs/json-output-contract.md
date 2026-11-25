@@ -166,8 +166,10 @@ that directly depend on this task. `commits` contains recorded commit refs.
 
 A task links at most one issue. The field was added in a compatible release,
 so `schema_version` stays `1`; consumers written before it should already
-ignore it as an unknown field. Dispatch never contacts GitHub to fill it, so
-the issue is not guaranteed to exist.
+ignore it as an unknown field. `task add --issue` and `task edit --issue` never
+contact GitHub to fill it, so a linked issue is not guaranteed to exist;
+`task add --from-issue` fetches the issue through `gh` and links the canonical
+ref from its returned URL.
 
 `workspace` is `null` when no active workspace covers the task. Otherwise it
 contains:
@@ -679,8 +681,12 @@ The version 1 error codes are:
 | `internal_error` | An unexpected failure, such as running out of memory |
 | `invalid_actor` | The actor name is not valid |
 | `invalid_title` | The task title is empty or contains a Dispatch task ID |
-| `invalid_issue` | The `--issue` value is not a valid GitHub issue reference |
+| `invalid_issue` | The `--issue` or `--from-issue` value is not a valid GitHub issue reference, or refers to a pull request |
 | `issue_unresolvable` | A bare issue number cannot be resolved: no GitHub `origin` remote |
+| `issue_not_found` | The requested GitHub issue or repository does not exist |
+| `gh_missing` | `gh` (GitHub CLI) is not installed or not on `PATH` |
+| `gh_not_authenticated` | `gh` is not logged in or its credentials were rejected |
+| `gh_failed` | `gh` exited with another error or returned unreadable JSON |
 | `invalid_commit` | The commit ref is not a 4–64 character hex SHA |
 | `invalid_group` | The group name is empty or too long |
 | `invalid_prefix` | The group prefix is not valid |
