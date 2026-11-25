@@ -227,6 +227,7 @@ enum {
     TUI_COL_WS_STATE = 9, /* workspace record state */
     TUI_COL_FLAG = 5,    /* dirty/clean */
     TUI_COL_GIT = 7,     /* git/no-git */
+    TUI_COL_ORIGIN = 7,  /* created/adopted */
     TUI_COL_TIME = 20,   /* log timestamps */
     TUI_COL_LOG_ACTOR = 14,
     TUI_COL_COMMAND = 10,
@@ -246,6 +247,7 @@ enum {
         TUI_COL_MARKER + TUI_COL_NAME + 1 + TUI_COL_RUNNER + 1,
     TUI_X_WS_DIRTY = TUI_COL_MARKER + TUI_COL_TASK + 1 + TUI_COL_STATE + 1 +
                      TUI_COL_WS_STATE + 1 + TUI_COL_NAME + 1,
+    TUI_X_WS_ORIGIN = TUI_X_WS_DIRTY + TUI_COL_FLAG + 1 + TUI_COL_GIT + 1,
     TUI_X_LOG_ACTION = TUI_COL_MARKER + TUI_COL_TIME + 1 +
                        TUI_COL_LOG_ACTOR + 1 + TUI_COL_COMMAND + 1,
 };
@@ -493,6 +495,10 @@ void run_task_move_picker(DispatchTui *tui);
 void run_workspace_create_form(DispatchTui *tui);
 
 void run_workspace_prune_form(DispatchTui *tui);
+
+void workspace_remove_prompt_label(const DispatchWorkspace *workspace,
+                                   int force, char *label,
+                                   size_t label_size);
 
 void run_workspace_remove_form(DispatchTui *tui, int force);
 
