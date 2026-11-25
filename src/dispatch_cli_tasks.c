@@ -105,14 +105,15 @@ int cmd_repo(int argc, char **argv) {
     }
 
     if (argc != 4 || strcmp(argv[2], "set") != 0) {
-        fprintf(stderr, "Usage: dispatch repo [set <path>]\n");
+        cli_error("usage", NULL, "Usage: dispatch repo [set <path>]\n");
         return 1;
     }
 
     const char *repo_arg = argv[3];
     char *repo_path = dispatch_resolve_path(".", repo_arg);
     if (!repo_path) {
-        fprintf(stderr, "Repo path %s does not exist\n", repo_arg);
+        cli_error("invalid_path", NULL, "Repo path %s does not exist\n",
+                  repo_arg);
         return 1;
     }
 
@@ -122,24 +123,45 @@ int cmd_repo(int argc, char **argv) {
         return 1;
     }
 
+    char *previous_repo_path =
+        cli_strdup(locked.board.repo_path ? locked.board.repo_path : ".");
+    int changed = strcmp(previous_repo_path, repo_path) != 0;
     dispatch_board_set_repo_path(&locked.board, repo_path);
     if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
+        free(previous_repo_path);
         free(repo_path);
         return 1;
     }
 
-    printf("Set repo path to %s\n", repo_path);
-    if (!dispatch_path_is_git_repository(repo_path))
-        printf("Warning: %s is not a git repository\n", repo_path);
+    int is_git = dispatch_path_is_git_repository(repo_path);
+    if (!cli_json()) {
+        printf("Set repo path to %s\n", repo_path);
+        if (!is_git)
+            printf("Warning: %s is not a git repository\n", repo_path);
+    } else if (!is_git) {
+        cli_warning("repo_not_git", NULL, NULL, "%s is not a git repository",
+                    repo_path);
+    }
     DispatchLogField targets[] = {
         {"repo_path", repo_path},
     };
     append_dispatch_log("user", "repo", "set", targets, 1, NULL, 0,
                         "Set repo path");
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result = dispatch_json_result_new("repo_set");
+        dispatch_json_result_set_changed(json_result, changed);
+        dispatch_json_result_set_string(json_result, "previous_repo_path",
+                                        previous_repo_path);
+        dispatch_json_result_set_string(json_result, "repo_path", repo_path);
+        dispatch_json_result_set_bool(json_result, "is_git_repo", is_git);
+        status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+    }
     locked_board_close(&locked);
+    free(previous_repo_path);
     free(repo_path);
-    return 0;
+    return status;
 }
 
 /* Why dispatch_board_add_group refused a group, for the JSON error code. */
@@ -330,8 +352,8 @@ static int cmd_group_ready(int argc, char **argv) {
 
 static int cmd_group_edit(int argc, char **argv) {
     if (argc != 6 || strcmp(argv[4], "--description") != 0) {
-        fprintf(stderr,
-                "Usage: dispatch group edit <prefix> --description <text>\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch group edit <prefix> --description <text>\n");
         return 1;
     }
 
@@ -346,17 +368,21 @@ static int cmd_group_edit(int argc, char **argv) {
     DispatchGroup *group = dispatch_board_find_group(board, group_id);
     if (!group) {
         locked_board_close(&locked);
-        fprintf(stderr, "No group with id, prefix, or name %s\n", group_id);
+        cli_error("group_not_found", NULL,
+                  "No group with id, prefix, or name %s\n", group_id);
         return 1;
     }
 
+    int changed =
+        strcmp(group->description ? group->description : "", description) != 0;
     dispatch_group_set_description(group, description);
     if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
         return 1;
     }
 
-    printf("Updated group %s description\n", group->prefix);
+    if (!cli_json())
+        printf("Updated group %s description\n", group->prefix);
     DispatchLogField targets[] = {
         {"group", group->id},
     };
@@ -368,8 +394,18 @@ static int cmd_group_edit(int argc, char **argv) {
              group->prefix);
     append_dispatch_log("user", "group", "edit", targets, 1, context, 1,
                         message);
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result =
+            dispatch_json_result_new("group_edit");
+        dispatch_json_result_set_changed(json_result, changed);
+        dispatch_json_result_set_string(json_result, "group", group->id);
+        dispatch_json_result_set_string(json_result, "description",
+                                        description);
+        status = cli_json_emit_tasks(board, group->id, json_result);
+    }
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 static void group_task_counts(const DispatchBoard *board,
@@ -805,9 +841,12 @@ int cmd_task(int argc, char **argv) {
     if (argc >= 5 && strcmp(argv[2], "priority") == 0) {
         const char *task_id = argv[3];
         char *end = NULL;
+        errno = 0;
         long value = strtol(argv[4], &end, 10);
-        if (!end || *end != '\0' || value < -99 || value > 99) {
-            fprintf(stderr, "Priority must be an integer between -99 and 99\n");
+        if (argv[4][0] == '\0' || errno != 0 || !end || *end != '\0' ||
+            value < -99 || value > 99) {
+            cli_error("invalid_priority", NULL,
+                      "Priority must be an integer between -99 and 99\n");
             return 1;
         }
         const char *actor = "user";
@@ -815,25 +854,34 @@ int cmd_task(int argc, char **argv) {
             if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
                 actor = argv[++i];
             } else {
-                fprintf(stderr, "Unknown task priority option: %s\n", argv[i]);
+                cli_error("usage", NULL, "Unknown task priority option: %s\n",
+                          argv[i]);
                 return 1;
             }
+        }
+        if (!dispatch_actor_label_is_valid(actor)) {
+            cli_error("invalid_actor", NULL,
+                      "Actor must start with an ASCII letter or digit and contain only letters, digits, '.', '_' or '-'\n");
+            return 1;
         }
 
         LockedBoard locked;
         if (!locked_board_load_or_error(&locked))
             return 1;
         DispatchTask *task = dispatch_board_find_task(&locked.board, task_id);
+        int previous_priority = task ? task->priority : 0;
         if (!task || !dispatch_task_set_priority(task, (int)value, actor)) {
             locked_board_close(&locked);
-            fprintf(stderr, "No task with id %s\n", task_id);
+            cli_error("task_not_found", task_id, "No task with id %s\n",
+                      task_id);
             return 1;
         }
         if (!locked_board_save_or_error(&locked)) {
             locked_board_close(&locked);
             return 1;
         }
-        printf("Set priority of %s to %d\n", task_id, (int)value);
+        if (!cli_json())
+            printf("Set priority of %s to %d\n", task_id, (int)value);
         DispatchLogField targets[] = {
             {"task", task_id},
         };
@@ -844,8 +892,20 @@ int cmd_task(int argc, char **argv) {
         snprintf(message, sizeof(message), "Set priority of %s", task_id);
         append_dispatch_log(actor, "task", "priority", targets, 1, context, 1,
                             message);
+        int status = 0;
+        if (cli_json()) {
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("task_priority");
+            dispatch_json_result_add_target(json_result, task_id);
+            dispatch_json_result_set_changed(json_result,
+                                             previous_priority != (int)value);
+            dispatch_json_result_set_int(json_result, "previous_priority",
+                                         previous_priority);
+            dispatch_json_result_set_int(json_result, "priority", (int)value);
+            status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+        }
         locked_board_close(&locked);
-        return 0;
+        return status;
     }
 
     if (argc < 5 || strcmp(argv[2], "add") != 0) {

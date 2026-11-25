@@ -469,12 +469,37 @@ static int normalize_agent_prompts(DispatchBoard *board) {
     return changed;
 }
 
-int cmd_normalize(void) {
+int cmd_normalize(int argc, char **argv) {
+    (void)argv;
+    if (argc != 2) {
+        cli_error("usage", NULL, "Usage: dispatch normalize [--json]\n");
+        return 1;
+    }
+
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
         return 1;
 
+    DispatchState *stored_before = NULL;
+    if (locked.board.tasks.count > 0) {
+        stored_before =
+            malloc(locked.board.tasks.count * sizeof(*stored_before));
+        if (!stored_before) {
+            fprintf(stderr, "Out of memory\n");
+            exit(1);
+        }
+        for (size_t i = 0; i < locked.board.tasks.count; i++)
+            stored_before[i] = locked.board.tasks.items[i].state;
+    }
+
     dispatch_board_normalize_states(&locked.board);
+    int state_updates = 0;
+    for (size_t i = 0; i < locked.board.tasks.count; i++) {
+        if (locked.board.tasks.items[i].state != stored_before[i])
+            state_updates++;
+    }
+    free(stored_before);
+
     int assignment_repairs = dispatch_board_repair_assignments(&locked.board);
     int session_updates = dispatch_board_normalize_agent_sessions(&locked.board);
     int prompt_updates = normalize_agent_prompts(&locked.board);
@@ -487,18 +512,36 @@ int cmd_normalize(void) {
         return 1;
     }
 
-    printf("Normalized %s\n", DISPATCH_STORE_FILE);
-    if (assignment_repairs > 0)
-        printf("Repaired %d stale task assignment%s\n", assignment_repairs,
-               assignment_repairs == 1 ? "" : "s");
-    if (session_updates > 0)
-        printf("Trimmed %d agent session ID%s\n", session_updates,
-               session_updates == 1 ? "" : "s");
-    if (prompt_updates > 0)
-        printf("Updated %d agent prompt%s\n", prompt_updates,
-               prompt_updates == 1 ? "" : "s");
+    if (!cli_json()) {
+        printf("Normalized %s\n", DISPATCH_STORE_FILE);
+        if (assignment_repairs > 0)
+            printf("Repaired %d stale task assignment%s\n", assignment_repairs,
+                   assignment_repairs == 1 ? "" : "s");
+        if (session_updates > 0)
+            printf("Trimmed %d agent session ID%s\n", session_updates,
+                   session_updates == 1 ? "" : "s");
+        if (prompt_updates > 0)
+            printf("Updated %d agent prompt%s\n", prompt_updates,
+                   prompt_updates == 1 ? "" : "s");
+    }
     append_dispatch_log("user", "normalize", "normalize", NULL, 0, NULL, 0,
                         "Normalized dispatch.json");
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result = dispatch_json_result_new("normalize");
+        dispatch_json_result_set_changed(
+            json_result, state_updates > 0 || assignment_repairs > 0 ||
+                             session_updates > 0 || prompt_updates > 0);
+        dispatch_json_result_set_int(json_result, "state_updates",
+                                     state_updates);
+        dispatch_json_result_set_int(json_result, "assignment_repairs",
+                                     assignment_repairs);
+        dispatch_json_result_set_int(json_result, "session_updates",
+                                     session_updates);
+        dispatch_json_result_set_int(json_result, "prompt_updates",
+                                     prompt_updates);
+        status = cli_json_emit_tasks(&locked.board, NULL, json_result);
+    }
     locked_board_close(&locked);
-    return 0;
+    return status;
 }

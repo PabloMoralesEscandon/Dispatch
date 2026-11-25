@@ -1399,10 +1399,359 @@ assert_json \
     result.skipped array_length 0
 expect_json_error usage "$BIN" workspace prune --bogus --json
 
-# Out-of-scope subcommands keep rejecting --json as before.
-expect_fail "$BIN" task priority DE-01 5 --json
-assert_contains "Unknown task priority option: --json"
-assert_not_contains '"schema_version"'
+# Remaining mutating commands and non-fatal warnings in JSON mode (issue #12).
+# task priority: update, no-op, and coded errors.
+expect_json_ok "$BIN" task priority DE-01 5 --actor json-agent --json
+assert_json \
+    schema_version integer 1 \
+    command string "task priority" \
+    query.task_id string DE-01 \
+    tasks array_length 1 \
+    tasks.0.id string DE-01 \
+    tasks.0.priority integer 5 \
+    warnings array_length 0 \
+    result.action string task_priority \
+    result.changed boolean true \
+    result.task string DE-01 \
+    result.previous_priority integer 0 \
+    result.priority integer 5
+expect_json_ok "$BIN" task priority DE-01 5 --json
+assert_json \
+    result.action string task_priority \
+    result.changed boolean false \
+    result.previous_priority integer 5 \
+    result.priority integer 5
+expect_json_error invalid_priority "$BIN" task priority DE-01 abc --json
+expect_json_error invalid_priority "$BIN" task priority DE-01 100 --json
+expect_json_error invalid_priority "$BIN" task priority DE-01 "" --json
+expect_json_error invalid_actor "$BIN" task priority DE-01 1 --actor "bad actor" --json
+expect_json_error task_not_found "$BIN" task priority Missing 1 --json
+assert_json error.task_id string Missing
+expect_json_error usage "$BIN" task priority DE-01 1 --bogus --json
+expect_json_error usage "$BIN" task priority DE-01 --json
+expect_json_error usage "$BIN" task priority DE-01 1 --json --json
+
+# group edit: update, no-op, and coded errors.
+expect_json_ok "$BIN" group edit DE --description "Core development" --json
+assert_json \
+    command string "group edit" \
+    query.group string DE \
+    board.groups.0.description string "Core development" \
+    tasks array_length 0 \
+    warnings array_length 0 \
+    result.action string group_edit \
+    result.changed boolean true \
+    result.group string DE \
+    result.description string "Core development"
+expect_json_ok "$BIN" group edit DE --description "Core development" --json
+assert_json \
+    result.action string group_edit \
+    result.changed boolean false
+expect_json_error group_not_found "$BIN" group edit Missing --description "Nope" --json
+expect_json_error usage "$BIN" group edit DE --json
+expect_json_error usage "$BIN" group edit DE --description "X" --json --json
+
+# agent create/archive/restore/session/command/resume in JSON mode.
+expect_json_ok "$BIN" agent create --name json-worker --runner codex \
+    --model gpt-test --print-command --json
+assert_json \
+    schema_version integer 1 \
+    command string "agent create" \
+    query.name string json-worker \
+    query.include_archived null - \
+    summary.returned integer 1 \
+    agents array_length 1 \
+    agents.0.name string json-worker \
+    agents.0.runner string codex \
+    agents.0.model string gpt-test \
+    agents.0.archived boolean false \
+    warnings array_length 0 \
+    result.action string agent_create \
+    result.changed boolean true \
+    result.agent string json-worker \
+    result.scratch_dir string .dispatch/agents/json-worker/scratch \
+    result.decisions_dir string .dispatch/agents/json-worker/decisions \
+    result.command string "*"
+expect_json_error agent_exists "$BIN" agent create --name json-worker \
+    --runner codex --json
+expect_json_error invalid_agent "$BIN" agent create --name "bad/name" \
+    --runner codex --json
+expect_json_error invalid_agent "$BIN" agent create --runner codex --json
+expect_json_error invalid_runner "$BIN" agent create --name other-worker \
+    --runner bogus --json
+expect_json_error usage "$BIN" agent create --bogus --json
+
+expect_json_ok "$BIN" agent command json-worker --json
+assert_json \
+    command string "agent command" \
+    agents array_length 1 \
+    agents.0.name string json-worker \
+    warnings array_length 0 \
+    result.action string agent_command \
+    result.changed boolean false \
+    result.agent string json-worker \
+    result.command string "*"
+expect_json_error agent_not_found "$BIN" agent command missing-agent --json
+expect_json_error usage "$BIN" agent command json-worker --bogus --json
+
+expect_json_ok "$BIN" agent session json-worker --session-id "  sess-42  " \
+    --current-task DE-01 --json
+assert_json \
+    command string "agent session" \
+    agents.0.session_id string sess-42 \
+    agents.0.current_task string DE-01 \
+    warnings array_length 0 \
+    result.action string agent_session \
+    result.changed boolean true \
+    result.agent string json-worker
+expect_json_ok "$BIN" agent session json-worker --session-id "sess-42" --json
+assert_json result.changed boolean false
+expect_json_error agent_active "$BIN" agent archive json-worker --json
+assert_json error.task_id string DE-01
+expect_json_ok "$BIN" agent session json-worker --clear-current-task \
+    --clear-session --json
+assert_json \
+    agents.0.session_id null - \
+    agents.0.current_task null - \
+    result.changed boolean true
+expect_json_ok "$BIN" agent session json-worker --clear-session --json
+assert_json result.changed boolean false
+expect_json_error task_not_found "$BIN" agent session json-worker \
+    --current-task Missing --json
+assert_json error.task_id string Missing
+expect_json_error workspace_not_found "$BIN" agent session json-worker \
+    --last-workspace Missing --json
+expect_json_error usage "$BIN" agent session json-worker \
+    --session-id a --clear-session --json
+expect_json_error usage "$BIN" agent session json-worker --json
+
+expect_json_ok "$BIN" agent archive json-worker --json
+assert_json \
+    command string "agent archive" \
+    agents.0.archived boolean true \
+    warnings array_length 0 \
+    result.action string agent_archive \
+    result.changed boolean true \
+    result.agent string json-worker \
+    result.archived boolean true
+expect_json_ok "$BIN" agent archive json-worker --json
+assert_json result.changed boolean false result.archived boolean true
+expect_json_error agent_archived "$BIN" agent command json-worker --json
+expect_json_error agent_archived "$BIN" agent session json-worker \
+    --session-id s --json
+expect_json_error agent_archived "$BIN" agent resume json-worker --json
+expect_json_ok "$BIN" agent restore json-worker --json
+assert_json \
+    command string "agent restore" \
+    agents.0.archived boolean false \
+    result.action string agent_restore \
+    result.changed boolean true \
+    result.agent string json-worker \
+    result.archived boolean false
+expect_json_ok "$BIN" agent restore json-worker --json
+assert_json result.changed boolean false result.archived boolean false
+expect_json_error agent_not_found "$BIN" agent archive missing-agent --json
+expect_json_error usage "$BIN" agent archive --json
+
+# agent resume: codex (no board change) vs claude (mints UUID on first run).
+expect_json_ok "$BIN" agent resume json-worker --json
+assert_json \
+    command string "agent resume" \
+    agents.0.name string json-worker \
+    warnings array_length 0 \
+    result.action string agent_resume \
+    result.changed boolean false \
+    result.agent string json-worker \
+    result.command string "*" \
+    result.resume_script_path null - \
+    result.session_generated boolean false
+expect_json_ok "$BIN" agent create --name json-claude --runner claude \
+    --no-run-script --json
+expect_json_ok "$BIN" agent resume json-claude --json
+assert_json \
+    command string "agent resume" \
+    agents.0.session_id string "*" \
+    result.action string agent_resume \
+    result.changed boolean true \
+    result.agent string json-claude \
+    result.resume_script_path string .dispatch/agents/json-claude/resume.sh \
+    result.session_generated boolean true
+expect_json_ok "$BIN" agent resume json-claude --json
+assert_json \
+    result.changed boolean false \
+    result.session_generated boolean false
+expect_json_error agent_not_found "$BIN" agent resume missing-agent --json
+expect_json_error usage "$BIN" agent resume json-claude --bogus --json
+
+# init, repo set, normalize, workspace repair, and non-fatal JSON warnings.
+json_extra_dir="$(make_case_dir json-init-repo-repair)"
+json_extra_moved="$TMP_ROOT/json-init-repo-repair-moved"
+mkdir -p "$json_extra_dir/repo" "$json_extra_dir/plain-dir"
+expect_ok git -C "$json_extra_dir/repo" init
+expect_ok git -C "$json_extra_dir/repo" -c user.name=Dispatch \
+    -c user.email=dispatch@example.invalid commit --allow-empty -m init
+(
+    cd "$json_extra_dir"
+    expect_json_error invalid_path "$BIN" init missing-repo --json
+    assert_json command string init
+    expect_json_error usage "$BIN" init repo extra --json
+    expect_json_error usage "$BIN" init --json --json
+
+    expect_json_ok "$BIN" init repo --json
+    assert_json \
+        schema_version integer 1 \
+        command string init \
+        board.repo_path string "$json_extra_dir/repo" \
+        tasks array_length 0 \
+        warnings array_length 0 \
+        result.action string init \
+        result.changed boolean true \
+        result.created boolean true \
+        result.repo_path string "$json_extra_dir/repo"
+    expect_json_ok "$BIN" init repo --json
+    assert_json \
+        command string init \
+        result.action string init \
+        result.changed boolean false \
+        result.created boolean false
+
+    # repo set: non-git path puts repo_not_git in warnings with empty stderr.
+    expect_json_ok "$BIN" repo set plain-dir --json
+    assert_json \
+        command string "repo set" \
+        board.repo_path string "$json_extra_dir/plain-dir" \
+        warnings array_length 1 \
+        warnings.0.code string repo_not_git \
+        warnings.0.task_id null - \
+        warnings.0.agent null - \
+        result.action string repo_set \
+        result.changed boolean true \
+        result.previous_repo_path string "$json_extra_dir/repo" \
+        result.repo_path string "$json_extra_dir/plain-dir" \
+        result.is_git_repo boolean false
+    expect_json_ok "$BIN" repo set plain-dir --json
+    assert_json result.changed boolean false warnings array_length 1
+    expect_json_ok "$BIN" repo set repo --json
+    assert_json \
+        warnings array_length 0 \
+        result.changed boolean true \
+        result.is_git_repo boolean true
+    expect_json_error invalid_path "$BIN" repo set missing-repo --json
+    assert_json command string "repo set"
+    expect_json_error usage "$BIN" repo set --json
+    expect_json_error usage "$BIN" repo set repo --json --json
+
+    # workspace repair: relocate workflow dir + worktree, repair, then no-op.
+    expect_ok "$BIN" group add Development --prefix DE
+    expect_ok "$BIN" task add DE Relocate
+    expect_ok "$BIN" task add DE Adopted
+    expect_ok "$BIN" ready DE-01 DE-02 --actor user
+    expect_ok "$BIN" workspace create DE-01 --actor codex
+    expect_ok git -C repo worktree add -b ext/adopted ../ext-adopted HEAD
+    expect_ok "$BIN" workspace adopt DE-02 --actor codex --path ext-adopted \
+        --external orca:repair-test
+)
+mv "$json_extra_dir" "$json_extra_moved"
+(
+    cd "$json_extra_moved"
+    expect_json_ok "$BIN" repo set repo --json
+    expect_json_ok "$BIN" workspace repair DE-01 --json
+    assert_json \
+        schema_version integer 1 \
+        command string "workspace repair" \
+        query.workspace string DE-01 \
+        workspaces array_length 1 \
+        workspaces.0.id string DE-01 \
+        workspaces.0.path string "$json_extra_moved/repo-agent-codex-DE-01" \
+        warnings array_length 0 \
+        result.action string workspace_repair \
+        result.changed boolean true \
+        result.task string DE-01 \
+        result.workspace string DE-01 \
+        result.old_path string "$json_extra_dir/repo-agent-codex-DE-01" \
+        result.path string "$json_extra_moved/repo-agent-codex-DE-01" \
+        result.old_repo_path string "$json_extra_dir/repo" \
+        result.repo_path string "$json_extra_moved/repo"
+    expect_json_ok "$BIN" workspace repair DE-01 --json
+    assert_json \
+        result.action string workspace_repair \
+        result.changed boolean false \
+        warnings array_length 0
+    expect_json_error workspace_adopted "$BIN" workspace repair DE-02 --json
+    assert_json command string "workspace repair" error.task_id string DE-02
+    expect_json_error workspace_not_found "$BIN" workspace repair Missing --json
+    expect_json_error usage "$BIN" workspace repair --json
+    expect_json_error usage "$BIN" workspace repair DE-01 --json --json
+
+    # Failed dispatch.log append goes into warnings instead of stderr text
+    # across task, workspace, and agent mutations.
+    expect_ok "$BIN" agent create --name log-warn-agent --runner codex \
+        --no-run-script
+    mv dispatch.log dispatch.log.saved
+    mkdir dispatch.log
+    expect_json_ok "$BIN" task add DE "Warn on log failure" --json
+    assert_json \
+        warnings array_length 1 \
+        warnings.0.code string log_append_failed \
+        warnings.0.task_id null - \
+        warnings.0.agent null -
+    expect_json_ok "$BIN" workspace remove DE-02 --json
+    assert_json \
+        warnings array_length 1 \
+        warnings.0.code string log_append_failed
+    expect_json_ok "$BIN" agent archive log-warn-agent --json
+    assert_json \
+        warnings array_length 1 \
+        warnings.0.code string log_append_failed
+    rmdir dispatch.log
+    mv dispatch.log.saved dispatch.log
+)
+
+# init scaffold_failed warning when .dispatch cannot be created as a directory.
+scaffold_warn_dir="$(make_case_dir json-init-scaffold-warn)"
+mkdir -p "$scaffold_warn_dir/repo"
+printf 'blocking file\n' > "$scaffold_warn_dir/.dispatch"
+(
+    cd "$scaffold_warn_dir"
+    expect_json_ok "$BIN" init repo --json
+    assert_json \
+        command string init \
+        result.changed boolean true \
+        result.created boolean true \
+        warnings array_length 1 \
+        warnings.0.code string scaffold_failed \
+        warnings.0.task_id null - \
+        warnings.0.agent null -
+)
+
+# normalize --json: reports repair counts, then changed:false on clean board.
+norm_json_dir="$(make_case_dir json-normalize)"
+mkdir -p "$norm_json_dir/repo"
+cp "$ROOT/tests/fixtures/zombie-assignment-board.json" \
+    "$norm_json_dir/dispatch.json"
+(
+    cd "$norm_json_dir"
+    expect_json_ok "$BIN" normalize --json
+    assert_json \
+        schema_version integer 1 \
+        command string normalize \
+        tasks array_length 0 \
+        warnings array_length 0 \
+        result.action string normalize \
+        result.changed boolean true \
+        result.state_updates integer 0 \
+        result.assignment_repairs integer 1 \
+        result.session_updates integer 0 \
+        result.prompt_updates integer 0
+    expect_json_ok "$BIN" normalize --json
+    assert_json \
+        command string normalize \
+        result.action string normalize \
+        result.changed boolean false \
+        result.assignment_repairs integer 0
+    expect_json_error usage "$BIN" normalize extra --json
+    expect_json_error usage "$BIN" normalize --json --json
+)
 
 case_dir="$(make_case_dir task-edit)"
 cd "$case_dir"

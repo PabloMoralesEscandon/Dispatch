@@ -42,6 +42,9 @@ void cli_json_begin(const char *command);
 int cli_json(void);
 void cli_error(const char *code, const char *task_id, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+void cli_warning(const char *code, const char *task_id, const char *agent,
+                 const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
 void cli_json_snapshot(const DispatchBoard *board);
 int cli_json_finish_emit(int ok);
 void cli_json_suppress_error(void);
@@ -52,6 +55,8 @@ int cli_json_emit_tasks(const DispatchBoard *board, const char *group,
 int cli_json_emit_workspaces(const DispatchBoard *board,
                              const DispatchWorkspace *records, size_t count,
                              DispatchJsonResult *result);
+int cli_json_emit_agent(const DispatchBoard *board, const DispatchAgent *agent,
+                        DispatchJsonResult *result);
 /* Emit the JSON error document when status is non-zero; reset state. */
 int cli_json_end(int status);
 
@@ -70,7 +75,7 @@ int cmd_finish(int argc, char **argv);
 int cmd_group(int argc, char **argv);
 int cmd_list(int argc, char **argv);
 int cmd_log(int argc, char **argv);
-int cmd_normalize(void);
+int cmd_normalize(int argc, char **argv);
 int cmd_queue_list(int argc, char **argv, DispatchState state, const char *label);
 int cmd_ready(int argc, char **argv);
 int cmd_ready_list(int json_output);

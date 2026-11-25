@@ -239,9 +239,10 @@ static json_t *agent_json(const DispatchBoard *board,
     return object;
 }
 
-int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
-                              const char *command, const DispatchAgent *only,
-                              int include_archived) {
+static json_t *agent_envelope_json(const DispatchBoard *board,
+                                   const char *command,
+                                   const DispatchAgent *only,
+                                   int include_archived) {
     json_t *agents = json_array();
     size_t enabled = 0;
     size_t archived = 0;
@@ -276,7 +277,14 @@ int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
 
     json_t *root = envelope_json(board, command, query, summary);
     json_object_set_new(root, "agents", agents);
-    return dump_document(stream, root);
+    return root;
+}
+
+int dispatch_json_emit_agents(FILE *stream, const DispatchBoard *board,
+                              const char *command, const DispatchAgent *only,
+                              int include_archived) {
+    return dump_document(
+        stream, agent_envelope_json(board, command, only, include_archived));
 }
 
 int dispatch_json_emit_log(FILE *stream, const DispatchBoard *board,
@@ -520,10 +528,23 @@ static void append_warning(json_t *warnings, const char *code,
                            const char *agent) {
     json_t *warning = json_object();
     json_object_set_new(warning, "code", json_string(code));
-    json_object_set_new(warning, "message", json_string(message));
+    json_t *message_json = json_string(message ? message : "");
+    json_object_set_new(
+        warning, "message",
+        message_json ? message_json : json_string("(message is not valid UTF-8)"));
     json_object_set_new(warning, "task_id", optional_string(task_id));
     json_object_set_new(warning, "agent", optional_string(agent));
     json_array_append_new(warnings, warning);
+}
+
+static json_t *extra_warnings_json(const DispatchJsonWarning *items,
+                                   size_t count) {
+    json_t *warnings = json_array();
+    for (size_t i = 0; i < count; i++) {
+        append_warning(warnings, items[i].code, items[i].message,
+                       items[i].task_id, items[i].agent);
+    }
+    return warnings;
 }
 
 static int board_has_task(const DispatchBoard *board, const char *task_id) {
@@ -730,6 +751,11 @@ void dispatch_json_result_set_bool(DispatchJsonResult *result,
     json_object_set_new(result->extras, key, json_boolean(value));
 }
 
+void dispatch_json_result_set_int(DispatchJsonResult *result,
+                                  const char *key, long long value) {
+    json_object_set_new(result->extras, key, json_integer((json_int_t)value));
+}
+
 void dispatch_json_result_add_skipped(DispatchJsonResult *result,
                                       const char *workspace_id,
                                       const char *reason) {
@@ -816,7 +842,9 @@ static json_t *result_json(const DispatchBoard *board,
 int dispatch_json_emit_mutation(FILE *stream, const DispatchBoard *board,
                                 const char *command, const char *group,
                                 const DispatchJsonSnapshot *before,
-                                const DispatchJsonResult *result) {
+                                const DispatchJsonResult *result,
+                                const DispatchJsonWarning *warnings,
+                                size_t warning_count) {
     json_t *tasks = json_array();
     size_t returned = 0;
     size_t index;
@@ -849,7 +877,8 @@ int dispatch_json_emit_mutation(FILE *stream, const DispatchBoard *board,
     json_object_set_new(root, "query", query_json(&request));
     json_object_set_new(root, "summary", summary_json(board, returned));
     json_object_set_new(root, "tasks", tasks);
-    json_object_set_new(root, "warnings", json_array());
+    json_object_set_new(root, "warnings",
+                        extra_warnings_json(warnings, warning_count));
     json_object_set_new(root, "result", result_json(board, before, result));
     return dump_document(stream, root);
 }
@@ -857,7 +886,8 @@ int dispatch_json_emit_mutation(FILE *stream, const DispatchBoard *board,
 int dispatch_json_emit_workspace_mutation(
     FILE *stream, const DispatchBoard *board, const char *command,
     const DispatchWorkspace *records, size_t record_count,
-    const DispatchJsonSnapshot *before, const DispatchJsonResult *result) {
+    const DispatchJsonSnapshot *before, const DispatchJsonResult *result,
+    const DispatchJsonWarning *warnings, size_t warning_count) {
     json_t *workspaces = json_array();
     for (size_t i = 0; i < record_count; i++)
         json_array_append_new(workspaces,
@@ -865,6 +895,20 @@ int dispatch_json_emit_workspace_mutation(
 
     json_t *root = workspace_envelope_json(
         board, command, workspaces, record_count == 1 ? records[0].id : NULL);
+    json_object_set_new(root, "warnings",
+                        extra_warnings_json(warnings, warning_count));
+    json_object_set_new(root, "result", result_json(board, before, result));
+    return dump_document(stream, root);
+}
+
+int dispatch_json_emit_agent_mutation(
+    FILE *stream, const DispatchBoard *board, const char *command,
+    const DispatchAgent *agent, const DispatchJsonSnapshot *before,
+    const DispatchJsonResult *result, const DispatchJsonWarning *warnings,
+    size_t warning_count) {
+    json_t *root = agent_envelope_json(board, command, agent, 0);
+    json_object_set_new(root, "warnings",
+                        extra_warnings_json(warnings, warning_count));
     json_object_set_new(root, "result", result_json(board, before, result));
     return dump_document(stream, root);
 }

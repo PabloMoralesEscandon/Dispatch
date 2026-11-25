@@ -246,7 +246,8 @@ int write_agent_prompt(const char *path, const char *name,
                               const char *decisions_dir) {
     FILE *file = fopen(path, "w");
     if (!file) {
-        fprintf(stderr, "Could not write %s: %s\n", path, strerror(errno));
+        cli_error("io_failed", NULL, "Could not write %s: %s\n", path,
+                  strerror(errno));
         return 0;
     }
 
@@ -288,7 +289,8 @@ int write_agent_prompt(const char *path, const char *name,
 int write_agent_run_script(const char *path, const char *command) {
     FILE *file = fopen(path, "w");
     if (!file) {
-        fprintf(stderr, "Could not write %s: %s\n", path, strerror(errno));
+        cli_error("io_failed", NULL, "Could not write %s: %s\n", path,
+                  strerror(errno));
         return 0;
     }
 
@@ -298,8 +300,8 @@ int write_agent_run_script(const char *path, const char *command) {
     fprintf(file, "exec %s\n", command);
     fclose(file);
     if (chmod(path, 0700) != 0) {
-        fprintf(stderr, "Could not mark %s executable: %s\n", path,
-                strerror(errno));
+        cli_error("io_failed", NULL, "Could not mark %s executable: %s\n", path,
+                  strerror(errno));
         return 0;
     }
     return 1;
@@ -349,13 +351,15 @@ void dispatch_agent_create_result_free(DispatchAgentCreateResult *result) {
     memset(result, 0, sizeof(*result));
 }
 
-int dispatch_agent_create(const DispatchAgentCreateOptions *options,
-                          DispatchAgentCreateResult *result, char *error,
-                          size_t error_size) {
+static int create_agent_impl(const DispatchAgentCreateOptions *options,
+                             DispatchAgentCreateResult *result, char *error,
+                             size_t error_size, const char **error_code) {
     if (result)
         memset(result, 0, sizeof(*result));
     if (error && error_size > 0)
         error[0] = '\0';
+    if (error_code)
+        *error_code = "internal_error";
 
     const char *name = options ? options->name : NULL;
     const char *runner = options ? options->runner : NULL;
@@ -365,6 +369,8 @@ int dispatch_agent_create(const DispatchAgentCreateOptions *options,
     int no_run_script = options ? options->no_run_script : 0;
 
     if (!dispatch_agent_name_is_valid(name)) {
+        if (error_code)
+            *error_code = "invalid_agent";
         if (error && error_size > 0) {
             snprintf(error, error_size,
                      "Agent name must be 1-%d characters of letters, digits, "
@@ -374,6 +380,8 @@ int dispatch_agent_create(const DispatchAgentCreateOptions *options,
         return 0;
     }
     if (!dispatch_agent_runner_is_valid(runner)) {
+        if (error_code)
+            *error_code = "invalid_runner";
         if (error && error_size > 0)
             snprintf(error, error_size,
                      "Agent runner must be one of " DISPATCH_AGENT_RUNNER_CHOICES);
@@ -398,6 +406,8 @@ int dispatch_agent_create(const DispatchAgentCreateOptions *options,
     }
     if (dispatch_board_find_agent(&locked.board, name)) {
         locked_board_close(&locked);
+        if (error_code)
+            *error_code = "agent_exists";
         if (error && error_size > 0)
             snprintf(error, error_size, "Agent %s already exists", name);
         free(agent_dir_base);
@@ -459,6 +469,12 @@ int dispatch_agent_create(const DispatchAgentCreateOptions *options,
     return 1;
 }
 
+int dispatch_agent_create(const DispatchAgentCreateOptions *options,
+                          DispatchAgentCreateResult *result, char *error,
+                          size_t error_size) {
+    return create_agent_impl(options, result, error, error_size, NULL);
+}
+
 static int cmd_agent_create(int argc, char **argv) {
     const char *name = NULL;
     const char *runner = NULL;
@@ -478,8 +494,8 @@ static int cmd_agent_create(int argc, char **argv) {
         } else if (strcmp(argv[i], "--print-command") == 0) {
             print_command = 1;
         } else {
-            fprintf(stderr,
-                    "Usage: dispatch agent create --name <name> --runner " DISPATCH_AGENT_RUNNER_CHOICES " [--model <name>] [--no-run-script] [--print-command]\n");
+            cli_error("usage", NULL,
+                      "Usage: dispatch agent create --name <name> --runner " DISPATCH_AGENT_RUNNER_CHOICES " [--model <name>] [--no-run-script] [--print-command]\n");
             return 1;
         }
     }
@@ -493,23 +509,46 @@ static int cmd_agent_create(int argc, char **argv) {
     };
     DispatchAgentCreateResult result = {0};
     char error[256] = {0};
-    if (!dispatch_agent_create(&options, &result, error, sizeof(error))) {
+    const char *error_code = "internal_error";
+    if (!create_agent_impl(&options, &result, error, sizeof(error),
+                           &error_code)) {
         if (error[0] != '\0')
-            fprintf(stderr, "%s\n", error);
+            cli_error(error_code, NULL, "%s\n", error);
         return 1;
     }
 
-    printf("Created agent %s (%s)\n", name, runner);
-    printf("  prompt: %s\n", result.prompt_path);
-    printf("  scratch: %s\n", result.scratch_dir);
-    printf("  decisions: %s\n", result.decisions_dir);
-    if (result.run_script_path)
-        printf("  run script: %s\n", result.run_script_path);
-    if (print_command)
-        printf("  command: %s\n", result.command);
+    int status = 0;
+    if (cli_json()) {
+        DispatchBoard board;
+        if (!load_board_or_error(&board)) {
+            status = 1;
+        } else {
+            DispatchAgent *created = dispatch_board_find_agent(&board, name);
+            DispatchJsonResult *json_result =
+                dispatch_json_result_new("agent_create");
+            dispatch_json_result_set_string(json_result, "agent", name);
+            dispatch_json_result_set_string(json_result, "scratch_dir",
+                                            result.scratch_dir);
+            dispatch_json_result_set_string(json_result, "decisions_dir",
+                                            result.decisions_dir);
+            dispatch_json_result_set_string(json_result, "command",
+                                            result.command);
+            status = cli_json_emit_agent(&board, created, json_result);
+            dispatch_board_free(&board);
+        }
+    } else {
+        printf("Created agent %s (%s)\n", name, runner);
+        printf("  prompt: %s\n", result.prompt_path);
+        printf("  scratch: %s\n", result.scratch_dir);
+        printf("  decisions: %s\n", result.decisions_dir);
+        if (result.run_script_path)
+            printf("  run script: %s\n", result.run_script_path);
+        if (print_command)
+            printf("  command: %s\n", result.command);
+    }
 
     dispatch_agent_create_result_free(&result);
-    return 0;
+    return status;
 }
 
 static int cmd_agent_list(int argc, char **argv) {
@@ -639,9 +678,15 @@ static int agent_has_active_workspace(const DispatchBoard *board,
     return 0;
 }
 
+static int optional_strings_equal(const char *a, const char *b) {
+    const char *sa = a && a[0] ? a : "";
+    const char *sb = b && b[0] ? b : "";
+    return strcmp(sa, sb) == 0;
+}
+
 static int cmd_agent_archive_restore(int argc, char **argv) {
     if (argc != 4) {
-        fprintf(stderr, "Usage: dispatch agent %s <name>\n", argv[2]);
+        cli_error("usage", NULL, "Usage: dispatch agent %s <name>\n", argv[2]);
         return 1;
     }
 
@@ -655,7 +700,7 @@ static int cmd_agent_archive_restore(int argc, char **argv) {
     DispatchAgent *agent = dispatch_board_find_agent(&locked.board, name);
     if (!agent) {
         locked_board_close(&locked);
-        fprintf(stderr, "No agent named %s\n", name);
+        cli_error("agent_not_found", NULL, "No agent named %s\n", name);
         return 1;
     }
 
@@ -663,18 +708,20 @@ static int cmd_agent_archive_restore(int argc, char **argv) {
         const char *task_id = NULL;
         const char *workspace_id = NULL;
         if (agent_has_active_task(&locked.board, agent, &task_id)) {
-            fprintf(stderr, "Agent %s has active task %s\n", name, task_id);
+            cli_error("agent_active", task_id, "Agent %s has active task %s\n",
+                      name, task_id);
             locked_board_close(&locked);
             return 1;
         }
         if (agent_has_active_workspace(&locked.board, agent, &workspace_id)) {
-            fprintf(stderr, "Agent %s has active workspace %s\n", name,
-                    workspace_id);
+            cli_error("agent_active", NULL,
+                      "Agent %s has active workspace %s\n", name, workspace_id);
             locked_board_close(&locked);
             return 1;
         }
     }
 
+    int changed = (agent->archived != archive);
     agent->archived = archive;
     agent->updated_at = time(NULL);
     if (!locked_board_save_or_error(&locked)) {
@@ -682,7 +729,8 @@ static int cmd_agent_archive_restore(int argc, char **argv) {
         return 1;
     }
 
-    printf("%s agent %s\n", archive ? "Archived" : "Restored", name);
+    if (!cli_json())
+        printf("%s agent %s\n", archive ? "Archived" : "Restored", name);
     DispatchLogField targets[] = {
         {"agent", name},
     };
@@ -694,13 +742,22 @@ static int cmd_agent_archive_restore(int argc, char **argv) {
              archive ? "Archived" : "Restored", name);
     append_dispatch_log("user", "agent", archive ? "archive" : "restore",
                         targets, 1, context, 1, message);
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result = dispatch_json_result_new(
+            archive ? "agent_archive" : "agent_restore");
+        dispatch_json_result_set_changed(json_result, changed);
+        dispatch_json_result_set_string(json_result, "agent", name);
+        dispatch_json_result_set_bool(json_result, "archived", archive);
+        status = cli_json_emit_agent(&locked.board, agent, json_result);
+    }
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 static void print_agent_session_usage(void) {
-    fprintf(stderr,
-            "Usage: dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]\n");
+    cli_error("usage", NULL,
+              "Usage: dispatch agent session <name> [--session-id <id>|--clear-session] [--current-task <id>|--clear-current-task] [--last-workspace <id>|--clear-last-workspace]\n");
 }
 
 static int cmd_agent_session(int argc, char **argv) {
@@ -751,7 +808,7 @@ static int cmd_agent_session(int argc, char **argv) {
     if ((session_id && clear_session) ||
         (current_task && clear_current_task) ||
         (last_workspace && clear_last_workspace)) {
-        fprintf(stderr, "Session metadata options conflict\n");
+        cli_error("usage", NULL, "Session metadata options conflict\n");
         return 1;
     }
 
@@ -762,33 +819,46 @@ static int cmd_agent_session(int argc, char **argv) {
     DispatchAgent *agent = dispatch_board_find_agent(&locked.board, name);
     if (!agent) {
         locked_board_close(&locked);
-        fprintf(stderr, "No agent named %s\n", name);
+        cli_error("agent_not_found", NULL, "No agent named %s\n", name);
         return 1;
     }
     if (agent->archived) {
         locked_board_close(&locked);
-        fprintf(stderr, "Agent %s is archived; restore it first\n", name);
+        cli_error("agent_archived", NULL,
+                  "Agent %s is archived; restore it first\n", name);
         return 1;
     }
     if (current_task && !dispatch_board_find_task(&locked.board, current_task)) {
         locked_board_close(&locked);
-        fprintf(stderr, "No task with id %s\n", current_task);
+        cli_error("task_not_found", current_task, "No task with id %s\n",
+                  current_task);
         return 1;
     }
     if (last_workspace &&
         !dispatch_board_find_workspace(&locked.board, last_workspace)) {
         locked_board_close(&locked);
-        fprintf(stderr, "No workspace for %s\n", last_workspace);
+        cli_error("workspace_not_found", NULL, "No workspace for %s\n",
+                  last_workspace);
         return 1;
     }
 
     char *trimmed_session_id = session_id ? trimmed_copy(session_id) : NULL;
-    if (session_id || clear_session)
+    int changed = 0;
+    if (session_id || clear_session) {
+        if (!optional_strings_equal(agent->session_id, trimmed_session_id))
+            changed = 1;
         replace_optional_string(&agent->session_id, trimmed_session_id);
-    if (current_task || clear_current_task)
+    }
+    if (current_task || clear_current_task) {
+        if (!optional_strings_equal(agent->current_task, current_task))
+            changed = 1;
         replace_optional_string(&agent->current_task, current_task);
-    if (last_workspace || clear_last_workspace)
+    }
+    if (last_workspace || clear_last_workspace) {
+        if (!optional_strings_equal(agent->last_workspace, last_workspace))
+            changed = 1;
         replace_optional_string(&agent->last_workspace, last_workspace);
+    }
     agent->updated_at = time(NULL);
 
     if (!locked_board_save_or_error(&locked)) {
@@ -797,7 +867,8 @@ static int cmd_agent_session(int argc, char **argv) {
         return 1;
     }
 
-    printf("Updated agent session %s\n", name);
+    if (!cli_json())
+        printf("Updated agent session %s\n", name);
     DispatchLogField targets[] = {
         {"agent", name},
     };
@@ -810,18 +881,27 @@ static int cmd_agent_session(int argc, char **argv) {
     snprintf(message, sizeof(message), "Updated agent session %s", name);
     append_dispatch_log("user", "agent", "session", targets, 1, context, 3,
                         message);
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result =
+            dispatch_json_result_new("agent_session");
+        dispatch_json_result_set_changed(json_result, changed);
+        dispatch_json_result_set_string(json_result, "agent", name);
+        status = cli_json_emit_agent(&locked.board, agent, json_result);
+    }
     free(trimmed_session_id);
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 static int cmd_agent_command(int argc, char **argv) {
     if (argc != 4 && argc != 5) {
-        fprintf(stderr, "Usage: dispatch agent command <name> [--print-command]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch agent command <name> [--print-command]\n");
         return 1;
     }
     if (argc == 5 && strcmp(argv[4], "--print-command") != 0) {
-        fprintf(stderr, "Unknown agent command option: %s\n", argv[4]);
+        cli_error("usage", NULL, "Unknown agent command option: %s\n", argv[4]);
         return 1;
     }
 
@@ -832,31 +912,43 @@ static int cmd_agent_command(int argc, char **argv) {
     DispatchAgent *agent = dispatch_board_find_agent(&board, argv[3]);
     if (!agent) {
         dispatch_board_free(&board);
-        fprintf(stderr, "No agent named %s\n", argv[3]);
+        cli_error("agent_not_found", NULL, "No agent named %s\n", argv[3]);
         return 1;
     }
     if (agent->archived) {
         dispatch_board_free(&board);
-        fprintf(stderr, "Agent %s is archived; restore it first\n", argv[3]);
+        cli_error("agent_archived", NULL,
+                  "Agent %s is archived; restore it first\n", argv[3]);
         return 1;
     }
 
     char *command =
         agent_command_for(agent->runner, agent->model, agent->prompt_path);
-    printf("%s\n", command);
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result =
+            dispatch_json_result_new("agent_command");
+        dispatch_json_result_set_changed(json_result, 0);
+        dispatch_json_result_set_string(json_result, "agent", agent->name);
+        dispatch_json_result_set_string(json_result, "command", command);
+        status = cli_json_emit_agent(&board, agent, json_result);
+    } else {
+        printf("%s\n", command);
+    }
     free(command);
 
     dispatch_board_free(&board);
-    return 0;
+    return status;
 }
 
 static int cmd_agent_resume(int argc, char **argv) {
     if (argc != 4 && argc != 5) {
-        fprintf(stderr, "Usage: dispatch agent resume <name> [--print-command]\n");
+        cli_error("usage", NULL,
+                  "Usage: dispatch agent resume <name> [--print-command]\n");
         return 1;
     }
     if (argc == 5 && strcmp(argv[4], "--print-command") != 0) {
-        fprintf(stderr, "Unknown agent resume option: %s\n", argv[4]);
+        cli_error("usage", NULL, "Unknown agent resume option: %s\n", argv[4]);
         return 1;
     }
 
@@ -867,12 +959,13 @@ static int cmd_agent_resume(int argc, char **argv) {
     DispatchAgent *agent = dispatch_board_find_agent(&locked.board, argv[3]);
     if (!agent) {
         locked_board_close(&locked);
-        fprintf(stderr, "No agent named %s\n", argv[3]);
+        cli_error("agent_not_found", NULL, "No agent named %s\n", argv[3]);
         return 1;
     }
     if (agent->archived) {
         locked_board_close(&locked);
-        fprintf(stderr, "Agent %s is archived; restore it first\n", argv[3]);
+        cli_error("agent_archived", NULL,
+                  "Agent %s is archived; restore it first\n", argv[3]);
         return 1;
     }
 
@@ -881,9 +974,9 @@ static int cmd_agent_resume(int argc, char **argv) {
         workspace =
             dispatch_board_find_workspace(&locked.board, agent->last_workspace);
         if (!workspace || workspace->state == DISPATCH_WORKSPACE_REMOVED) {
+            cli_error("workspace_not_found", NULL,
+                      "No active workspace for %s\n", agent->last_workspace);
             locked_board_close(&locked);
-            fprintf(stderr, "No active workspace for %s\n",
-                    agent->last_workspace);
             return 1;
         }
     }
@@ -900,7 +993,8 @@ static int cmd_agent_resume(int argc, char **argv) {
             char *uuid = generate_uuid_v4();
             if (!uuid) {
                 locked_board_close(&locked);
-                fprintf(stderr, "Could not generate Claude session UUID\n");
+                cli_error("internal_error", NULL,
+                          "Could not generate Claude session UUID\n");
                 return 1;
             }
             replace_optional_string(&agent->session_id, uuid);
@@ -923,15 +1017,12 @@ static int cmd_agent_resume(int argc, char **argv) {
             return 1;
         }
     } else {
+        cli_error("invalid_runner", NULL,
+                  "Agent resume is not implemented for runner %s\n",
+                  agent->runner);
         locked_board_close(&locked);
-        fprintf(stderr, "Agent resume is not implemented for runner %s\n",
-                agent->runner);
         return 1;
     }
-
-    printf("%s\n", command);
-    if (resume_script_path)
-        printf("resume script: %s\n", resume_script_path);
 
     if (generated_session) {
         DispatchLogField targets[] = {
@@ -948,11 +1039,29 @@ static int cmd_agent_resume(int argc, char **argv) {
                             message);
     }
 
+    int status = 0;
+    if (cli_json()) {
+        DispatchJsonResult *json_result =
+            dispatch_json_result_new("agent_resume");
+        dispatch_json_result_set_changed(json_result, generated_session);
+        dispatch_json_result_set_string(json_result, "agent", agent->name);
+        dispatch_json_result_set_string(json_result, "command", command);
+        dispatch_json_result_set_string(json_result, "resume_script_path",
+                                        resume_script_path);
+        dispatch_json_result_set_bool(json_result, "session_generated",
+                                      generated_session);
+        status = cli_json_emit_agent(&locked.board, agent, json_result);
+    } else {
+        printf("%s\n", command);
+        if (resume_script_path)
+            printf("resume script: %s\n", resume_script_path);
+    }
+
     free(command);
     free(resume_script_path);
 
     locked_board_close(&locked);
-    return 0;
+    return status;
 }
 
 int cmd_agent(int argc, char **argv) {
