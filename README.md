@@ -197,16 +197,31 @@ dispatch ready
 
 ```bash
 dispatch init [repo-path]
+dispatch repo
+dispatch repo set <path>
 dispatch normalize
 dispatch status [--json]
-dispatch doctor
+dispatch doctor [--json]
 dispatch log [--task <id>] [--actor <name>] [--agent <name>] [--workspace <id>] [--command <name>] [--action <name>] [--limit <n>] [--json]
 ```
 
-`init` creates `dispatch.json` if it does not already exist. Pass the repository
-path, normally `repo`, when using the recommended parent workflow layout.
-`normalize` recomputes derived states such as blocked and ready. It also repairs
-older agent prompt records by moving them to the canonical
+`init` resolves `[repo-path]` (which must exist, defaulting to `.`) to an
+absolute path and creates `dispatch.json` if it does not already exist. Pass
+the repository path, normally `repo`, when using the recommended parent
+workflow layout.
+
+`repo` prints the board's configured repository path (`Repo: <path>`) and warns
+if it is not a Git repository; there is no `repo show` subcommand.
+`repo set <path>` resolves `<path>` (which must exist) to an absolute path and
+updates the board's stored repository path in place without recreating the
+board or modifying tasks, workspaces, or history. It warns if the target is not
+a Git repository and appends a `repo`/`set` entry to `dispatch.log`. Neither
+form accepts `--json`.
+
+`normalize` recomputes derived states such as blocked and ready and repairs
+stale task assignment invariant violations (see
+[task state invariants](docs/task-state-invariants.md)). It also repairs older
+agent prompt records by moving them to the canonical
 `.dispatch/agents/<name>/<name>-PROMPT.md` prompt path, refreshing outdated
 generated prompt content, regenerating affected agent run scripts, and trimming
 stored agent session IDs.
@@ -489,12 +504,18 @@ pane and agent `run.sh` scripts or resume commands in other panes.
 ### Groups
 
 ```bash
-dispatch group add <name> [--prefix XX]
+dispatch group add <name> [--prefix XX] [--description <text>]
 dispatch group ready <group> [--actor <name>] [--no-review]
+dispatch group edit <prefix> --description <text>
+dispatch group list
+dispatch group show <prefix>
 ```
 
 Groups are workflow lanes or topics. Task IDs are generated from the group
-prefix, for example `DE-01`.
+prefix, for example `DE-01`. Pass `--description` on `group add` or update it
+later with `group edit` to record what work belongs in the group; `group list`
+and `group show` inspect recorded scopes and per-group task counts (see
+[group scope](docs/group-scope.md)).
 
 `group ready` marks every proposed task in the group as ready in one operation.
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
@@ -514,6 +535,7 @@ dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-
 dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]
 dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
+dispatch task priority <id> <value> [--actor <name>]
 dispatch show <id> [--json]
 dispatch list [all] [group] [--json]
 ```
@@ -568,14 +590,24 @@ prefix from its original group, such as `DE-02` while listed in group `QA`.
 Deleting a task with dependents is rejected unless `--force` is used. Forced
 delete also removes that task from other tasks' dependency lists.
 
+`task priority` sets a task's integer priority from `-99` to `99` (default `0`).
+Higher values surface first in ready listings (`ready`, the Ready section of
+`status`, and `finish`'s `Next ready tasks:`), with ties keeping board order.
+Priority orders only ready tasks — dependencies and workflow state still take
+precedence, and `list` and `--json` task arrays always keep board order.
+Changing priority appends a `priority` entry to task history using `--actor`
+(default `user`) and a `task`/`priority` record to `dispatch.log`; `show`
+always prints `Priority: <n>`. `task priority` does not accept `--json`.
+
 `list` prints active tasks once, grouped by Dispatch group and in task order.
 Completed tasks are hidden by default. If every task in a group is completed,
 the group prints a single `(done)` marker instead of every completed task row.
 Dependencies are shown on the task line as `depends_on:A,B`. The output can be
 limited to one group by ID, prefix, or name. Use `list all` to include
 completed tasks, optionally scoped to a group with `list all <group>`.
-Tasks with recorded commits show a `commits:N` summary on their task line, and
-tasks with a linked issue show `issue:#N`.
+Tasks with recorded commits show a `commits:N` summary on their task line,
+tasks with a linked issue show `issue:#N`, and tasks with a non-zero priority
+show `priority:N`.
 
 When stdout is a terminal, `list` uses ANSI color to distinguish group headings,
 task IDs, states, and metadata. Set `FORCE_COLOR=1` to force color in captured
@@ -611,12 +643,13 @@ task-to-diff link.
 
 ```bash
 dispatch ready [--json]
-dispatch ready <id> [--actor <name>] [--no-review]
+dispatch ready <id> [<id> ...] [--actor <name>] [--no-review]
 dispatch reviews [--json]
 dispatch proposed [--json]
 dispatch start <id> --actor <name>
 dispatch finish <id> --actor <name>
-dispatch review <id> [--actor <name>]
+dispatch review <id> [<id> ...] [--actor <name>]
+dispatch unassign <id> --actor <name>
 ```
 
 The normal lifecycle is:
@@ -631,9 +664,13 @@ Tasks without review gates go directly from `doing` to `done` when finished:
 proposed -> ready -> doing -> done
 ```
 
-Use `ready` with no ID to list work that can be started. If no task is ready,
-it summarizes waiting review, proposed, and blocked queues. Use `ready <id>` to
-approve a proposed task for work. Omitted actors on user-facing approval and
+Use `ready` with no ID to list work that can be started, ordered by descending
+`priority` (see `task priority`) with board order preserved on ties. If no task
+is ready, it summarizes waiting review, proposed, and blocked queues. Use
+`ready <id>` (one or more IDs) to approve proposed tasks for work; re-readying
+a `doing`, `paused`, or `review` task is an explicit revert that clears its
+assignment and start provenance (`assigned_to`, `started_by`, `started_at`) so
+it can be started cleanly again. Omitted actors on user-facing approval and
 review commands default to `user`; agents should still pass their explicit
 actor name when acting on the user's instruction. Add `--no-review` when
 approving a task that can safely move directly from `doing` to `done` after the
@@ -644,7 +681,29 @@ for approval.
 
 `start` assigns the task to an actor and prevents a second actor from starting
 the same task. `finish` records the completing actor and moves the task to
-`review` or `done`. `review` accepts a review task as done.
+`review` or `done`. `review` accepts one or more review tasks as done.
+
+`unassign` clears an abandoned or stuck task assignment (`assigned_to`,
+`started_by`, and `started_at`) without editing `dispatch.json`. `--actor` is
+required. It is allowed when the task is assigned and in `proposed`, `ready`,
+`blocked`, `doing`, or `paused`: a `doing` (or `paused`) task returns to
+`ready` (or `blocked` if dependencies are unmet), while a stale assignment on a
+`proposed`, `ready`, or `blocked` task is cleared in place. `unassign` refuses
+`review` and `done` tasks so completion provenance is not discarded, and
+refuses tasks with no assignee. It appends an `unassigned` entry to task
+history and an `unassign` record to `dispatch.log`, leaves workspaces
+untouched, and accepts `--json` (see
+[JSON Results For Mutating Commands](#json-results-for-mutating-commands)). See
+[task state invariants](docs/task-state-invariants.md) for the full assignment
+contract and `normalize` repair procedure.
+
+The board model also defines a reserved `paused` state (`DISPATCH_STATE_PAUSED`),
+which appears as a `paused:0` counter in `status`, `group show`, and JSON
+`summary.states`. No CLI command or TUI action transitions a task into `paused`
+(`dispatch pause` is not implemented). If a board already contains a `paused`
+task, Dispatch loads it and treats it as an in-flight assigned state in
+`doctor` and `normalize`, and `ready <id>` or `unassign <id>` clears its
+assignment and returns it to `ready` (or `blocked` if dependencies are unmet).
 
 ## JSON Output
 
@@ -1062,6 +1121,6 @@ Dispatch no longer supports the old personal todo commands or metadata:
 - recurrence
 - notification metadata
 - categories
-- priority-first sorting
+- global priority-first sorting (`list` stays in group and workflow order; optional `task priority` orders only the `ready` queue)
 
 Use Dispatch groups, dependencies, review gates, and lifecycle commands instead.

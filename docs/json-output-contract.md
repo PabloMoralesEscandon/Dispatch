@@ -114,6 +114,7 @@ Every entry in `tasks` has the same shape:
   "state": "blocked",
   "stored_state": "blocked",
   "requires_review": true,
+  "priority": 0,
   "assigned_to": null,
   "started_by": null,
   "completed_by": null,
@@ -146,6 +147,9 @@ Every entry in `tasks` has the same shape:
 remains `proposed`; otherwise this is the effective state after dependencies
 are evaluated. `stored_state` is the persisted lifecycle state and can differ
 from `state` when derived state has not yet been normalized and persisted.
+`priority` is an integer from `-99` to `99` (default `0`, set with
+`task priority`); higher values surface first in human `ready` listings, while
+JSON `tasks` arrays always retain board order.
 
 `depends_on` contains all direct dependency IDs. `blocked_by` contains only
 dependencies that are not effectively done. `blocks` contains IDs of all tasks
@@ -699,5 +703,5 @@ generic failure.
 
 Read commands report errors as text even with `--json`. Mutating commands
 outside the list above, such as `task priority`, `group edit`,
-`workspace repair`, `agent`, `normalize`, and `init`, do not accept `--json`
-and report errors as text.
+`workspace repair`, `repo`, `agent`, `normalize`, and `init`, do not accept
+`--json` and report errors as text.
