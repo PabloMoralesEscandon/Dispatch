@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -205,6 +206,13 @@ static int configure_child(const DispatchExecOptions *options, int stdin_fd,
                !redirect_to_dev_null(STDIN_FILENO, 0)) {
         return 0;
     }
+    /* Guard against stderr_fd colliding with STDOUT_FILENO before dup2. */
+    if (stdout_fd >= 0 && stderr_fd == STDOUT_FILENO) {
+        int moved = dup(stderr_fd);
+        if (moved < 0)
+            return 0;
+        stderr_fd = moved;
+    }
     if (stdout_fd >= 0) {
         if (dup2(stdout_fd, STDOUT_FILENO) < 0)
             return 0;
@@ -219,7 +227,7 @@ static int configure_child(const DispatchExecOptions *options, int stdin_fd,
                !redirect_to_dev_null(STDERR_FILENO, 1)) {
         return 0;
     }
-    if (options->merge_stderr_to_stdout &&
+    if (options->merge_stderr_to_stdout && stderr_fd < 0 &&
         dup2(STDOUT_FILENO, STDERR_FILENO) < 0) {
         return 0;
     }
@@ -362,6 +370,153 @@ int dispatch_exec_capture(const char *const argv[],
         *output = NULL;
         if (output_size)
             *output_size = 0;
+        return 0;
+    }
+    return 1;
+}
+
+static int set_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD);
+    return flags >= 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
+}
+
+static int drain_pipe(int *fd, int *open_flag, char **output, size_t *length,
+                      size_t *capacity) {
+    char buffer[4096];
+    ssize_t count = read(*fd, buffer, sizeof(buffer));
+    if (count > 0) {
+        if (!append_output(output, length, capacity, buffer, (size_t)count))
+            return 0;
+        return 1;
+    }
+    if (count == 0) {
+        close(*fd);
+        *fd = -1;
+        *open_flag = 0;
+        return 1;
+    }
+    return errno == EINTR;
+}
+
+int dispatch_exec_capture_streams(const char *const argv[],
+                                  const DispatchExecOptions *options,
+                                  char **stdout_output, size_t *stdout_size,
+                                  char **stderr_output, size_t *stderr_size,
+                                  DispatchExecResult *result) {
+    if (!stdout_output || !stderr_output) {
+        errno = EINVAL;
+        return 0;
+    }
+    *stdout_output = NULL;
+    *stderr_output = NULL;
+    if (stdout_size)
+        *stdout_size = 0;
+    if (stderr_size)
+        *stderr_size = 0;
+
+    int out_fds[2] = {-1, -1};
+    int err_fds[2] = {-1, -1};
+    if (pipe(out_fds) != 0)
+        return 0;
+    if (pipe(err_fds) != 0) {
+        close(out_fds[0]);
+        close(out_fds[1]);
+        return 0;
+    }
+    if (!set_cloexec(out_fds[0]) || !set_cloexec(err_fds[0])) {
+        close(out_fds[0]);
+        close(out_fds[1]);
+        close(err_fds[0]);
+        close(err_fds[1]);
+        return 0;
+    }
+
+    pid_t child;
+    if (!spawn_process(argv, options, -1, out_fds[1], err_fds[1], -1, &child)) {
+        close(out_fds[0]);
+        close(out_fds[1]);
+        close(err_fds[0]);
+        close(err_fds[1]);
+        return 0;
+    }
+    close(out_fds[1]);
+    close(err_fds[1]);
+
+    size_t out_len = 0, out_cap = 0;
+    size_t err_len = 0, err_cap = 0;
+    int out_open = 1;
+    int err_open = 1;
+    int read_ok = 1;
+    while (out_open || err_open) {
+        struct pollfd pfds[2];
+        nfds_t nfds = 0;
+        int out_idx = -1;
+        int err_idx = -1;
+        if (out_open) {
+            out_idx = (int)nfds;
+            pfds[nfds].fd = out_fds[0];
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+        if (err_open) {
+            err_idx = (int)nfds;
+            pfds[nfds].fd = err_fds[0];
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+
+        int ready = poll(pfds, nfds, -1);
+        if (ready < 0) {
+            if (errno == EINTR)
+                continue;
+            read_ok = 0;
+            break;
+        }
+        if (out_idx >= 0 && pfds[out_idx].revents != 0 &&
+            !drain_pipe(&out_fds[0], &out_open, stdout_output, &out_len,
+                        &out_cap)) {
+            read_ok = 0;
+            break;
+        }
+        if (err_idx >= 0 && pfds[err_idx].revents != 0 &&
+            !drain_pipe(&err_fds[0], &err_open, stderr_output, &err_len,
+                        &err_cap)) {
+            read_ok = 0;
+            break;
+        }
+    }
+
+    if (out_open)
+        close(out_fds[0]);
+    if (err_open)
+        close(err_fds[0]);
+
+    int wait_ok = wait_for_process(child, result);
+    if (!*stdout_output) {
+        *stdout_output = exec_strdup("");
+        if (!*stdout_output)
+            read_ok = 0;
+    }
+    if (!*stderr_output) {
+        *stderr_output = exec_strdup("");
+        if (!*stderr_output)
+            read_ok = 0;
+    }
+    if (stdout_size)
+        *stdout_size = out_len;
+    if (stderr_size)
+        *stderr_size = err_len;
+    if (!read_ok || !wait_ok) {
+        free(*stdout_output);
+        free(*stderr_output);
+        *stdout_output = NULL;
+        *stderr_output = NULL;
+        if (stdout_size)
+            *stdout_size = 0;
+        if (stderr_size)
+            *stderr_size = 0;
         return 0;
     }
     return 1;

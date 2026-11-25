@@ -113,6 +113,13 @@ void cli_json_snapshot(const DispatchBoard *board) {
     context.snapshot_taken = 1;
 }
 
+void cli_json_snapshot_reset(void) {
+    if (!context.snapshot_taken)
+        return;
+    dispatch_json_snapshot_free(&context.before);
+    context.snapshot_taken = 0;
+}
+
 int cli_json_finish_emit(int ok) {
     if (ok)
         return 0;

@@ -762,10 +762,10 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
     int visible_rows = rows - start_y - 2;
     sync_workspace_scroll(tui, visible_rows);
     char header[256];
-    snprintf(header, sizeof(header), "  %-*s %-*s %-*s %-*s %-*s %-*s %s",
+    snprintf(header, sizeof(header), "  %-*s %-*s %-*s %-*s %-*s %-*s %-*s %s",
              TUI_COL_TASK, "Task", TUI_COL_STATE, "State", TUI_COL_WS_STATE,
              "WS", TUI_COL_NAME, "Actor", TUI_COL_FLAG, "Dirty", TUI_COL_GIT,
-             "Git", "Branch / Path");
+             "Git", TUI_COL_ORIGIN, "Origin", "Branch / Path");
     draw_list_header(y++, cols, header);
 
     for (size_t i = 0; i < tui->board.workspaces.count && y < rows - 1; i++) {
@@ -786,17 +786,21 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
                                            : "missing";
         int git_present = path_has_git_metadata(workspace->path);
         int dirty = workspace_is_dirty(workspace);
+        const char *origin = workspace->adopted ? "adopted" : "created";
         int selected = visible_index == tui->selected_workspace;
 
-        char branchpath[1100];
+        char path_buf[1024];
+        char branchpath[1200];
         snprintf(branchpath, sizeof(branchpath), "%s  %s", workspace->branch,
-                 workspace->path);
+                 display_path(tui, workspace->path, path_buf,
+                              sizeof(path_buf)));
         char task_cell[TUI_CELL_BYTES(TUI_COL_TASK)];
         char state_cell[TUI_CELL_BYTES(TUI_COL_STATE)];
         char ws_cell[TUI_CELL_BYTES(TUI_COL_WS_STATE)];
         char actor_cell[TUI_CELL_BYTES(TUI_COL_NAME)];
         char dirty_cell[TUI_CELL_BYTES(TUI_COL_FLAG)];
         char git_cell[TUI_CELL_BYTES(TUI_COL_GIT)];
+        char origin_cell[TUI_CELL_BYTES(TUI_COL_ORIGIN)];
         cell_text(task_cell, sizeof(task_cell), workspace->task_id,
                   TUI_COL_TASK);
         cell_text(state_cell, sizeof(state_cell), task_state, TUI_COL_STATE);
@@ -809,10 +813,11 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
                   TUI_COL_FLAG);
         cell_text(git_cell, sizeof(git_cell), git_present ? "git" : "no-git",
                   TUI_COL_GIT);
-        char line[1200];
-        snprintf(line, sizeof(line), "%s%s %s %s %s %s %s %s",
+        cell_text(origin_cell, sizeof(origin_cell), origin, TUI_COL_ORIGIN);
+        char line[1400];
+        snprintf(line, sizeof(line), "%s%s %s %s %s %s %s %s %s",
                  selected ? " >" : "  ", task_cell, state_cell, ws_cell,
-                 actor_cell, dirty_cell, git_cell, branchpath);
+                 actor_cell, dirty_cell, git_cell, origin_cell, branchpath);
         tui_style_row_on(visible_index, selected);
         draw_padded(y, 0, cols, line);
         tui_style_row_off(visible_index, selected);
@@ -827,6 +832,10 @@ static void draw_workspace_rows(DispatchTui *tui, int start_y, int rows,
             mvaddnstr(y, TUI_X_WS_DIRTY, dirty ? "dirty" : "clean",
                       TUI_COL_FLAG);
             attroff(COLOR_PAIR(dc) | (dirty ? A_BOLD : A_DIM));
+            int oc = workspace->adopted ? TUI_COLOR_ACCENT : TUI_COLOR_MUTED;
+            attron(COLOR_PAIR(oc) | (workspace->adopted ? A_BOLD : A_DIM));
+            mvaddnstr(y, TUI_X_WS_ORIGIN, origin, TUI_COL_ORIGIN);
+            attroff(COLOR_PAIR(oc) | (workspace->adopted ? A_BOLD : A_DIM));
         }
         y++;
         visible_index++;
@@ -1180,6 +1189,12 @@ static void draw_task_inspector(DispatchTui *tui, int rows, int cols) {
         y = draw_field(y, rows, cols, "Branch", workspace->branch);
         y = draw_field(y, rows, cols, "Path",
                        display_path(tui, workspace->path, buf, sizeof(buf)));
+        if (workspace->adopted) {
+            snprintf(buf, sizeof(buf), "adopted%s%s",
+                     workspace->external_id ? " " : "",
+                     workspace->external_id ? workspace->external_id : "");
+            y = draw_field(y, rows, cols, "Origin", buf);
+        }
     }
 
     y++;
@@ -1282,6 +1297,10 @@ static void draw_workspace_inspector(DispatchTui *tui, int rows, int cols) {
     y = draw_field(y, rows, cols, "Path",
                    display_path(tui, workspace->path, buf, sizeof(buf)));
     y = draw_field(y, rows, cols, "Branch", workspace->branch);
+    y = draw_field(y, rows, cols, "Origin",
+                   workspace->adopted ? "adopted" : "created");
+    if (workspace->adopted)
+        y = draw_field(y, rows, cols, "External ID", workspace->external_id);
     y++;
 
     y = draw_section(y, rows, cols, "Git");

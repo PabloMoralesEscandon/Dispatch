@@ -450,7 +450,8 @@ static int worktree_paths_match(const char *listed, const char *path) {
 
 /* Looks up workspace_path in `git worktree list --porcelain` for repo_path.
  * Paths match textually or by realpath, so a record stored as a resolved
- * path still matches git's spelling. On a match, *branch receives the
+ * path still matches git's spelling. Prunable entries are ignored because
+ * their worktree is no longer live. On a match, *branch receives the
  * checked-out branch name (refs/heads/ stripped), or NULL for a detached
  * HEAD. Returns 0 when git fails, else 1 with *found set. */
 static int git_worktree_lookup(const char *repo_path,
@@ -471,6 +472,7 @@ static int git_worktree_lookup(const char *repo_path,
     }
 
     int in_match = 0;
+    int prunable = 0;
     char *cursor = output ? output : "";
     while (*cursor) {
         char *end = strchr(cursor, '\n');
@@ -487,13 +489,87 @@ static int git_worktree_lookup(const char *repo_path,
             const char *ref = cursor + 7;
             if (strncmp(ref, "refs/heads/", 11) == 0)
                 ref += 11;
+            free(*branch);
             *branch = cli_strdup(ref);
+        } else if (in_match && (strcmp(cursor, "prunable") == 0 ||
+                                strncmp(cursor, "prunable ", 9) == 0)) {
+            prunable = 1;
         }
         if (!end)
             break;
         cursor = end + 1;
     }
+    if (prunable) {
+        *found = 0;
+        if (branch) {
+            free(*branch);
+            *branch = NULL;
+        }
+    }
     free(output);
+    return 1;
+}
+
+static char *git_common_dir(const char *path) {
+    const char *argv[] = {"git", "-C", path, "rev-parse", "--git-common-dir",
+                          NULL};
+    DispatchExecOptions options = {.stderr_mode = DISPATCH_EXEC_DEV_NULL};
+    DispatchExecResult result;
+    char *output = NULL;
+    if (!dispatch_exec_capture(argv, &options, &output, NULL, &result) ||
+        !dispatch_exec_result_success(&result) || !output) {
+        free(output);
+        return NULL;
+    }
+    size_t len = strlen(output);
+    while (len > 0 && (output[len - 1] == '\n' || output[len - 1] == '\r'))
+        output[--len] = '\0';
+    char *resolved = len > 0 ? dispatch_resolve_path(path, output) : NULL;
+    free(output);
+    return resolved;
+}
+
+static int git_same_common_dir(const char *repo_path,
+                               const char *workspace_path) {
+    char *repo_common = git_common_dir(repo_path);
+    char *workspace_common = git_common_dir(workspace_path);
+    int same = repo_common && workspace_common &&
+               strcmp(repo_common, workspace_common) == 0;
+    free(repo_common);
+    free(workspace_common);
+    return same;
+}
+
+/* Verifies that workspace_path is a live linked git worktree of repo_path
+ * (not prunable, not the main repository, and sharing git's common dir so an
+ * unrelated repository initialized at the same path does not pass). On a
+ * match, *branch receives the checked-out branch name or NULL for a detached
+ * HEAD. Returns 0 when git cannot list repo_path's worktrees. */
+int workspace_git_worktree_inspect(const char *repo_path,
+                                   const char *workspace_path,
+                                   int *is_worktree, char **branch) {
+    *is_worktree = 0;
+    if (branch)
+        *branch = NULL;
+    if (!repo_path || !workspace_path)
+        return 0;
+
+    int found = 0;
+    char *wt_branch = NULL;
+    if (!git_worktree_lookup(repo_path, workspace_path, &found, &wt_branch))
+        return 0;
+
+    if (found && !worktree_paths_match(repo_path, workspace_path) &&
+        workspace_git_worktree_present_at(workspace_path) &&
+        git_same_common_dir(repo_path, workspace_path)) {
+        *is_worktree = 1;
+        if (branch)
+            *branch = wt_branch;
+        else
+            free(wt_branch);
+    } else {
+        free(wt_branch);
+    }
     return 1;
 }
 
@@ -1170,11 +1246,30 @@ static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
     return workspace && workspace_git_worktree_present_at(workspace->path);
 }
 
+static void print_workspace_list_usage(void) {
+    cli_error("usage", NULL,
+              "Usage: dispatch workspace list [--external <tool>:<id>] "
+              "[--json]\n");
+}
+
 static int cmd_workspace_list(int argc, char **argv) {
-    (void)argv;
     int json_output = cli_json();
-    if (argc != 3) {
-        cli_error("usage", NULL, "Usage: dispatch workspace list [--json]\n");
+
+    const char *external_option = NULL;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--external") == 0 && (i + 1) < argc &&
+            !external_option) {
+            external_option = argv[++i];
+        } else {
+            print_workspace_list_usage();
+            return 1;
+        }
+    }
+    if (external_option && !dispatch_external_id_is_valid(external_option)) {
+        cli_error("invalid_external_id", NULL,
+                  "External ID must be <tool>:<id>, with a lowercase tool name "
+                  "and no spaces: %s\n",
+                  external_option);
         return 1;
     }
 
@@ -1183,21 +1278,20 @@ static int cmd_workspace_list(int argc, char **argv) {
         return 1;
 
     if (json_output) {
-        int status = cli_json_finish_emit(dispatch_json_emit_workspaces(
-            stdout, &board, "workspace list", NULL));
+        int status = cli_json_finish_emit(dispatch_json_emit_workspaces_filtered(
+            stdout, &board, "workspace list", NULL, external_option));
         dispatch_board_free(&board);
         return status;
     }
 
-    if (board.workspaces.count == 0) {
-        printf("(no workspaces)\n");
-        dispatch_board_free(&board);
-        return 0;
-    }
-
+    int printed = 0;
     for (size_t i = 0; i < board.workspaces.count; i++) {
         DispatchWorkspace *workspace = &board.workspaces.items[i];
         if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        if (external_option &&
+            (!workspace->external_id ||
+             strcmp(workspace->external_id, external_option) != 0))
             continue;
         DispatchTask *task = dispatch_board_find_task(&board,
                                                       workspace->task_id);
@@ -1213,7 +1307,10 @@ static int cmd_workspace_list(int argc, char **argv) {
                    workspace->external_id ? " " : "",
                    workspace->external_id ? workspace->external_id : "");
         printf("\n");
+        printed = 1;
     }
+    if (!printed)
+        printf("(no workspaces)\n");
 
     dispatch_board_free(&board);
     return 0;
@@ -1995,7 +2092,8 @@ int cmd_workspace(int argc, char **argv) {
     print_workspace_create_usage();
     fprintf(stderr,
             "       dispatch workspace adopt <task-id> --actor <name> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]\n");
-    fprintf(stderr, "       dispatch workspace list\n");
+    fprintf(stderr,
+            "       dispatch workspace list [--external <tool>:<id>]\n");
     fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
     fprintf(stderr,
             "       dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]\n");

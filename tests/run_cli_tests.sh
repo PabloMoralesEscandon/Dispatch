@@ -198,10 +198,18 @@ cc $TEST_CFLAGS -Iinclude tests/issue_ref_test.c src/dispatch_issue.c \
 JSON_ASSERT="$TMP_ROOT/json_assert"
 cc tests/json_assert.c -ljansson -o "$JSON_ASSERT"
 
-cc -Iinclude tests/exec_helper_test.c src/dispatch_exec.c \
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/exec_helper_test.c src/dispatch_exec.c \
     -o "$TMP_ROOT/exec_helper_test"
 mkdir "$TMP_ROOT/exec helper cwd"
 "$TMP_ROOT/exec_helper_test" "$TMP_ROOT/exec helper cwd"
+
+# shellcheck disable=SC2086
+cc $TEST_CFLAGS -Iinclude tests/gh_helper_test.c src/dispatch_gh.c \
+    src/dispatch_exec.c src/dispatch_issue.c -ljansson \
+    -o "$TMP_ROOT/gh_helper_test"
+mkdir "$TMP_ROOT/gh-helper-stubs"
+"$TMP_ROOT/gh_helper_test" "$TMP_ROOT/gh-helper-stubs" >/dev/null
 
 case_dir="$(make_case_dir core)"
 cd "$case_dir"
@@ -2833,7 +2841,7 @@ assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
 assert_contains "_dispatch_compadd_candidates runners"
 assert_contains "compadd -- add edit move delete priority"
-assert_contains "add) compadd -- --description --actor --no-review --issue --json ;;"
+assert_contains "add) compadd -- --description --actor --no-review --issue --from-issue --json ;;"
 assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor --json ;;"
 
 expect_fail "$BIN" completion zsh extra
@@ -2858,6 +2866,8 @@ bash_complete() {
 }
 bash_complete dispatch task add DE Title --i
 assert_line "--issue"
+bash_complete dispatch task add DE --f
+assert_line "--from-issue"
 bash_complete dispatch task edit DE-01 --
 assert_line "--title"
 assert_line "--issue"
@@ -2879,6 +2889,7 @@ assert_contains "(__dispatch_candidates tasks)"
 assert_contains "-l runner -r -a '(__dispatch_candidates runners)'"
 assert_contains "(__dispatch_candidates workspaces)"
 assert_contains "__fish_seen_subcommand_from add' -l issue -r"
+assert_contains "__fish_seen_subcommand_from add' -l from-issue -r"
 assert_contains "__fish_seen_subcommand_from edit' -l issue -r"
 assert_contains "__fish_seen_subcommand_from edit' -l clear-issue"
 
@@ -3730,9 +3741,15 @@ fi
 assert_file_contains AGENTS.md "# Dispatch Agent Instructions"
 assert_file_contains AGENTS.md "Never read \`dispatch.json\` directly."
 assert_file_contains CLAUDE.md "# Dispatch Agent Instructions"
-# GH-1: agents on new boards learn to link GitHub issues.
+# GH-1 / GH-5: agents on new boards learn to link and import GitHub issues.
 assert_file_contains AGENTS.md "[--no-review] [--issue <ref>]"
+assert_file_contains AGENTS.md "dispatch task add <group> --from-issue <ref>"
 assert_file_contains CLAUDE.md "dispatch task edit <TASK-ID> --issue <ref>|--clear-issue"
+assert_file_contains CLAUDE.md "dispatch task add <group> --from-issue <ref>"
+assert_file_contains AGENTS.md "dispatch repo set <path>"
+assert_file_contains CLAUDE.md "dispatch repo set <path>"
+assert_file_contains AGENTS.md "dispatch task priority <TASK-ID> <value>"
+assert_file_contains CLAUDE.md "dispatch task priority <TASK-ID> <value>"
 expect_ok "$BIN" doctor
 assert_contains "AGENTS.md found in workflow directory"
 # Re-init with an existing board must not scaffold or recreate files.
@@ -3820,6 +3837,7 @@ assert_contains "Repo: $other_real"
 expect_ok "$BIN" show DE-01
 assert_contains "Title: Root"
 expect_fail "$BIN" repo set
+expect_fail "$BIN" repo show
 expect_fail "$BIN" repo bogus other-repo
 
 case_dir="$(make_case_dir tui-palette-help)"
@@ -3840,11 +3858,15 @@ cd "$case_dir"
 
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
-assert_contains "agent create/list/show/command/session/resume"
+assert_contains "repo [set]"
+assert_not_contains "repo show/set"
+assert_contains "agent create/list/show/command/session/resume/archive/restore"
 assert_contains "workspace create/adopt/list/show/remove/repair/prune"
-assert_contains "completion candidates"
-assert_contains "--json"
+assert_contains "group add/ready/edit/list/show"
 assert_contains "task add/edit/move/delete/priority"
+assert_contains "completion candidates/bash/zsh/fish/install"
+assert_contains "finish, review, unassign, normalize"
+assert_contains "--json"
 assert_contains "agent create/archive/restore/session/command/resume"
 assert_not_contains "clear"
 assert_not_contains "project"
@@ -4479,7 +4501,8 @@ assert_line "log"
 expect_ok "$BIN" completion zsh
 assert_contains "_dispatch_log_command"
 assert_contains "list) compadd -- --all --json ;;"
-assert_contains "list|show) compadd -- --json ;;"
+assert_contains "list) compadd -- --external --json ;;"
+assert_contains "show) compadd -- --json ;;"
 expect_ok "$BIN" completion fish
 assert_contains "__fish_seen_subcommand_from log' -l task -r -a '(__dispatch_candidates tasks)'"
 assert_contains "__fish_seen_subcommand_from list show' -l json"
@@ -4572,6 +4595,428 @@ if [ -e opened-url ]; then
 fi
 PATH=/no-such-dir expect_ok "$BIN" tui --key-smoke task o
 assert_contains "is not available; issue: https://github.com/acme/widgets/issues/12"
+
+# GH-5: create a task from a GitHub issue with `task add <group> --from-issue <ref>`.
+case_dir="$(make_case_dir task-from-issue)"
+cd "$case_dir"
+git init -q repo
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+
+# --help on task and task add lists --from-issue.
+expect_ok "$BIN" task --help
+assert_contains "dispatch task add <group> --from-issue <ref> [--actor <name>] [--no-review]"
+expect_ok "$BIN" task add --help
+assert_contains "dispatch task add <group> --from-issue <ref> [--actor <name>] [--no-review]"
+
+# Stub gh controlled via environment variables so tests need no network.
+mkdir -p fake-bin no-gh-bin
+ln -sf "$(command -v git)" no-gh-bin/git
+cat > fake-bin/gh <<'STUB_GH'
+#!/bin/sh
+if [ -n "${GH_STUB_LOG:-}" ]; then
+    printf '%s\n' "$*" > "$GH_STUB_LOG"
+fi
+if [ -n "${GH_STUB_CHECK_NO_LOCK:-}" ] && [ -e "$GH_STUB_CHECK_NO_LOCK" ]; then
+    printf 'board lock was held while gh ran\n' >&2
+    exit 99
+fi
+if [ -n "${GH_STUB_STDERR:-}" ]; then
+    printf '%s\n' "$GH_STUB_STDERR" >&2
+fi
+if [ -n "${GH_STUB_STDOUT:-}" ]; then
+    printf '%s\n' "$GH_STUB_STDOUT"
+fi
+exit "${GH_STUB_EXIT:-0}"
+STUB_GH
+chmod +x fake-bin/gh
+
+# Conflicting or invalid arguments fail before gh is invoked.
+rm -f gh-called.log
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add DE --from-issue
+assert_contains "Option --from-issue requires an issue reference"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error usage "$BIN" task add DE --from-issue --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add DE --from-issue 5 --from-issue 6
+assert_contains "--from-issue may only be given once"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add DE --from-issue 5 --issue 5
+assert_contains "Use either --from-issue or --issue, not both"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error usage "$BIN" task add DE --from-issue 5 --issue 6 --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add DE "Explicit title" --from-issue 5
+assert_contains "Cannot pass both a title and --from-issue"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error usage "$BIN" task add DE --from-issue 5 "Trailing title" --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add DE --from-issue 5 --description "Custom body"
+assert_contains "Cannot combine --description with --from-issue"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error usage "$BIN" task add DE --from-issue 5 --description "Custom" --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add --from-issue 5
+assert_contains "Usage: dispatch task add"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error invalid_issue "$BIN" task add DE --from-issue nope --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error invalid_issue "$BIN" task add DE --from-issue https://github.com/acme/widgets/pull/5 --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error invalid_actor "$BIN" task add DE --from-issue acme/widgets#5 --actor "bad actor" --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error group_not_found "$BIN" task add NOPE --from-issue acme/widgets#5 --json
+# Bare numbers fail before calling gh when origin is missing or non-GitHub.
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_json_error issue_unresolvable "$BIN" task add DE --from-issue 5 --json
+git -C repo remote add origin https://gitlab.com/acme/widgets.git
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_LOG="$case_dir/gh-called.log" \
+    expect_fail "$BIN" task add DE --from-issue '#5'
+assert_contains "not a GitHub repository"
+if [ -e "$case_dir/gh-called.log" ]; then
+    fail "gh should not have been called for invalid or unresolvable arguments"
+fi
+
+git -C repo remote set-url origin git@github.com:acme/widgets.git
+
+# Missing gh on PATH produces a clear error in text and JSON modes.
+expect_fail env PATH="$case_dir/no-gh-bin" "$BIN" task add DE --from-issue 5
+assert_contains "GitHub CLI (gh) is not installed or not on PATH"
+expect_json_error gh_missing env PATH="$case_dir/no-gh-bin" "$BIN" task add DE --from-issue 5 --json
+
+# Unauthenticated gh (exit 4 and HTTP 401).
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=4 \
+    GH_STUB_STDERR="To get started with GitHub CLI, please run:  gh auth login" \
+    expect_fail "$BIN" task add DE --from-issue 5
+assert_contains "GitHub CLI (gh) is not logged in; run 'gh auth login'"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=4 \
+    GH_STUB_STDERR="To get started with GitHub CLI, please run:  gh auth login" \
+    expect_json_error gh_not_authenticated "$BIN" task add DE --from-issue 5 --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=1 \
+    GH_STUB_STDERR="HTTP 401: Bad credentials (https://api.github.com/graphql)" \
+    expect_json_error gh_not_authenticated "$BIN" task add DE --from-issue 5 --json
+
+# Nonexistent issue.
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=1 \
+    GH_STUB_STDERR="GraphQL: Could not resolve to an issue or pull request with the number of 999. (repository.issue)" \
+    expect_fail "$BIN" task add DE --from-issue 999
+assert_contains "GitHub issue acme/widgets#999 was not found"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=1 \
+    GH_STUB_STDERR="GraphQL: Could not resolve to an issue or pull request with the number of 999. (repository.issue)" \
+    expect_json_error issue_not_found "$BIN" task add DE --from-issue 999 --json
+
+# Pull request number returned by gh issue view is rejected as invalid_issue.
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_STDOUT='{"title":"A PR","body":"desc","url":"https://github.com/acme/widgets/pull/9"}' \
+    expect_fail "$BIN" task add DE --from-issue 9
+assert_contains "is a pull request, not an issue"
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_STDOUT='{"title":"A PR","body":"desc","url":"https://github.com/acme/widgets/pull/9"}' \
+    expect_json_error invalid_issue "$BIN" task add DE --from-issue 9 --json
+
+# Generic gh failure and malformed JSON map to gh_failed.
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=1 \
+    GH_STUB_STDERR="HTTP 502: Bad Gateway" \
+    expect_fail "$BIN" task add DE --from-issue 5
+assert_contains "HTTP 502: Bad Gateway"
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_EXIT=1 \
+    GH_STUB_STDERR="HTTP 502: Bad Gateway" \
+    expect_json_error gh_failed "$BIN" task add DE --from-issue 5 --json
+PATH="$case_dir/fake-bin:$PATH" GH_STUB_STDOUT="not-json" \
+    expect_json_error gh_failed "$BIN" task add DE --from-issue 5 --json
+
+# Fetched titles that violate Dispatch title rules are rejected with invalid_title.
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_STDOUT='{"title":"DE-01 Prefixed","body":"desc","url":"https://github.com/acme/widgets/issues/5"}' \
+    expect_json_error invalid_title "$BIN" task add DE --from-issue 5 --json
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_STDOUT='{"title":"   ","body":"desc","url":"https://github.com/acme/widgets/issues/5"}' \
+    expect_json_error invalid_title "$BIN" task add DE --from-issue 5 --json
+
+# None of the failed attempts modified the board or wrote log entries.
+expect_ok "$BIN" list
+assert_contains "(no tasks)"
+assert_file_not_contains dispatch.log '"issue_link"'
+
+# Happy path 1: bare number, multiline CRLF body, stderr upgrade banner,
+# verifies lock is NOT held while gh runs.
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_LOG="$case_dir/gh-called.log" \
+    GH_STUB_CHECK_NO_LOCK="$case_dir/dispatch.json.lock" \
+    GH_STUB_STDERR="A new release of gh is available: 2.96.0 -> 2.105.0" \
+    GH_STUB_STDOUT='{"title":"Import from GitHub","body":"First line\r\nSecond line","url":"https://github.com/acme/widgets/issues/5"}' \
+    expect_ok "$BIN" task add DE --from-issue 5
+assert_line "Added task DE-01"
+assert_line "Linked DE-01 to acme/widgets#5"
+assert_file_contains "$case_dir/gh-called.log" "issue view 5 --repo acme/widgets --json title,body,url"
+expect_ok "$BIN" show DE-01
+assert_line "Title: Import from GitHub"
+assert_contains "Description: First line"
+assert_line "Second line"
+assert_line "Requires review: yes"
+assert_line "Issue: acme/widgets#5 (https://github.com/acme/widgets/issues/5)"
+assert_line "  created by user"
+assert_line "  issue_link by user: acme/widgets#5"
+assert_file_contains dispatch.log '"action":"issue_link","outcome":"success","message":"Linked DE-01 to acme/widgets#5","targets":{"task":"DE-01"},"context":{"issue":"acme/widgets#5"}'
+
+# Happy path 2: #number with --actor and --no-review in any option order.
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_LOG="$case_dir/gh-called.log" \
+    GH_STUB_STDOUT='{"title":"Skip review gate","body":"Small fix","url":"https://github.com/acme/widgets/issues/6"}' \
+    expect_ok "$BIN" task add DE --actor codex --no-review --from-issue '#6'
+assert_line "Added task DE-02"
+assert_line "Linked DE-02 to acme/widgets#6"
+assert_file_contains "$case_dir/gh-called.log" "issue view 6 --repo acme/widgets --json title,body,url"
+expect_ok "$BIN" show DE-02
+assert_line "Title: Skip review gate"
+assert_line "Requires review: no"
+assert_line "  created by codex"
+assert_line "  issue_link by codex: acme/widgets#6"
+
+# Happy path 3: cross-repo owner/repo#N with --json output and stderr noise.
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_LOG="$case_dir/gh-called.log" \
+    GH_STUB_STDERR="gh notice on stderr" \
+    GH_STUB_STDOUT='{"title":"Cross repo issue","body":"Details here","url":"https://github.com/Other-Org/thing.js/issues/7"}' \
+    expect_json_ok "$BIN" task add DE --from-issue Other-Org/thing.js#7 --json
+assert_json \
+    schema_version integer 1 \
+    command string "task add" \
+    query.task_id string DE-03 \
+    tasks.0.id string DE-03 \
+    tasks.0.title string "Cross repo issue" \
+    tasks.0.description string "Details here" \
+    tasks.0.issue.repo string Other-Org/thing.js \
+    tasks.0.issue.number integer 7 \
+    tasks.0.issue.url string https://github.com/Other-Org/thing.js/issues/7 \
+    result.action string task_add \
+    result.changed boolean true \
+    result.task string DE-03 \
+    result.new_state string proposed
+assert_file_contains "$case_dir/gh-called.log" "issue view 7 --repo Other-Org/thing.js --json title,body,url"
+
+# Happy path 4: issue URL input, null body -> empty description, transferred
+# issue URL canonicalizes the linked ref.
+PATH="$case_dir/fake-bin:$PATH" \
+    GH_STUB_LOG="$case_dir/gh-called.log" \
+    GH_STUB_STDOUT='{"title":"Transferred issue","body":null,"url":"https://github.com/Acme/New-Widgets/issues/88"}' \
+    expect_json_ok "$BIN" task add DE --from-issue 'https://github.com/acme/widgets/issues/8?x=1#issuecomment-2' --json
+assert_json \
+    tasks.0.id string DE-04 \
+    tasks.0.title string "Transferred issue" \
+    tasks.0.description string "" \
+    tasks.0.issue.repo string Acme/New-Widgets \
+    tasks.0.issue.number integer 88 \
+    tasks.0.issue.url string https://github.com/Acme/New-Widgets/issues/88
+assert_file_contains "$case_dir/gh-called.log" "issue view 8 --repo acme/widgets --json title,body,url"
+
+# GH-13: adopted workspace follow-ups: external ID lookup, doctor checks for
+# non-worktree paths and branch drift, and TUI markers/inspector/prompts.
+case_dir="$(make_case_dir adopted-followups)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+for title in Created AdoptedOne AdoptedTwo AdoptedNoExt AdoptedDetached AdoptedReplaced DoingTask; do
+    expect_ok "$BIN" task add DE "$title" --no-review
+done
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 DE-07 --actor user --no-review
+
+expect_ok "$BIN" workspace create DE-01 --actor worker
+expect_ok git -C repo worktree add -b orca/one ../orca-one HEAD
+expect_ok git -C repo worktree add -b orca/two ../orca-two HEAD
+expect_ok git -C repo worktree add -b orca/four ../orca-four HEAD
+expect_ok git -C repo worktree add --detach ../orca-detached HEAD
+expect_ok git -C repo worktree add -b orca/six ../orca-six HEAD
+expect_ok git -C repo worktree add -b orca/seven ../orca-seven HEAD
+
+expect_ok "$BIN" workspace adopt DE-02 --actor orca-bot --path orca-one --external orca:ws-1
+expect_ok "$BIN" workspace adopt DE-03 --actor orca-bot --path orca-two --external orca:ws-2
+expect_ok "$BIN" workspace adopt DE-04 --actor orca-bot --path orca-four
+expect_ok "$BIN" workspace adopt DE-05 --actor orca-bot --path orca-detached --branch orca/detached
+expect_ok "$BIN" workspace adopt DE-06 --actor orca-bot --path orca-six --external orca:ws-6
+
+# Existing ADR 0003 invariant: a doing task cannot be adopted.
+expect_ok "$BIN" start DE-07 --actor orca-bot
+expect_fail "$BIN" workspace adopt DE-07 --actor orca-bot --path orca-seven
+assert_contains "Task DE-07 must be ready and unassigned"
+expect_json_error already_assigned "$BIN" workspace adopt DE-07 --actor orca-bot --path orca-seven --json
+
+# Lookup by external ID (text and JSON, both flag orders).
+expect_ok "$BIN" workspace list --external orca:ws-1
+assert_contains "DE-02"
+assert_contains "[adopted orca:ws-1]"
+assert_not_contains "DE-01"
+assert_not_contains "DE-03"
+
+expect_ok "$BIN" workspace list --external orca:ws-1 --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace list" \
+    query.workspace null - \
+    query.external_id string orca:ws-1 \
+    summary.total integer 6 \
+    summary.returned integer 1 \
+    summary.active integer 6 \
+    summary.removed integer 0 \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-02 \
+    workspaces.0.adopted boolean true \
+    workspaces.0.external_id string orca:ws-1
+
+expect_ok "$BIN" workspace list --json --external orca:ws-2
+assert_json \
+    query.workspace null - \
+    query.external_id string orca:ws-2 \
+    summary.returned integer 1 \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-03 \
+    workspaces.0.external_id string orca:ws-2
+
+# Missing external ID succeeds with an empty result.
+expect_ok "$BIN" workspace list --external orca:missing
+assert_line "(no workspaces)"
+expect_ok "$BIN" workspace list --external orca:missing --json
+assert_json \
+    command string "workspace list" \
+    query.workspace null - \
+    query.external_id string orca:missing \
+    summary.total integer 6 \
+    summary.returned integer 0 \
+    summary.active integer 6 \
+    workspaces array_length 0
+
+# Unfiltered list and show report query.external_id as null.
+expect_ok "$BIN" workspace list --json
+assert_json \
+    query.workspace null - \
+    query.external_id null - \
+    summary.returned integer 6
+expect_ok "$BIN" workspace show DE-02 --json
+assert_json \
+    query.workspace string DE-02 \
+    query.external_id null -
+
+# Usage and format errors for workspace list --external.
+expect_fail "$BIN" workspace list --external
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_json_error usage "$BIN" workspace list --external --json
+assert_json command string "workspace list" error.task_id null -
+expect_fail "$BIN" workspace list --external orca:ws-1 --external orca:ws-2
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_json_error usage "$BIN" workspace list --external orca:ws-1 --external orca:ws-2 --json
+assert_json command string "workspace list" error.task_id null -
+expect_fail "$BIN" workspace list --external orca:ws-1 extra
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_json_error usage "$BIN" workspace list --external orca:ws-1 extra --json
+assert_json command string "workspace list" error.task_id null -
+expect_fail "$BIN" workspace list --external orca
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace list --external ""
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace list --external "orca:has space"
+assert_contains "External ID must be <tool>:<id>"
+expect_json_error invalid_external_id "$BIN" workspace list --external Bad:ws-1 --json
+assert_json command string "workspace list" error.task_id null -
+expect_json_error invalid_external_id "$BIN" workspace list --external "orca:has space" --json
+assert_json command string "workspace list" error.task_id null -
+
+# Completion offers --external on workspace list across zsh, fish, and bash.
+expect_ok "$BIN" completion zsh
+assert_contains "list) compadd -- --external --json ;;"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from list' -l external -r"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-ws-list-completion.bash"
+# shellcheck disable=SC2016
+PATH="$(dirname "$BIN"):$PATH" expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-ws-list-completion.bash" dispatch workspace list --e
+assert_line "--external"
+
+# TUI smoke and headless renders for adopted workspaces and prompts.
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "DE-01 ready active actor:worker branch:agent/worker/DE-01 git:present dirty:no origin:created path:"
+assert_contains "DE-02 ready active actor:orca-bot branch:orca/one git:present dirty:no origin:adopted external:orca:ws-1 path:"
+assert_contains "DE-04 ready active actor:orca-bot branch:orca/four git:present dirty:no origin:adopted path:"
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-02
+assert_line "Origin: adopted"
+assert_line "External ID: orca:ws-1"
+assert_line "Remove prompt: Type DE-02 to remove record (adopted worktree kept): "
+assert_line "Force remove prompt: Type DE-02 to force remove record (adopted worktree kept): "
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-04
+assert_line "Origin: adopted"
+assert_line "External ID: -"
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-01
+assert_line "Origin: created"
+assert_not_contains "External ID:"
+assert_line "Remove prompt: Type DE-01 to remove: "
+assert_line "Force remove prompt: Type DE-01 to remove: "
+
+expect_ok "$BIN" tui --render-smoke workspaces 100 30
+assert_contains "Dirty Git     Origin  Branch / Path"
+assert_contains "DE-01    ready    active    worker                   clean git     created "
+assert_contains "DE-02    ready    active    orca-bot                 clean git     adopted "
+
+expect_ok "$BIN" tui --render-smoke workspaces 100 30 "ji"
+assert_line "  Origin         adopted"
+assert_line "  External ID    orca:ws-1"
+
+expect_ok "$BIN" tui --render-smoke workspaces 100 30 "jjji"
+assert_line "  Origin         adopted"
+assert_line "  External ID    -"
+
+expect_ok "$BIN" tui --render-smoke board 100 30 "ji"
+assert_line "  Origin         adopted orca:ws-1"
+
+# Doctor: healthy adopted worktrees (including a detached HEAD adopted with
+# --branch) emit no worktree or branch mismatch warnings.
+expect_ok "$BIN" doctor --json
+assert_not_contains '"kind": "workspace_not_a_worktree"'
+assert_not_contains '"kind": "workspace_branch_mismatch"'
+
+# Branch drift on an adopted worktree triggers workspace_branch_mismatch.
+expect_ok git -C orca-one checkout -q -b orca/drifted
+expect_ok "$BIN" doctor
+assert_contains "[ok] workspace DE-02 path exists"
+assert_contains "[warn] adopted workspace DE-02 is on branch orca/drifted, expected orca/one"
+assert_contains "check out orca/one in the worktree"
+expect_ok "$BIN" doctor --json
+assert_contains '"kind": "workspace_branch_mismatch"'
+assert_contains '"subject": "DE-02"'
+
+# Switching back clears the warning.
+expect_ok git -C orca-one checkout -q orca/one
+expect_ok "$BIN" doctor --json
+assert_not_contains '"kind": "workspace_branch_mismatch"'
+
+# Path exists but is no longer a git worktree of the board repo:
+# 1) Removed cleanly with git worktree remove, then replaced by a plain dir.
+expect_ok git -C repo worktree remove orca-two
+mkdir orca-two
+# 2) Deleted without git worktree prune (stanza is prunable), then plain dir.
+rm -rf orca-four
+mkdir orca-four
+# 3) Deleted without git worktree prune, then replaced by an unrelated repo.
+rm -rf orca-six
+expect_ok git -C "$case_dir" init -q orca-six
+
+expect_ok "$BIN" doctor
+assert_contains "[ok] workspace DE-03 path exists"
+assert_contains "[warn] adopted workspace DE-03 path is not a git worktree of $case_dir/repo: $case_dir/orca-two"
+assert_contains "[warn] adopted workspace DE-04 path is not a git worktree of $case_dir/repo: $case_dir/orca-four"
+assert_contains "[warn] adopted workspace DE-06 path is not a git worktree of $case_dir/repo: $case_dir/orca-six"
+assert_not_contains "adopted workspace DE-02 path is not a git worktree"
+expect_ok "$BIN" doctor --json
+assert_contains '"kind": "workspace_not_a_worktree"'
+assert_contains '"subject": "DE-03"'
+assert_contains '"subject": "DE-04"'
+assert_contains '"subject": "DE-06"'
+assert_not_contains '"kind": "workspace_branch_mismatch"'
 
 cd "$ROOT"
 

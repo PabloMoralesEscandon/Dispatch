@@ -33,7 +33,6 @@ normalize_frame() {
     sed -E \
         -e "s|$TMP_ROOT_REAL|<tmp>|g" \
         -e "s|$TMP_ROOT|<tmp>|g" \
-        -e 's|(agent/golden/DE-01)  /.*|\1  <workspace>|' \
         -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?/<timestamp>/g'
 }
 
@@ -135,5 +134,31 @@ cd "$ISSUE"
 "$BIN" ready DE-01 --actor user >/dev/null
 
 capture_frame issue-task task
+
+# GH-13: adopted workspaces in the workspaces table (next to a created one)
+# and in the workspace inspector, kept in their own fixture so the frames
+# above do not churn.
+ADOPTED="$TMP_ROOT/adopted"
+mkdir -p "$ADOPTED/repo"
+git -C "$ADOPTED/repo" init -q
+git -C "$ADOPTED/repo" config user.name "Golden Tests"
+git -C "$ADOPTED/repo" config user.email "golden@example.com"
+printf 'fixture\n' >"$ADOPTED/repo/fixture.txt"
+git -C "$ADOPTED/repo" add fixture.txt
+git -C "$ADOPTED/repo" commit -qm "Golden fixture"
+git -C "$ADOPTED/repo" worktree add -q -b orca/ws-2 "$TMP_ROOT/orca" HEAD
+
+cd "$ADOPTED"
+"$BIN" init repo >/dev/null
+"$BIN" group add Development --prefix DE >/dev/null
+"$BIN" task add DE "Created workspace task" >/dev/null
+"$BIN" task add DE "Adopted workspace task" >/dev/null
+"$BIN" ready DE-01 DE-02 --actor user >/dev/null
+"$BIN" workspace create DE-01 --actor golden --dir "$ADOPTED/created-wt" >/dev/null
+"$BIN" workspace adopt DE-02 --actor orca-agent --path "$TMP_ROOT/orca" \
+    --external orca:ws-42 >/dev/null
+
+capture_frame adopted-workspaces workspaces
+capture_frame adopted-workspace-inspector workspaces "ji"
 
 printf 'PASS: TUI golden frames\n'

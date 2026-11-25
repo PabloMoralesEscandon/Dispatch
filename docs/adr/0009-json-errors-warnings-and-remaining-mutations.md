@@ -1,4 +1,4 @@
-# 0006: JSON errors on reads, non-fatal warnings, and remaining mutations
+# 0009: JSON errors on reads, non-fatal warnings, and remaining mutations
 
 - **Status:** Accepted
 - **Date:** 2026-11-25

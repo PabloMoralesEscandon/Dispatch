@@ -1,0 +1,31 @@
+Frame: workspace 100x30
+ DISPATCH   Workspace                                                    actor:user  board:Dispatch
+
+  DE-02  orca/ws-2                                                                           ready
+  ------------------------------------------------------------------------------------------------
+
+Location
+  Actor          orca-agent
+  Repo           <tmp>/adopted/repo
+  Path           <tmp>/orca
+  Branch         orca/ws-2
+  Origin         adopted
+  External ID    orca:ws-42
+
+Git
+  WS state       active
+  Worktree       present
+  Dirty          no
+
+Sequence
+  Tasks          -
+  Review gate    -
+
+
+
+
+
+
+
+
+ Inspecting workspace                                        q/Esc back   x remove   X force remove

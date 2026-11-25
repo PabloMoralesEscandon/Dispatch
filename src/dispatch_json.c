@@ -148,11 +148,13 @@ static json_t *envelope_json(const DispatchBoard *board, const char *command,
 }
 
 /* The workspace envelope up to its workspaces array. query.workspace is
- * the single record's ID when exactly one is returned. */
+ * the single record's ID when selected by workspace ID; query.external_id
+ * records a --external lookup filter. */
 static json_t *workspace_envelope_json(const DispatchBoard *board,
                                        const char *command,
                                        json_t *workspaces,
-                                       const char *query_workspace) {
+                                       const char *query_workspace,
+                                       const char *query_external_id) {
     size_t active = 0;
     size_t removed = 0;
     for (size_t i = 0; i < board->workspaces.count; i++) {
@@ -164,6 +166,8 @@ static json_t *workspace_envelope_json(const DispatchBoard *board,
 
     json_t *query = json_object();
     json_object_set_new(query, "workspace", optional_string(query_workspace));
+    json_object_set_new(query, "external_id",
+                        optional_string(query_external_id));
 
     json_t *summary = json_object();
     json_object_set_new(summary, "total",
@@ -180,9 +184,11 @@ static json_t *workspace_envelope_json(const DispatchBoard *board,
 
 static int dump_document(FILE *stream, json_t *root);
 
-int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
-                                  const char *command,
-                                  const DispatchWorkspace *only) {
+int dispatch_json_emit_workspaces_filtered(FILE *stream,
+                                           const DispatchBoard *board,
+                                           const char *command,
+                                           const DispatchWorkspace *only,
+                                           const char *external_id) {
     json_t *workspaces = json_array();
     if (only) {
         json_array_append_new(workspaces, workspace_record_json(board, only));
@@ -191,13 +197,25 @@ int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
             const DispatchWorkspace *workspace = &board->workspaces.items[i];
             if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
                 continue;
+            if (external_id &&
+                (!workspace->external_id ||
+                 strcmp(workspace->external_id, external_id) != 0))
+                continue;
             json_array_append_new(workspaces,
                                   workspace_record_json(board, workspace));
         }
     }
     return dump_document(stream,
                          workspace_envelope_json(board, command, workspaces,
-                                                 only ? only->id : NULL));
+                                                 only ? only->id : NULL,
+                                                 external_id));
+}
+
+int dispatch_json_emit_workspaces(FILE *stream, const DispatchBoard *board,
+                                  const char *command,
+                                  const DispatchWorkspace *only) {
+    return dispatch_json_emit_workspaces_filtered(stream, board, command, only,
+                                                  NULL);
 }
 
 static json_t *agent_json(const DispatchBoard *board,
@@ -894,7 +912,8 @@ int dispatch_json_emit_workspace_mutation(
                               workspace_record_json(board, &records[i]));
 
     json_t *root = workspace_envelope_json(
-        board, command, workspaces, record_count == 1 ? records[0].id : NULL);
+        board, command, workspaces, record_count == 1 ? records[0].id : NULL,
+        NULL);
     json_object_set_new(root, "warnings",
                         extra_warnings_json(warnings, warning_count));
     json_object_set_new(root, "result", result_json(board, before, result));

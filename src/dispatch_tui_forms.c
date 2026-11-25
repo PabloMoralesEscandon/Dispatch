@@ -1260,6 +1260,19 @@ void run_workspace_create_form(DispatchTui *tui) {
     clamp_workspace_selection(tui);
 }
 
+void workspace_remove_prompt_label(const DispatchWorkspace *workspace,
+                                   int force, char *label,
+                                   size_t label_size) {
+    if (workspace->adopted) {
+        snprintf(label, label_size,
+                 force ? "Type %s to force remove record (adopted worktree kept): "
+                       : "Type %s to remove record (adopted worktree kept): ",
+                 workspace->task_id);
+    } else {
+        snprintf(label, label_size, "Type %s to remove: ", workspace->task_id);
+    }
+}
+
 void run_workspace_remove_form(DispatchTui *tui, int force) {
     DispatchWorkspace *workspace = selected_visible_workspace(tui);
     if (!workspace) {
@@ -1268,8 +1281,8 @@ void run_workspace_remove_form(DispatchTui *tui, int force) {
     }
 
     char confirm[64];
-    char label[128];
-    snprintf(label, sizeof(label), "Type %s to remove: ", workspace->task_id);
+    char label[256];
+    workspace_remove_prompt_label(workspace, force, label, sizeof(label));
     if (!prompt_line(label, confirm, sizeof(confirm), ""))
         return;
     if (strcmp(confirm, workspace->task_id) != 0) {
