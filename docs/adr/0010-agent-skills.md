@@ -56,9 +56,8 @@ edit`, `task move`), working (`workspace create`/`adopt`, `start`, `finish`,
 `commit add`), tidying it initiates (`unassign`, `task priority`), and
 `review` when the user explicitly assigned it as the reviewer. It never
 records its own work as `user`. The history therefore shows that an agent
-created a plan and that the user approved it. (The README's note that agents
-should pass their own name when approving at the user's instruction predates
-this decision.) `group add`, `group edit` and `dep add/remove` accept no
+created a plan and that the user approved it; the README's lifecycle and
+group sections say the same. `group add`, `group edit` and `dep add/remove` accept no
 `--actor` and are logged as `user`; that is a product gap tracked separately,
 and the plan skill says so rather than showing commands that would fail.
 

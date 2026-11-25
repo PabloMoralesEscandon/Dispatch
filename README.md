@@ -542,8 +542,9 @@ and `group show` inspect recorded scopes and per-group task counts (see
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
 Proposed tasks with unmet dependencies are approved but still display as blocked
 until their blockers are done. If `--actor` is omitted, Dispatch records the
-actor as `user`. An agent should still pass its explicit actor name when the
-agent is performing the approval at the user's instruction. Add `--no-review`
+actor as `user`. Approval is the user's decision, so an agent that runs
+`group ready` at the user's explicit instruction records `--actor user` (or the
+person's own name); it never records its own work as `user`. Add `--no-review`
 only when the user approves every readied task as safe to finish without a
 review gate. If `--no-review` is used on a group that is already readied, it
 also applies to ready or blocked tasks in that group that have not been started
@@ -715,8 +716,11 @@ is ready, it summarizes waiting review, proposed, and blocked queues. Use
 a `doing`, `paused`, or `review` task is an explicit revert that clears its
 assignment and start provenance (`assigned_to`, `started_by`, `started_at`) so
 it can be started cleanly again. Omitted actors on user-facing approval and
-review commands default to `user`; agents should still pass their explicit
-actor name when acting on the user's instruction. Add `--no-review` when
+review commands default to `user`. Readying and accepting are the user's
+decisions: an agent acting on the user's explicit instruction records
+`--actor user` (or the person's own name), and uses its own name only for its
+own work or when the user assigned it as the reviewer (see the
+`dispatch-board` skill). Add `--no-review` when
 approving a task that can safely move directly from `doing` to `done` after the
 agent finishes it.
 
