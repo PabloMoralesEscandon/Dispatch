@@ -256,6 +256,9 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "    log)\n"
         "      _dispatch_log_command\n"
         "      ;;\n"
+        "    status)\n"
+        "      compadd -- --check-issues --json\n"
+        "      ;;\n"
         "    completion)\n"
         "      _dispatch_completion_command\n"
         "      ;;\n"
@@ -353,6 +356,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "      start|finish|review) _dispatch_complete_words \"--actor\" ;;\n"
         "      log) _dispatch_complete_words \"--task --actor --agent "
         "--workspace --command --action --limit --json\" ;;\n"
+        "      status) _dispatch_complete_words \"--check-issues --json\" ;;\n"
         "    esac\n"
         "    return\n"
         "  fi\n"
@@ -610,6 +614,10 @@ static int cmd_completion_fish(int argc, char **argv) {
         "complete -c dispatch -f -n '__fish_seen_subcommand_from log' -l "
         "limit -r\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from log' -l "
+        "json\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from status' -l "
+        "check-issues\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from status' -l "
         "json\n",
         stdout);
     return 0;

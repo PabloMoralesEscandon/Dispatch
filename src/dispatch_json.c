@@ -475,6 +475,10 @@ static json_t *query_json(const DispatchJsonRequest *request) {
         }
     }
     json_object_set_new(object, "states", states);
+    if (request->include_warnings) {
+        json_object_set_new(object, "check_issues",
+                            json_boolean(request->check_issues));
+    }
     return object;
 }
 
@@ -548,10 +552,11 @@ static int board_has_task(const DispatchBoard *board, const char *task_id) {
     return find_task(board, task_id) != NULL;
 }
 
-static json_t *warnings_json(const DispatchBoard *board, int include_warnings) {
+static json_t *warnings_json(const DispatchBoard *board,
+                             const DispatchJsonRequest *request) {
     json_t *warnings = json_array();
     char message[512];
-    if (!include_warnings)
+    if (!request->include_warnings)
         return warnings;
 
     for (size_t i = 0; i < board->tasks.count; i++) {
@@ -591,6 +596,18 @@ static json_t *warnings_json(const DispatchBoard *board, int include_warnings) {
                  agent->current_task);
         append_warning(warnings, "missing_current_task", message, NULL,
                        agent->name);
+    }
+    for (size_t i = 0; i < request->extra_warning_count; i++) {
+        const DispatchJsonWarning *extra = &request->extra_warnings[i];
+        json_t *warning = json_object();
+        json_object_set_new(warning, "code", json_string(extra->code));
+        json_object_set_new(warning, "message", json_string(extra->message));
+        json_object_set_new(warning, "task_id",
+                            optional_string(extra->task_id));
+        json_object_set_new(warning, "agent", optional_string(extra->agent));
+        if (extra->issue)
+            json_object_set_new(warning, "issue", json_string(extra->issue));
+        json_array_append_new(warnings, warning);
     }
     return warnings;
 }
@@ -638,8 +655,7 @@ int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
     json_object_set_new(root, "query", query_json(request));
     json_object_set_new(root, "summary", summary_json(board, returned));
     json_object_set_new(root, "tasks", tasks);
-    json_object_set_new(root, "warnings",
-                        warnings_json(board, request->include_warnings));
+    json_object_set_new(root, "warnings", warnings_json(board, request));
 
     int result = json_dumpf(root, stream, JSON_INDENT(2));
     json_decref(root);

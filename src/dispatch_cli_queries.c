@@ -1,6 +1,9 @@
 #include "dispatch_cli_internal.h"
 
+#include "dispatch_gh.h"
 #include "dispatch_issue.h"
+
+#include <strings.h>
 
 int save_task_transition(LockedBoard *locked, const char *verb,
                                 const char *task_id) {
@@ -687,20 +690,186 @@ int cmd_blocked(int argc, char **argv) {
     return 0;
 }
 
+typedef struct {
+    DispatchJsonWarning *items;
+    char **messages;
+    size_t count;
+    size_t capacity;
+} StatusWarningList;
+
+static void status_warning_list_add(StatusWarningList *list, const char *code,
+                                    const char *message, const char *task_id,
+                                    const char *agent, const char *issue) {
+    if (list->count >= list->capacity) {
+        size_t next = list->capacity ? list->capacity * 2 : 8;
+        list->items = cli_realloc_array(list->items, next, sizeof(*list->items));
+        list->messages =
+            cli_realloc_array(list->messages, next, sizeof(*list->messages));
+        list->capacity = next;
+    }
+    char *copy = cli_strdup(message);
+    list->messages[list->count] = copy;
+    list->items[list->count] = (DispatchJsonWarning){
+        .code = code,
+        .message = copy,
+        .task_id = task_id,
+        .agent = agent,
+        .issue = issue,
+    };
+    list->count++;
+}
+
+static void status_warning_list_free(StatusWarningList *list) {
+    for (size_t i = 0; i < list->count; i++)
+        free(list->messages[i]);
+    free(list->messages);
+    free(list->items);
+    memset(list, 0, sizeof(*list));
+}
+
+typedef struct {
+    char issue[DISPATCH_ISSUE_TEXT_MAX];
+    DispatchGhStatus status;
+    DispatchGhIssueState state;
+    char detail[256];
+} CheckedIssue;
+
+static CheckedIssue *find_checked_issue(CheckedIssue *cache, size_t count,
+                                        const char *issue) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcasecmp(cache[i].issue, issue) == 0)
+            return &cache[i];
+    }
+    return NULL;
+}
+
+/* Queries GitHub via the shared `dispatch_gh` helper for every unique issue
+ * linked on the board and records drift or lookup warnings in board task order.
+ * Missing or unauthenticated `gh` produces one board-level warning and stops
+ * further queries so `status` stays non-fatal. */
+static void collect_issue_check_warnings(const DispatchBoard *board,
+                                         StatusWarningList *out) {
+    int has_linked_issue = 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        if (board->tasks.items[i].issue && board->tasks.items[i].issue[0]) {
+            has_linked_issue = 1;
+            break;
+        }
+    }
+    if (!has_linked_issue)
+        return;
+
+    CheckedIssue *cache = NULL;
+    size_t cache_count = 0;
+    size_t cache_capacity = 0;
+    char message[512];
+
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *task = &board->tasks.items[i];
+        if (!task->issue || !task->issue[0])
+            continue;
+
+        DispatchIssueRef ref;
+        if (!dispatch_issue_parse_canonical(task->issue, &ref))
+            continue;
+
+        CheckedIssue *entry =
+            find_checked_issue(cache, cache_count, task->issue);
+        if (!entry) {
+            DispatchGhIssueState issue_state = DISPATCH_GH_ISSUE_STATE_UNKNOWN;
+            DispatchGhResult gh_result = {0};
+            DispatchGhStatus gh_status =
+                dispatch_gh_issue_state(&ref, &issue_state, &gh_result);
+            char detail[256];
+            snprintf(detail, sizeof(detail), "%s", gh_result.detail);
+            dispatch_gh_result_free(&gh_result);
+
+            if (gh_status == DISPATCH_GH_MISSING) {
+                status_warning_list_add(
+                    out, dispatch_gh_error_code(gh_status),
+                    "cannot check linked issues: gh is not installed or not on "
+                    "PATH",
+                    NULL, NULL, NULL);
+                break;
+            }
+            if (gh_status == DISPATCH_GH_NOT_AUTHENTICATED) {
+                status_warning_list_add(
+                    out, dispatch_gh_error_code(gh_status),
+                    "cannot check linked issues: gh is not logged in (run: gh "
+                    "auth login)",
+                    NULL, NULL, NULL);
+                break;
+            }
+
+            if (cache_count >= cache_capacity) {
+                size_t next = cache_capacity ? cache_capacity * 2 : 8;
+                cache = cli_realloc_array(cache, next, sizeof(*cache));
+                cache_capacity = next;
+            }
+            entry = &cache[cache_count++];
+            memset(entry, 0, sizeof(*entry));
+            snprintf(entry->issue, sizeof(entry->issue), "%s", task->issue);
+            entry->status = gh_status;
+            entry->state = issue_state;
+            snprintf(entry->detail, sizeof(entry->detail), "%s", detail);
+        }
+
+        if (entry->status != DISPATCH_GH_OK) {
+            snprintf(message, sizeof(message),
+                     "%s: could not check linked issue %s (%s)", task->id,
+                     task->issue,
+                     entry->detail[0] ? entry->detail : "gh failed");
+            status_warning_list_add(out, dispatch_gh_error_code(entry->status),
+                                    message, task->id, NULL, task->issue);
+            continue;
+        }
+
+        DispatchState state = task_presentation_state(board, task);
+        if (state == DISPATCH_STATE_DONE &&
+            entry->state == DISPATCH_GH_ISSUE_STATE_OPEN) {
+            snprintf(message, sizeof(message),
+                     "%s is done, but linked issue %s is still open", task->id,
+                     task->issue);
+            status_warning_list_add(out, "issue_still_open", message, task->id,
+                                    NULL, task->issue);
+        } else if (state != DISPATCH_STATE_DONE &&
+                   entry->state == DISPATCH_GH_ISSUE_STATE_CLOSED) {
+            snprintf(message, sizeof(message),
+                     "%s is %s, but linked issue %s is closed", task->id,
+                     dispatch_state_name(state), task->issue);
+            status_warning_list_add(out, "issue_already_closed", message,
+                                    task->id, NULL, task->issue);
+        }
+    }
+
+    free(cache);
+}
+
 int cmd_status(int argc, char **argv) {
     int json_output = 0;
     if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        fprintf(stderr, "Usage: dispatch status [--json]\n");
+        fprintf(stderr, "Usage: dispatch status [--check-issues] [--json]\n");
         return 1;
     }
-    if (argc != 2) {
-        fprintf(stderr, "Usage: dispatch status [--json]\n");
-        return 1;
+
+    int check_issues = 0;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--check-issues") == 0 && !check_issues) {
+            check_issues = 1;
+        } else {
+            fprintf(stderr,
+                    "Usage: dispatch status [--check-issues] [--json]\n");
+            return 1;
+        }
     }
 
     DispatchBoard board;
     if (!load_board_or_error(&board))
         return 1;
+
+    StatusWarningList issue_warnings = {0};
+    if (check_issues)
+        collect_issue_check_warnings(&board, &issue_warnings);
 
     if (json_output) {
         DispatchJsonRequest request = {
@@ -709,8 +878,12 @@ int cmd_status(int argc, char **argv) {
             .state_mask = DISPATCH_JSON_STATE(DISPATCH_STATE_READY) |
                           DISPATCH_JSON_STATE(DISPATCH_STATE_REVIEW),
             .include_warnings = 1,
+            .check_issues = check_issues,
+            .extra_warnings = issue_warnings.items,
+            .extra_warning_count = issue_warnings.count,
         };
         int result = dispatch_json_emit(stdout, &board, &request) ? 0 : 1;
+        status_warning_list_free(&issue_warnings);
         dispatch_board_free(&board);
         return result;
     }
@@ -812,9 +985,14 @@ int cmd_status(int argc, char **argv) {
             warnings++;
         }
     }
+    for (size_t i = 0; i < issue_warnings.count; i++) {
+        printf("  %s\n", issue_warnings.items[i].message);
+        warnings++;
+    }
     if (warnings == 0)
         printf("  -\n");
 
+    status_warning_list_free(&issue_warnings);
     dispatch_board_free(&board);
     return 0;
 }

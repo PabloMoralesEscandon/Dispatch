@@ -9,12 +9,23 @@
 #define DISPATCH_JSON_STATE(state) (1U << (unsigned int)(state))
 
 typedef struct {
+    const char *code;
+    const char *message;
+    const char *task_id;
+    const char *agent;
+    const char *issue; /* optional canonical "owner/repo#N" */
+} DispatchJsonWarning;
+
+typedef struct {
     const char *command;
     const char *task_id;
     const char *group;
     int include_done;
     unsigned int state_mask;
     int include_warnings;
+    int check_issues;
+    const DispatchJsonWarning *extra_warnings;
+    size_t extra_warning_count;
 } DispatchJsonRequest;
 
 /* Removes one --json argument at or after first_arg and updates argc. */
