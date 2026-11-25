@@ -50,6 +50,8 @@ if working from another directory.
 
 ```bash
 dispatch init repo
+dispatch repo
+dispatch repo set <path>
 dispatch agent create --name <name> --runner codex|claude|opencode [--model <name>] [--no-run-script] [--print-command]
 dispatch agent list [--all]
 dispatch agent show <name>
@@ -82,6 +84,7 @@ dispatch group list
 dispatch group show <prefix>
 dispatch task add <group> <title> [--description <text>] [--actor <agent-id>] [--no-review] [--issue <ref>]
 dispatch task edit <TASK-ID> --issue <ref>|--clear-issue [--actor <agent-id>]
+dispatch task priority <TASK-ID> <value> [--actor <agent-id>]
 dispatch dep add <dependency-id> <dependent-id>
 dispatch dep remove <dependency-id> <dependent-id>
 dispatch commit add <TASK-ID> <sha> [--actor <agent-id>]
