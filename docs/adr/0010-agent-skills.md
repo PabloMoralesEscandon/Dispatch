@@ -89,5 +89,5 @@ and the plan skill says so rather than showing commands that would fail.
 ### Follow-ups
 
 - Shipping the skills in the binary and a `dispatch skills` install command
-  (issue #22).
+  (issue #22; done in [ADR 0011](0011-skills-install.md)).
 - Slimming `AGENTS.md` / `CLAUDE.md` to point at the skills (issue #23).

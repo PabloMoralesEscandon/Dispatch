@@ -5412,6 +5412,225 @@ expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=(
 assert_line "--actor"
 assert_line "--close-issue"
 
+# GH-22: dispatch skills list/install/update, init and doctor (ADR 0011).
+# Every command runs with HOME (and XDG_CONFIG_HOME) pointed at a temporary
+# directory, so the real home and skills already on the machine never matter.
+case_dir="$(make_case_dir skills-install)"
+skills_home="$case_dir/home"
+mkdir -p "$skills_home" "$case_dir/work/repo"
+git -C "$case_dir/work/repo" init -q
+cd "$case_dir/work"
+sk=(env HOME="$skills_home" XDG_CONFIG_HOME=)
+bundled_skills="dispatch-board dispatch-plan dispatch-work"
+project_skill_dirs=".claude/skills .agents/skills .opencode/skills"
+
+set_manifest() { # skill-dir version bundle-hash
+    sed -E -e "s/\"dispatch_version\": \"[^\"]*\"/\"dispatch_version\": \"$2\"/" \
+        -e "s/\"bundle_hash\": \"[^\"]*\"/\"bundle_hash\": \"$3\"/" \
+        "$1/.dispatch-skill.json" > "$1/.dispatch-skill.json.tmp"
+    mv "$1/.dispatch-skill.json.tmp" "$1/.dispatch-skill.json"
+}
+
+expect_ok "$BIN" --version
+assert_line "dispatch 0.1.0"
+expect_ok "$BIN" --help
+assert_contains "skills list/install/update"
+
+# Project install needs the workflow directory.
+expect_fail "${sk[@]}" "$BIN" skills install
+assert_contains "No dispatch board in this directory"
+expect_json_error board_missing "${sk[@]}" "$BIN" skills install --json
+assert_json command string "skills install"
+expect_json_error board_missing "${sk[@]}" "$BIN" skills update --project --json
+
+# init installs the project skills for every runner, and nothing global.
+expect_ok "${sk[@]}" "$BIN" init repo
+assert_contains "Created CLAUDE.md"
+assert_contains "Installed agent skills for claude, codex and opencode in .claude/skills, .agents/skills and .opencode/skills"
+for dir in $project_skill_dirs; do
+    for skill in $bundled_skills; do
+        if ! cmp -s "$ROOT/skills/$skill/SKILL.md" "$dir/$skill/SKILL.md"; then
+            fail "init did not install $dir/$skill/SKILL.md from the bundle"
+        fi
+        assert_file_contains "$dir/$skill/.dispatch-skill.json" '"dispatch_version": "0.1.0"'
+    done
+    if ! cmp -s "$ROOT/skills/dispatch-board/references/commands.md" \
+        "$dir/dispatch-board/references/commands.md"; then
+        fail "init did not install the dispatch-board reference file in $dir"
+    fi
+done
+if [ -e "$skills_home/.claude" ] || [ -e "$skills_home/.agents" ] || [ -e "$skills_home/.config" ]; then
+    fail "init must not install global skills"
+fi
+
+# Re-init and re-install are idempotent.
+expect_json_ok "${sk[@]}" "$BIN" init repo --json
+assert_json result.created boolean false result.changed boolean false \
+    result.skills_installed integer 0 result.skills_skipped integer 0
+expect_ok "${sk[@]}" "$BIN" skills install
+assert_contains "Skills: 0 installed, 0 updated, 0 replaced, 9 unchanged, 0 skipped (dispatch 0.1.0)"
+expect_json_ok "${sk[@]}" "$BIN" skills install --json
+assert_json command string "skills install" query.scope string project \
+    query.runner string all query.force boolean false \
+    result.action string skills_install result.changed boolean false \
+    result.dispatch_version string 0.1.0 result.installed integer 0 \
+    result.unchanged integer 9 result.skills array_length 9 \
+    result.skills.0.skill string dispatch-board result.skills.0.runner string claude \
+    result.skills.0.scope string project \
+    result.skills.0.path string .claude/skills/dispatch-board \
+    result.skills.0.status string current result.skills.0.action string unchanged \
+    warnings array_length 0
+
+# skills list reports the bundle and every location.
+expect_ok "${sk[@]}" "$BIN" skills list
+assert_contains "Bundled skills (dispatch 0.1.0):"
+assert_contains "  dispatch-plan 0.1.0"
+assert_contains "project codex    current   .agents/skills/dispatch-plan"
+assert_contains "global  opencode missing   $skills_home/.config/opencode/skills/dispatch-plan"
+expect_json_ok "${sk[@]}" "$BIN" skills list --json
+assert_json command string "skills list" dispatch_version string 0.1.0 \
+    query.scope string all query.runner string all skills array_length 3 \
+    skills.0.name string dispatch-board skills.0.version string 0.1.0 \
+    skills.0.files.1 string references/commands.md \
+    skills.0.installations array_length 6 \
+    skills.0.installations.0.status string current \
+    skills.0.installations.0.installed_version string 0.1.0 \
+    skills.0.installations.3.scope string global \
+    skills.0.installations.3.status string missing \
+    skills.0.installations.3.installed_version null - warnings array_length 0
+
+# Global install writes to each runner's user directory under HOME.
+expect_ok "${sk[@]}" "$BIN" skills install --global --runner claude
+assert_contains "Installed dispatch-work for claude (global): $skills_home/.claude/skills/dispatch-work"
+assert_contains "Skills: 3 installed"
+assert_file_contains "$skills_home/.claude/skills/dispatch-board/references/commands.md" "dispatch skills install"
+if [ -e "$skills_home/.agents" ]; then
+    fail "--runner claude must not install codex skills"
+fi
+expect_json_ok "${sk[@]}" "$BIN" skills install --global --json
+assert_json query.scope string global result.changed boolean true \
+    result.installed integer 6 result.unchanged integer 3
+assert_file_contains "$skills_home/.agents/skills/dispatch-plan/SKILL.md" "name: dispatch-plan"
+assert_file_contains "$skills_home/.config/opencode/skills/dispatch-work/SKILL.md" "name: dispatch-work"
+mkdir -p "$case_dir/xdg"
+expect_ok env HOME="$skills_home" XDG_CONFIG_HOME="$case_dir/xdg" "$BIN" skills install --global --runner opencode
+assert_file_contains "$case_dir/xdg/opencode/skills/dispatch-board/SKILL.md" "name: dispatch-board"
+expect_json_error home_unset env HOME= "$BIN" skills install --global --json
+
+# An edited skill is kept without --force and replaced with it.
+printf '\nLocal note.\n' >> .claude/skills/dispatch-plan/SKILL.md
+expect_ok "${sk[@]}" "$BIN" skills install --runner claude
+assert_contains "Warning: kept .claude/skills/dispatch-plan: it was edited after it was installed; rerun dispatch skills install --force to replace it"
+assert_contains "1 skipped"
+assert_file_contains .claude/skills/dispatch-plan/SKILL.md "Local note."
+expect_ok "${sk[@]}" "$BIN" skills list --project --runner claude
+assert_contains "project claude   modified  .claude/skills/dispatch-plan"
+expect_json_ok "${sk[@]}" "$BIN" skills install --runner claude --json
+assert_json result.skipped integer 1 result.changed boolean false \
+    result.skills.1.status string modified result.skills.1.action string skipped \
+    warnings.0.code string skill_modified warnings.0.task_id null -
+expect_ok "${sk[@]}" "$BIN" skills install --runner claude --force
+assert_contains "Replaced dispatch-plan for claude (project): .claude/skills/dispatch-plan"
+assert_file_not_contains .claude/skills/dispatch-plan/SKILL.md "Local note."
+
+# A skill folder Dispatch did not install is left alone too.
+rm .agents/skills/dispatch-work/.dispatch-skill.json
+expect_json_ok "${sk[@]}" "$BIN" skills install --runner codex --json
+assert_json warnings.0.code string skill_unmanaged result.skipped integer 1
+expect_json_ok "${sk[@]}" "$BIN" skills install --runner codex --force --json
+assert_json result.replaced integer 1 result.skills.2.action string replaced
+assert_file_contains .agents/skills/dispatch-work/.dispatch-skill.json '"skill": "dispatch-work"'
+
+# A copy from an older Dispatch is outdated: doctor names the fix, and
+# update refreshes it (and only installed copies).
+set_manifest .opencode/skills/dispatch-board 0.0.1 0000
+set_manifest "$skills_home/.claude/skills/dispatch-work" 0.0.1 0000
+expect_ok "${sk[@]}" "$BIN" skills list --runner opencode
+assert_contains "project opencode outdated  .opencode/skills/dispatch-board (installed by 0.0.1)"
+expect_ok "${sk[@]}" "$BIN" doctor
+assert_contains "[warn] skill dispatch-board at .opencode/skills/dispatch-board is older than this dispatch (0.0.1 < 0.1.0)"
+assert_contains "fix: dispatch skills update"
+assert_contains "fix: dispatch skills update --global"
+assert_contains "[ok] skill dispatch-plan installed (6 copies)"
+expect_ok "${sk[@]}" "$BIN" doctor --json
+assert_contains '"kind": "skills_outdated"'
+rm -rf "$skills_home/.agents"
+expect_json_ok "${sk[@]}" "$BIN" skills update --json
+assert_json command string "skills update" query.scope string all \
+    result.action string skills_update result.changed boolean true \
+    result.updated integer 2 result.installed integer 0 \
+    result.unchanged integer 13 result.skills array_length 15
+if [ -e "$skills_home/.agents" ]; then
+    fail "skills update must not install missing skills"
+fi
+assert_file_contains .opencode/skills/dispatch-board/.dispatch-skill.json '"dispatch_version": "0.1.0"'
+expect_ok "${sk[@]}" "$BIN" doctor
+assert_not_contains "skills_outdated"
+assert_not_contains "is older than this dispatch"
+expect_ok "${sk[@]}" "$BIN" skills update
+assert_contains "Skills: 0 installed, 0 updated, 0 replaced, 15 unchanged, 0 skipped"
+
+# update protects edited copies too, and never downgrades a newer install.
+printf '\nMine.\n' >> .claude/skills/dispatch-work/SKILL.md
+set_manifest .claude/skills/dispatch-board 9.0.0 0000
+expect_json_ok "${sk[@]}" "$BIN" skills update --project --runner claude --json
+assert_json result.skipped integer 2 result.changed boolean false \
+    warnings.0.code string skill_newer warnings.1.code string skill_modified
+assert_file_contains .claude/skills/dispatch-work/SKILL.md "Mine."
+expect_ok "${sk[@]}" "$BIN" skills update --project --runner claude --force
+assert_contains "Replaced dispatch-board for claude (project)"
+assert_contains "Replaced dispatch-work for claude (project)"
+
+# Re-init never clobbers an edited skill.
+printf '\nKeep me.\n' >> .opencode/skills/dispatch-plan/SKILL.md
+expect_json_ok "${sk[@]}" "$BIN" init repo --json
+assert_json result.skills_installed integer 0 result.skills_skipped integer 1 \
+    warnings.0.code string skill_modified
+assert_file_contains .opencode/skills/dispatch-plan/SKILL.md "Keep me."
+rm -rf .claude/skills/dispatch-work
+expect_ok "${sk[@]}" "$BIN" init repo
+assert_contains "dispatch.json already exists"
+assert_contains "Installed agent skills"
+assert_file_contains .claude/skills/dispatch-work/SKILL.md "name: dispatch-work"
+
+# Doctor warns when a skill is installed nowhere.
+rm -rf .claude .agents .opencode "$skills_home/.claude" "$skills_home/.config" "$case_dir/xdg"
+expect_ok "${sk[@]}" "$BIN" doctor
+assert_contains "[warn] skill dispatch-work is not installed for any runner"
+assert_contains "fix: dispatch skills install"
+expect_ok "${sk[@]}" "$BIN" doctor --json
+assert_contains '"kind": "skills_missing"'
+assert_contains '"subject": "dispatch-plan"'
+expect_ok "${sk[@]}" "$BIN" skills update
+assert_contains "No Dispatch skills are installed here; run dispatch skills install"
+
+# Usage errors are coded in JSON mode.
+expect_json_error usage "${sk[@]}" "$BIN" skills install --project --global --json
+expect_json_error invalid_runner "${sk[@]}" "$BIN" skills install --runner vim --json
+expect_json_error usage "${sk[@]}" "$BIN" skills list --force --json
+expect_json_error usage "${sk[@]}" "$BIN" skills install --json --json
+expect_fail "${sk[@]}" "$BIN" skills frob
+assert_contains "Unknown skills command: frob"
+expect_fail "${sk[@]}" "$BIN" skills
+assert_contains "Usage: dispatch skills list|install|update"
+
+# Shell completion covers the skills subcommands and options.
+expect_ok "$BIN" completion zsh
+assert_contains "_dispatch_skills_command"
+assert_contains "compadd -- --project --global --runner --force --json"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from skills; and __fish_seen_subcommand_from install update' -l force"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-skills-completion.bash"
+# shellcheck disable=SC2016
+expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills ""
+assert_line "install"
+assert_line "update"
+# shellcheck disable=SC2016
+expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills update --runner ""
+assert_line "opencode"
+
 cd "$ROOT"
 
 # Agent skills (ADR 0010): front matter and drift against dispatch --help.

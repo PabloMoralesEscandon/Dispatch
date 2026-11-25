@@ -53,6 +53,12 @@ Setting up a board is a one-off the person asks for explicitly:
 `CLAUDE.md`) for the repository at `repo`, `dispatch repo set <path>` repoints
 an existing board after the repository moved, and
 `dispatch completion install bash|zsh|fish` installs shell completion.
+`dispatch init` also installs these skills in the workflow directory;
+`dispatch skills list` shows where they are installed and whether they match
+the binary, `dispatch skills install --global` puts them in each runner's user
+skills directory, and `dispatch skills update` refreshes copies older than the
+binary. Neither replaces a skill the person edited unless they ask for
+`--force`.
 `dispatch tui` (or plain `dispatch`) opens the interactive board for the
 person; it is not for agents.
 
@@ -147,8 +153,9 @@ dispatch normalize              # recompute derived state, repair invariants
   GitHub (via `gh`) and warns when a done task's issue is still open or an open
   task's issue is already closed; missing or logged-out `gh` is a warning, not
   a failure.
-- `doctor` reports problems with suggested fixes; `normalize` is the safe
-  repair for derived state and stale assignments.
+- `doctor` reports problems with suggested fixes, including agent skills that
+  are missing or older than the binary; `normalize` is the safe repair for
+  derived state and stale assignments.
 - A stuck or abandoned assignment (an agent died mid-task) is cleared with
   `dispatch unassign <TASK-ID> --actor <your-agent-name>`: a `doing` task returns to
   `ready` (or `blocked`). It refuses `review` and `done` tasks and leaves

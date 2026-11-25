@@ -11,7 +11,9 @@ This document defines version 1 of the machine-readable output produced when
   `dep add|remove`, `ready <id>`, `start`, `finish`, `review`, `unassign`,
   `commit add`, `agent create|archive|restore|session|command|resume`, and
   `workspace create|adopt|remove|repair|prune`, described in
-  [Mutation results](#mutation-results).
+  [Mutation results](#mutation-results);
+- the agent skills commands `skills list`, `skills install`, and
+  `skills update`, described in [Skills responses](#skills-responses).
 
 ## General rules
 
@@ -274,6 +276,10 @@ text to stderr:
   workflow instruction files (`AGENTS.md`, `CLAUDE.md`).
 - `repo_not_git` when `repo set` points at a directory that is not a Git
   repository.
+- `skill_modified`, `skill_unmanaged`, and `skill_newer` when `init` (or
+  `skills install|update`, see [Skills responses](#skills-responses)) leaves
+  an installed agent skill alone because the user edited it, Dispatch did not
+  install it, or a newer Dispatch did.
 
 ## Workspace responses
 
@@ -561,7 +567,8 @@ The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
 `workspace_path_missing`, `workspace_path_moved`, `workspace_not_a_worktree`,
 `workspace_branch_mismatch`, `orphaned_workspace`, `missing_commits`,
 `dep_self`, `dep_missing_reference`, `dep_duplicate`,
-`assignment_state_mismatch`, and `start_provenance_mismatch`. Kinds shared
+`assignment_state_mismatch`, `start_provenance_mismatch`, `skills_missing`,
+and `skills_outdated`. Kinds shared
 with status warnings (`missing_commits`, `missing_current_task`,
 `assignment_state_mismatch`) describe the same conditions.
 `workspace_not_a_worktree` fires when an adopted workspace path exists on disk
@@ -569,6 +576,13 @@ but is no longer a live linked git worktree of the board repository;
 `workspace_branch_mismatch` fires when an adopted worktree has a different
 branch checked out than the recorded branch (detached HEADs are not flagged,
 matching `workspace adopt`'s acceptance of detached worktrees with `--branch`).
+`skills_missing` (subject: the skill name, fix `dispatch skills install`)
+fires when a bundled agent skill is installed for no runner, neither in the
+workflow directory nor globally. `skills_outdated` (subject: the skill name,
+fix `dispatch skills update`, or `dispatch skills update --global` for a
+global copy) fires once per installed copy that an older Dispatch installed
+and nobody edited since. Copies the user edited are not reported. Both were
+added in a compatible release.
 
 ## Mutation results
 
@@ -647,7 +661,7 @@ do not know.
 
 | Command | `action` | Targets | Extra fields |
 | --- | --- | --- | --- |
-| `init` | `init` | None | `created` (boolean), `repo_path` (string) |
+| `init` | `init` | None | `created` (boolean), `repo_path` (string), `skills_installed`, `skills_skipped` (integers: project skill copies installed or updated, and edited copies left alone) |
 | `repo set` | `repo_set` | None | `previous_repo_path` (string), `repo_path` (string), `is_git_repo` (boolean) |
 | `normalize` | `normalize` | None | `state_updates`, `assignment_repairs`, `session_updates`, `prompt_updates` (integers) |
 | `task add` | `task_add` | The new task | — |
@@ -679,7 +693,7 @@ do not know.
 | `workspace prune` | `workspace_prune` | None | `dry_run` (boolean), `skipped` (array) |
 
 `changed` is `false` for successful no-ops: `init` when `dispatch.json` already
-exists, `repo set` to the current path, `normalize` when no task state,
+exists and no agent skill was installed or updated, `repo set` to the current path, `normalize` when no task state,
 assignment, session ID, or agent prompt needed repair, `task priority` to the
 task's current priority, `group edit` with the existing description,
 `commit add` of a ref the task already records, `dep add` of an existing
@@ -758,7 +772,7 @@ The version 1 error codes are:
 | `board_unreadable` | The board could not be read or failed validation |
 | `board_save_failed` | The changed board could not be saved |
 | `log_unreadable` | `dispatch.log` could not be opened or read |
-| `io_failed` | A local support directory or file (agent prompt, run script, resume script) could not be created or written |
+| `io_failed` | A local support directory or file (agent prompt, run script, resume script, agent skill) could not be created or written |
 | `output_failed` | The JSON result could not be written to stdout |
 | `internal_error` | An unexpected failure, such as running out of memory |
 | `invalid_actor` | The actor name is not valid |
@@ -774,7 +788,7 @@ The version 1 error codes are:
 | `invalid_group` | The group name is empty or too long |
 | `invalid_prefix` | The group prefix is not valid |
 | `invalid_agent` | The agent name is empty, too long, or contains invalid characters |
-| `invalid_runner` | The agent runner is not one of the supported runners |
+| `invalid_runner` | The agent runner (or `skills --runner`) is not one of the supported runners |
 | `invalid_path` | The path argument does not exist or cannot be resolved |
 | `invalid_external_id` | The `--external` value is not `<tool>:<id>` |
 | `task_not_found` | A named task does not exist |
@@ -798,6 +812,7 @@ The version 1 error codes are:
 | `invalid_sequence` | The tasks do not form a valid `--sequence` chain |
 | `workspace_conflict` | The workspace path, branch, or external ID is already in use, or changed concurrently |
 | `repo_not_git` | The board repository is not a git repository |
+| `home_unset` | `skills` with `--global` while `HOME` is not set |
 | `workspace_dirty` | `workspace remove` without `--force` on a worktree with changes |
 | `not_a_worktree` | The workspace path is not a registered git worktree (for `adopt`, of the board repository) |
 | `branch_mismatch` | `adopt --branch` differs from the worktree's checked-out branch, or the worktree has a detached HEAD and no `--branch` was given |
@@ -805,3 +820,77 @@ The version 1 error codes are:
 
 New codes may be added in a compatible release; treat an unknown code as a
 generic failure.
+
+## Skills responses
+
+`skills list`, `skills install`, and `skills update` work without a board
+(only project installs need one), so they use their own envelope with no
+`board` or `summary`:
+
+```json
+{
+  "schema_version": 1,
+  "command": "skills install",
+  "query": { "scope": "project", "runner": "all", "force": false },
+  "result": {
+    "action": "skills_install",
+    "changed": true,
+    "dispatch_version": "0.1.0",
+    "installed": 2,
+    "updated": 0,
+    "replaced": 0,
+    "unchanged": 6,
+    "skipped": 1,
+    "skills": [
+      {
+        "skill": "dispatch-board",
+        "runner": "claude",
+        "scope": "project",
+        "path": ".claude/skills/dispatch-board",
+        "status": "modified",
+        "installed_version": "0.1.0",
+        "action": "skipped"
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "code": "skill_modified",
+      "message": "kept .claude/skills/dispatch-board: it was edited after it was installed; rerun dispatch skills install --force to replace it",
+      "task_id": null,
+      "agent": null
+    }
+  ]
+}
+```
+
+`query.scope` is `project`, `global`, or `all` (both scopes, the default for
+`skills list` and `skills update`; the project scope is included only when the
+command runs in a workflow directory). `query.runner` is `claude`, `codex`,
+`opencode`, or `all`. `query.force` is present for `install` and `update`.
+
+Each skill location has:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `skill` | string | Skill name, such as `dispatch-plan` |
+| `runner` | string | `claude`, `codex`, or `opencode` |
+| `scope` | string | `project` or `global` |
+| `path` | string | The skill folder: relative to the workflow directory for `project`, absolute for `global` |
+| `status` | string | State before the command: `missing`, `current`, `outdated` (installed by an older build and unedited), `modified` (edited since install), `unmanaged` (no Dispatch stamp), or `newer` (installed by a newer Dispatch) |
+| `installed_version` | string or null | Dispatch version recorded at install, `null` when missing or unmanaged |
+| `action` | string | `install` and `update` only: `installed`, `updated`, `replaced` (with `--force`), `unchanged`, or `skipped` |
+
+`result` for `install` (`action` `skills_install`) and `update` (`action`
+`skills_update`) has `changed` (whether any file was written),
+`dispatch_version`, one count per action, and `skills`, every location the
+command considered in project-then-global, runner, skill order. `update` only
+considers installed copies, so it never reports `missing` locations. Skipped
+locations add a `skill_modified`, `skill_unmanaged`, or `skill_newer` warning;
+they are not failures, and the command exits `0`.
+
+`skills list` returns, instead of `result`, `dispatch_version` and a `skills`
+array with one entry per bundled skill: `name`, `version` (the Dispatch
+version that bundles it), `files` (paths inside the skill folder), and
+`installations` (the locations above, without `action`). When `HOME` is unset,
+`list` reports only project locations and adds a `home_unset` warning.

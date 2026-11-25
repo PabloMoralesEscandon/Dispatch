@@ -17,3 +17,4 @@ the old one.
 | [0008](0008-check-linked-issues.md) | Check linked GitHub issues and close on review | Accepted |
 | [0009](0009-json-errors-warnings-and-remaining-mutations.md) | JSON errors on reads, non-fatal warnings, and remaining mutations | Accepted |
 | [0010](0010-agent-skills.md) | Agent skills for planning, working and the board | Accepted |
+| [0011](0011-skills-install.md) | Ship the agent skills in the binary and install them per runner | Accepted |
