@@ -1029,6 +1029,27 @@ The agent works through `DE-01`, `DE-02`, and `DE-03` in the same branch, making
 one commit per task. The sequence stops when `DE-03` reaches `review`, and the
 user reviews the final branch state.
 
+## Agent Skills
+
+The `skills/` directory holds three [Agent Skills](https://agentskills.io)
+that teach coding agents to use Dispatch by job, wherever their session
+starts:
+
+| Skill | Use it to |
+| --- | --- |
+| [`dispatch-plan`](skills/dispatch-plan/SKILL.md) | plan, break down or organise work into Dispatch groups, tasks, dependencies and review gates |
+| [`dispatch-work`](skills/dispatch-work/SKILL.md) | start, continue or finish a Dispatch task in its own workspace, with one commit per task |
+| [`dispatch-board`](skills/dispatch-board/SKILL.md) | check, review or tidy the board from the person's own session |
+
+Each skill repeats the critical rules (CLI only, never read or edit
+`dispatch.json`, an explicit actor on every change) and explains how to find
+the workflow directory from a session started in the product repository. To
+use them, copy or link the folders into your runner's skills directory (for
+example `~/.claude/skills/` for Claude Code). `tests/check_skills.sh`, run in
+CI, checks their front matter and that every command they mention matches
+`dispatch --help` and every command is covered; see
+[ADR 0010](docs/adr/0010-agent-skills.md).
+
 ## Planning Example
 
 When a user asks an agent to plan a feature, the agent should create tasks and
