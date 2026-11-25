@@ -1170,11 +1170,34 @@ static int workspace_git_worktree_present(const DispatchWorkspace *workspace) {
     return workspace && workspace_git_worktree_present_at(workspace->path);
 }
 
+static void print_workspace_list_usage(void) {
+    fprintf(stderr,
+            "Usage: dispatch workspace list [--external <tool>:<id>] "
+            "[--json]\n");
+}
+
 static int cmd_workspace_list(int argc, char **argv) {
     int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output) ||
-        argc != 3) {
-        fprintf(stderr, "Usage: dispatch workspace list [--json]\n");
+    if (!dispatch_cli_extract_json_flag(&argc, argv, 3, &json_output)) {
+        print_workspace_list_usage();
+        return 1;
+    }
+
+    const char *external_option = NULL;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--external") == 0 && (i + 1) < argc &&
+            !external_option) {
+            external_option = argv[++i];
+        } else {
+            print_workspace_list_usage();
+            return 1;
+        }
+    }
+    if (external_option && !dispatch_external_id_is_valid(external_option)) {
+        fprintf(stderr,
+                "External ID must be <tool>:<id>, with a lowercase tool name "
+                "and no spaces: %s\n",
+                external_option);
         return 1;
     }
 
@@ -1183,21 +1206,20 @@ static int cmd_workspace_list(int argc, char **argv) {
         return 1;
 
     if (json_output) {
-        int ok = dispatch_json_emit_workspaces(stdout, &board,
-                                               "workspace list", NULL);
+        int ok = dispatch_json_emit_workspaces_filtered(
+            stdout, &board, "workspace list", NULL, external_option);
         dispatch_board_free(&board);
         return ok ? 0 : 1;
     }
 
-    if (board.workspaces.count == 0) {
-        printf("(no workspaces)\n");
-        dispatch_board_free(&board);
-        return 0;
-    }
-
+    int printed = 0;
     for (size_t i = 0; i < board.workspaces.count; i++) {
         DispatchWorkspace *workspace = &board.workspaces.items[i];
         if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        if (external_option &&
+            (!workspace->external_id ||
+             strcmp(workspace->external_id, external_option) != 0))
             continue;
         DispatchTask *task = dispatch_board_find_task(&board,
                                                       workspace->task_id);
@@ -1213,7 +1235,10 @@ static int cmd_workspace_list(int argc, char **argv) {
                    workspace->external_id ? " " : "",
                    workspace->external_id ? workspace->external_id : "");
         printf("\n");
+        printed = 1;
     }
+    if (!printed)
+        printf("(no workspaces)\n");
 
     dispatch_board_free(&board);
     return 0;
@@ -1939,7 +1964,8 @@ int cmd_workspace(int argc, char **argv) {
     print_workspace_create_usage();
     fprintf(stderr,
             "       dispatch workspace adopt <task-id> --actor <name> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]\n");
-    fprintf(stderr, "       dispatch workspace list\n");
+    fprintf(stderr,
+            "       dispatch workspace list [--external <tool>:<id>]\n");
     fprintf(stderr, "       dispatch workspace show <task-id-or-workspace>\n");
     fprintf(stderr,
             "       dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]\n");
