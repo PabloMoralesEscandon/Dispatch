@@ -5827,6 +5827,168 @@ assert_contains "template-check.md: does not name the dispatch-board skill"
 assert_not_contains "does not name the dispatch-plan skill"
 rm -f "$template_case"
 
+# group add/edit and dep add/remove take --actor (issue #25): the default is
+# user, an explicit actor is recorded in dispatch.log and, for dep, in the
+# dependent task's history.
+case_dir="$(make_case_dir group-dep-actor)"
+cd "$case_dir"
+mkdir repo
+expect_ok git -C repo init
+expect_ok "$BIN" init repo
+
+expect_ok "$BIN" group add Development --prefix DE
+assert_line "Added group Development (DE)"
+expect_ok "$BIN" group add Quality --prefix QA --actor planner
+assert_line "Added group Quality (QA)"
+expect_json_ok "$BIN" group add Docs --prefix DO --json
+assert_json result.action string group_add result.group string DO
+expect_json_ok "$BIN" group add Ops --prefix OP --description "Operations" \
+    --actor planner --json
+assert_json \
+    result.action string group_add \
+    result.group string OP \
+    board.groups.3.description string Operations
+expect_json_ok "$BIN" log --command group --action add --json
+assert_json \
+    records array_length 4 \
+    records.0.actor string user \
+    records.0.targets.group string DE \
+    records.1.actor string planner \
+    records.1.targets.group string QA \
+    records.2.actor string user \
+    records.2.targets.group string DO \
+    records.3.actor string planner \
+    records.3.targets.group string OP
+
+expect_ok "$BIN" group edit DE --description "Core work"
+assert_line "Updated group DE description"
+expect_ok "$BIN" group edit QA --actor planner --description "Checks"
+assert_line "Updated group QA description"
+expect_json_ok "$BIN" group edit DO --description "Guides" --json
+assert_json result.action string group_edit result.changed boolean true
+expect_json_ok "$BIN" group edit OP --description "Ops work" --actor planner --json
+assert_json \
+    result.action string group_edit \
+    result.changed boolean true \
+    result.group string OP \
+    result.description string "Ops work"
+expect_json_ok "$BIN" log --command group --action edit --json
+assert_json \
+    records array_length 4 \
+    records.0.actor string user \
+    records.0.targets.group string DE \
+    records.1.actor string planner \
+    records.1.targets.group string QA \
+    records.2.actor string user \
+    records.3.actor string planner \
+    records.3.context.description string "Ops work"
+expect_json_ok "$BIN" log --actor planner --command group --json
+assert_json records array_length 4
+
+expect_ok "$BIN" task add DE First
+expect_ok "$BIN" task add DE Second
+expect_ok "$BIN" task add DE Third
+
+expect_ok "$BIN" dep add DE-01 DE-02
+assert_line "Added dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
+expect_ok "$BIN" dep add DE-01 DE-03 --actor planner
+assert_line "Added dependency DE-01 -> DE-03 (DE-03 depends on DE-01)"
+expect_ok "$BIN" show DE-02
+assert_contains "dependency_add by user: DE-01"
+expect_ok "$BIN" show DE-03
+assert_contains "dependency_add by planner: DE-01"
+expect_json_ok "$BIN" dep add DE-02 DE-03 --json
+assert_json \
+    result.action string dependency_add \
+    result.changed boolean true \
+    tasks.0.id string DE-03 \
+    tasks.0.history.2.actor string user \
+    tasks.0.history.2.action string dependency_add \
+    tasks.0.history.2.note string DE-02
+expect_json_ok "$BIN" dep add DE-02 DE-03 --actor planner --json
+# Re-adding an existing dependency changes nothing, so it adds no history.
+assert_json \
+    result.changed boolean false \
+    tasks.0.history array_length 3
+
+expect_ok "$BIN" dep remove DE-01 DE-02
+assert_line "Removed dependency DE-01 -> DE-02 (DE-02 depends on DE-01)"
+expect_ok "$BIN" show DE-02
+assert_contains "dependency_remove by user: DE-01"
+expect_ok "$BIN" dep remove DE-01 DE-03 --actor planner
+expect_ok "$BIN" show DE-03
+assert_contains "dependency_remove by planner: DE-01"
+expect_ok "$BIN" dep add DE-01 DE-02 --actor planner
+expect_json_ok "$BIN" dep remove DE-01 DE-02 --actor planner --json
+assert_json \
+    result.action string dependency_remove \
+    result.dependency string DE-01 \
+    result.dependent string DE-02 \
+    tasks.0.history.4.actor string planner \
+    tasks.0.history.4.action string dependency_remove \
+    tasks.0.history.4.note string DE-01
+expect_json_ok "$BIN" dep remove DE-02 DE-03 --json
+assert_json \
+    tasks.0.history.4.actor string user \
+    tasks.0.history.4.action string dependency_remove
+
+expect_json_ok "$BIN" log --command dep --json
+assert_json \
+    records array_length 9 \
+    records.0.actor string user \
+    records.0.action string dependency_add \
+    records.1.actor string planner \
+    records.1.targets.dependent string DE-03 \
+    records.2.actor string user \
+    records.3.actor string planner \
+    records.4.actor string user \
+    records.4.action string dependency_remove \
+    records.5.actor string planner \
+    records.6.actor string planner \
+    records.6.action string dependency_add \
+    records.7.actor string planner \
+    records.7.action string dependency_remove \
+    records.8.actor string user \
+    records.8.action string dependency_remove
+expect_json_ok "$BIN" log --actor planner --command dep --action dependency_remove --json
+assert_json records array_length 2
+
+# Bad actors and options are refused before the board changes.
+expect_json_error invalid_actor "$BIN" group add Bad --prefix BA --actor "two words" --json
+expect_json_error invalid_actor "$BIN" group edit DE --description X --actor "-x" --json
+expect_json_error invalid_actor "$BIN" dep add DE-01 DE-02 --actor "a b" --json
+expect_json_error invalid_actor "$BIN" dep remove DE-02 DE-03 --actor "" --json
+expect_json_error usage "$BIN" group add Bad --prefix BA --actor --json
+expect_json_error usage "$BIN" group edit DE --actor planner --json
+expect_json_error usage "$BIN" dep add DE-01 DE-02 --bogus --json
+expect_json_error usage "$BIN" dep remove DE-01 DE-02 --actor --json
+expect_fail "$BIN" dep add DE-01 DE-02 extra
+assert_contains "Unknown dep add option: extra"
+expect_fail "$BIN" group edit DE
+assert_contains "Usage: dispatch group edit <prefix> --description <text> [--actor <name>]"
+expect_fail "$BIN" dep add DE-01
+assert_contains "Usage: dispatch dep add <dependency-id> <dependent-id> [--actor <name>]"
+expect_fail "$BIN" group
+assert_contains "dispatch group add <name> [--prefix XX] [--description <text>] [--actor <name>]"
+expect_json_ok "$BIN" show DE-02 --json
+assert_json tasks.0.depends_on array_length 0
+expect_ok "$BIN" group list
+assert_not_contains "Bad"
+
+# Completion offers --actor on the four commands.
+expect_ok "$BIN" completion zsh
+assert_contains "add) compadd -- --prefix --description --actor --json ;;"
+assert_contains "edit) compadd -- --description --actor --json ;;"
+assert_contains "[[ \${words[3]} == add || \${words[3]} == remove ]] && compadd -- --actor --json"
+expect_ok "$BIN" completion bash
+assert_contains "add) _dispatch_complete_words \"--prefix --description --actor --json\" ;;"
+assert_contains "edit) _dispatch_complete_words \"--description --actor --json\" ;;"
+assert_contains "[[ \$sub == add || \$sub == remove ]] && _dispatch_complete_words \"--actor --json\" ;;"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from group; and __fish_seen_subcommand_from add edit' -l actor"
+assert_contains "__fish_seen_subcommand_from dep; and __fish_seen_subcommand_from add remove' -l actor"
+cd "$ROOT"
+
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
 assert_contains "PASS: TUI golden frames"
 
