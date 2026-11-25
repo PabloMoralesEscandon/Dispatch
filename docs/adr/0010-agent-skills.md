@@ -51,15 +51,16 @@ actor is whoever made the decision. The skills keep the template's rule:
 readying and accepting tasks are the user's decisions, so when an agent runs
 `ready`, `group ready` or `review` because the user explicitly told it to, it
 records `--actor user` (or the person's own name if they give one). An agent
-records its own name only for its own actions: planning (`task add`, `task
-edit`, `task move`), working (`workspace create`/`adopt`, `start`, `finish`,
+records its own name only for its own actions: planning (`group add`, `group
+edit`, `task add`, `task edit`, `task move`, `dep add`, `dep remove`), working (`workspace create`/`adopt`, `start`, `finish`,
 `commit add`), tidying it initiates (`unassign`, `task priority`), and
 `review` when the user explicitly assigned it as the reviewer. It never
 records its own work as `user`. The history therefore shows that an agent
 created a plan and that the user approved it; the README's lifecycle and
-group sections say the same. `group add`, `group edit` and `dep add/remove` accept no
-`--actor` and are logged as `user`; that is a product gap tracked separately,
-and the plan skill says so rather than showing commands that would fail.
+group sections say the same. `group add`, `group edit` and `dep add/remove`
+first accepted no `--actor` and were logged as `user`, so the plan skill had to
+describe the gap; issue #25 added the option (defaulting to `user`), and the
+plan skill now passes the agent's name on those commands too.
 
 **Checks.** `tests/check_skills.sh` runs in CI (its own step, and from
 `tests/run_cli_tests.sh`, which also proves it rejects broken copies):

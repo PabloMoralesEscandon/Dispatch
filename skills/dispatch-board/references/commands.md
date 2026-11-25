@@ -52,9 +52,9 @@ dispatch unassign <TASK-ID> --actor <name>
 ## Groups
 
 ```bash
-dispatch group add <name> --prefix <PREFIX> [--description <text>]
+dispatch group add <name> --prefix <PREFIX> [--description <text>] [--actor <agent-id>]
 dispatch group ready <group> --actor <name> [--no-review]
-dispatch group edit <prefix> --description <text>
+dispatch group edit <prefix> --description <text> [--actor <agent-id>]
 dispatch group list
 dispatch group show <prefix>
 ```
@@ -68,8 +68,8 @@ dispatch task edit <TASK-ID> [--title <text>] [--description <text>] [--issue <r
 dispatch task move <TASK-ID> <group> [--actor <agent-id>]
 dispatch task delete <TASK-ID> [--force]
 dispatch task priority <TASK-ID> <value> [--actor <agent-id>]
-dispatch dep add <dependency-id> <dependent-id>
-dispatch dep remove <dependency-id> <dependent-id>
+dispatch dep add <dependency-id> <dependent-id> [--actor <agent-id>]
+dispatch dep remove <dependency-id> <dependent-id> [--actor <agent-id>]
 ```
 
 ## Commits
