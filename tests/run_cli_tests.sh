@@ -146,6 +146,20 @@ make_case_dir() {
     printf '%s\n' "$dir"
 }
 
+# Compare a generated file with tests/golden/cli/<name>. UPDATE_GOLDENS=1
+# rewrites the golden instead, as tests/run_tui_golden_tests.sh does.
+CLI_GOLDEN_DIR="$ROOT/tests/golden/cli"
+assert_golden() {
+    local name="$1"
+    local file="$2"
+    if [ "${UPDATE_GOLDENS:-0}" = "1" ]; then
+        mkdir -p "$CLI_GOLDEN_DIR"
+        cp "$file" "$CLI_GOLDEN_DIR/$name"
+    elif ! diff -u "$CLI_GOLDEN_DIR/$name" "$file" >&2; then
+        fail "CLI golden changed: $name (refresh with UPDATE_GOLDENS=1 tests/run_cli_tests.sh)"
+    fi
+}
+
 cd "$ROOT"
 # DISPATCH_TEST_BUILD_MODE selects the nob build mode for the suite (e.g.
 # "asan" builds dispatch and the unit tests with Address/UB sanitizers).
@@ -322,6 +336,15 @@ assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch worksp
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch agent session codex-a --session-id <SESSION-ID>"
 assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Instructions"
 assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "Never read dispatch.json directly."
+# GH-23: the prompt names the agent skills and the agent's actor id, and
+# records approvals as the user's (ADR 0012).
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "## Dispatch Skills"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch-work\`"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch-plan\`"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch-board\`"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "run \`dispatch skills install\` from the workflow directory"
+assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch review <TASK-ID> --actor codex-a"
+assert_golden agent-prompt-codex.md .dispatch/agents/codex-a/codex-a-PROMPT.md
 if [ ! -d .dispatch/agents/codex-a/scratch ]; then
     fail "agent scratch directory was not created"
 fi
@@ -345,6 +368,7 @@ assert_contains "Created agent claude-a (claude)"
 assert_contains "command: claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 expect_ok "$BIN" agent command claude-a --print-command
 assert_contains "claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
+assert_golden agent-prompt-claude.md .dispatch/agents/claude-a/claude-a-PROMPT.md
 expect_ok "$BIN" tui --agent-run-command-smoke claude-a
 assert_contains "claude \"\$(cat '.dispatch/agents/claude-a/claude-a-PROMPT.md')\""
 expect_ok "$BIN" agent show claude-a
@@ -3738,18 +3762,41 @@ assert_contains "Created CLAUDE.md"
 if [ ! -d .dispatch/agents ]; then
     fail "dispatch init did not create .dispatch/agents"
 fi
-assert_file_contains AGENTS.md "# Dispatch Agent Instructions"
-assert_file_contains AGENTS.md "Never read \`dispatch.json\` directly."
-assert_file_contains CLAUDE.md "# Dispatch Agent Instructions"
-# GH-1 / GH-5: agents on new boards learn to link and import GitHub issues.
-assert_file_contains AGENTS.md "[--no-review] [--issue <ref>]"
-assert_file_contains AGENTS.md "dispatch task add <group> --from-issue <ref>"
-assert_file_contains CLAUDE.md "dispatch task edit <TASK-ID> --issue <ref>|--clear-issue"
-assert_file_contains CLAUDE.md "dispatch task add <group> --from-issue <ref>"
-assert_file_contains AGENTS.md "dispatch repo set <path>"
-assert_file_contains CLAUDE.md "dispatch repo set <path>"
-assert_file_contains AGENTS.md "dispatch task priority <TASK-ID> <value>"
-assert_file_contains CLAUDE.md "dispatch task priority <TASK-ID> <value>"
+# GH-23: the scaffolded files are the slim templates (ADR 0012): the
+# critical rules, how to find the workflow directory, and the skills to use.
+assert_golden init-AGENTS.md AGENTS.md
+assert_golden init-CLAUDE.md CLAUDE.md
+for file in AGENTS.md CLAUDE.md; do
+    if ! cmp -s "$ROOT/$file" "$file"; then
+        fail "init did not scaffold $file from the template"
+    fi
+    assert_file_contains "$file" "# Dispatch Agent Rules"
+    assert_file_contains "$file" "## Critical Rules"
+    assert_file_contains "$file" "Never read \`dispatch.json\` directly."
+    assert_file_contains "$file" "## Find The Workflow Directory"
+    assert_file_contains "$file" "\`dispatch-plan\`"
+    assert_file_contains "$file" "\`dispatch-work\`"
+    assert_file_contains "$file" "\`dispatch-board\`"
+    assert_file_contains "$file" "\`dispatch skills install\`"
+    assert_file_contains "$file" "\`dispatch skills install --global\`"
+    assert_file_not_contains "$file" "## Task Execution Protocol"
+    assert_file_not_contains "$file" "## Core Commands"
+    if [ "$(line_count "$file")" -gt 100 ]; then
+        fail "$file template is longer than 100 lines"
+    fi
+done
+# GH-1 / GH-5 and the command list moved from the templates into the skills
+# that init installs next to them.
+for dir in .claude/skills .agents/skills .opencode/skills; do
+    commands="$dir/dispatch-board/references/commands.md"
+    assert_file_contains "$commands" "[--no-review] [--issue <ref>]"
+    assert_file_contains "$commands" "dispatch task add <group> --from-issue <ref>"
+    assert_file_contains "$commands" "[--issue <ref>|--clear-issue]"
+    assert_file_contains "$commands" "dispatch repo set <path>"
+    assert_file_contains "$commands" "dispatch task priority <TASK-ID> <value>"
+    assert_file_contains "$dir/dispatch-plan/SKILL.md" "dispatch task add DE --from-issue 42"
+    assert_file_contains "$dir/dispatch-work/SKILL.md" "## Task Execution Protocol"
+done
 expect_ok "$BIN" doctor
 assert_contains "AGENTS.md found in workflow directory"
 # Re-init with an existing board must not scaffold or recreate files.
@@ -3767,7 +3814,7 @@ expect_ok "$BIN" init repo
 assert_contains "Created CLAUDE.md"
 assert_not_contains "Created AGENTS.md"
 assert_file_contains AGENTS.md "custom instructions"
-assert_file_not_contains AGENTS.md "# Dispatch Agent Instructions"
+assert_file_not_contains AGENTS.md "# Dispatch Agent Rules"
 
 # FX-09: the task inspector shows the full description: wrapped across rows,
 # paragraph breaks preserved, and every line reachable by scrolling.
@@ -5631,6 +5678,94 @@ expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1))
     bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills update --runner ""
 assert_line "opencode"
 
+# GH-23: slim templates and agent prompts that point at the skills (ADR 0012).
+# A fresh board gives a session everything it needs: the short instruction
+# files, every skill they name installed for every runner, and a quiet doctor.
+case_dir="$(make_case_dir slim-templates)"
+slim_home="$case_dir/home"
+mkdir -p "$slim_home" "$case_dir/work/repo"
+git -C "$case_dir/work/repo" init -q
+cd "$case_dir/work"
+sl=(env HOME="$slim_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH="$ROOT:$PATH")
+ln -s "$BIN" dispatch
+for shell in fish bash zsh; do
+    expect_ok "${sl[@]}" "$BIN" completion install "$shell"
+done
+expect_ok "${sl[@]}" "$BIN" init repo
+assert_contains "Created AGENTS.md"
+assert_contains "Created CLAUDE.md"
+assert_contains "Installed agent skills"
+expect_json_ok "${sl[@]}" "$BIN" skills install --json
+assert_json result.installed integer 0 result.unchanged integer 9
+for file in AGENTS.md CLAUDE.md; do
+    # Every skill the template names is installed for every runner.
+    for skill in $(grep -o '`dispatch-[a-z]*`' "$file" | tr -d '`' | sort -u); do
+        for dir in .claude/skills .agents/skills .opencode/skills; do
+            if [ ! -f "$dir/$skill/SKILL.md" ]; then
+                fail "$file names $skill, but $dir/$skill/SKILL.md is missing"
+            fi
+        done
+    done
+done
+expect_ok "${sl[@]}" "$BIN" agent create --name worker --runner claude --no-run-script
+for skill in $(grep -o '`dispatch-[a-z]*`' .dispatch/agents/worker/worker-PROMPT.md | tr -d '`' | sort -u); do
+    if [ ! -f ".claude/skills/$skill/SKILL.md" ]; then
+        fail "the agent prompt names $skill, but it is not installed"
+    fi
+done
+expect_ok "${sl[@]}" "$BIN" doctor
+assert_contains "[ok] skill dispatch-work installed (3 copies)"
+assert_contains "[ok] agent worker prompt exists"
+assert_not_contains "old long Dispatch instructions"
+assert_not_contains "skills_missing"
+
+# Doctor notices the old long templates on an existing board, suggests
+# dispatch skills install, and never rewrites the files.
+# tests/fixtures/legacy-AGENTS.md is the AGENTS.md that init wrote before
+# ADR 0012.
+cp "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md
+expect_ok "${sl[@]}" "$BIN" doctor
+assert_contains "[warn] AGENTS.md carries the old long Dispatch instructions; the agent skills now hold them"
+assert_contains "fix: dispatch skills install, then shorten AGENTS.md to the slim template (README: Upgrading Older Boards)"
+assert_not_contains "CLAUDE.md carries the old"
+if ! cmp -s "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md; then
+    fail "doctor must not rewrite AGENTS.md"
+fi
+printf '# Our rules\n\n## Task Execution Protocol\n\nLocal text.\n' > CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 2
+assert_contains '"kind": "instructions_outdated"'
+assert_contains '"subject": "AGENTS.md"'
+assert_contains '"subject": "CLAUDE.md"'
+assert_contains '"fix": "dispatch skills install, then shorten CLAUDE.md to the slim template (README: Upgrading Older Boards)"'
+cp "$ROOT/AGENTS.md" AGENTS.md
+cp "$ROOT/CLAUDE.md" CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json summary.warnings integer 0
+assert_not_contains "instructions_outdated"
+
+# Prompts written by an older Dispatch (no skills section, or the repository
+# instructions copied in) are flagged by doctor and regenerated by normalize.
+prompt=.dispatch/agents/worker/worker-PROMPT.md
+expected_prompt="$(cat "$prompt")"
+printf '# Dispatch Agent: worker\n\n## Agent ID\n\n- Agent name: `worker`\n' > "$prompt"
+expect_ok "${sl[@]}" "$BIN" doctor
+assert_contains "[warn] agent worker prompt predates the Dispatch skills"
+assert_contains "fix: run dispatch normalize"
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_contains '"kind": "agent_prompt_outdated"'
+assert_contains '"subject": "worker"'
+expect_ok "${sl[@]}" "$BIN" normalize
+if [ "$(cat "$prompt")" != "$expected_prompt" ]; then
+    fail "normalize did not regenerate the outdated agent prompt"
+fi
+printf '# Dispatch Agent: worker\n\n## Agent ID\n\n## Dispatch Skills\n\n## Repository Instructions From AGENTS.md\n\nOld copy.\n' > "$prompt"
+expect_ok "${sl[@]}" "$BIN" normalize
+assert_file_not_contains "$prompt" "## Repository Instructions From AGENTS.md"
+expect_ok "${sl[@]}" "$BIN" doctor
+assert_contains "[ok] agent worker prompt exists"
+assert_not_contains "predates the Dispatch skills"
+
 cd "$ROOT"
 
 # Agent skills (ADR 0010): front matter and drift against dispatch --help.
@@ -5680,12 +5815,24 @@ expect_fail env DISPATCH_BIN="$BIN" "$ROOT/tests/check_skills.sh" "$skills_case"
 assert_contains "'dispatch tui' is listed in dispatch --help but no skill mentions it"
 rm -rf "$skills_case"
 
+# The slim templates (ADR 0012) are checked for command drift and must name
+# every skill; their mentions do not count towards skill coverage.
+template_case="$TMP_ROOT/template-check.md"
+printf '# Rules\n\nRun `dispatch frob` or `dispatch skills nuke`; use `dispatch-plan`.\n' > "$template_case"
+expect_fail env DISPATCH_BIN="$BIN" DISPATCH_TEMPLATES="$template_case" "$ROOT/tests/check_skills.sh"
+assert_contains "'dispatch frob' is not a command in dispatch --help"
+assert_contains "'dispatch skills nuke' is not a subcommand in dispatch --help"
+assert_contains "template-check.md: does not name the dispatch-work skill"
+assert_contains "template-check.md: does not name the dispatch-board skill"
+assert_not_contains "does not name the dispatch-plan skill"
+rm -f "$template_case"
+
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
 assert_contains "PASS: TUI golden frames"
 
 # The aggregate suite also proves that a deliberate captured-frame mutation
 # is rejected by the golden comparison instead of silently updating fixtures.
-expect_fail env DISPATCH_BIN="$BIN" TUI_GOLDEN_MUTATE_FRAME=board \
+expect_fail env DISPATCH_BIN="$BIN" UPDATE_GOLDENS=0 TUI_GOLDEN_MUTATE_FRAME=board \
     "$ROOT/tests/run_tui_golden_tests.sh"
 assert_contains "FAIL: TUI golden frame changed: board"
 

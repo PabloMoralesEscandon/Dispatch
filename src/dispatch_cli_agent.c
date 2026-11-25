@@ -252,7 +252,7 @@ int write_agent_prompt(const char *path, const char *name,
     }
 
     fprintf(file, "# Dispatch Agent: %s\n\n", name);
-    fprintf(file, "This file identifies the Dispatch agent instance. General repository and workflow instructions come from `AGENTS.md` in the workflow directory.\n\n");
+    fprintf(file, "You are the Dispatch agent `%s`. This file gives your identity; how to plan, work and review comes from the Dispatch agent skills, and the rules every session follows are in `AGENTS.md` / `CLAUDE.md` in the workflow directory.\n\n", name);
     fprintf(file, "## Agent ID\n\n");
     fprintf(file, "- Agent name: `%s`\n", name);
     fprintf(file, "- Runner: `%s`\n", runner);
@@ -262,26 +262,29 @@ int write_agent_prompt(const char *path, const char *name,
     fprintf(file, "- Scratch directory: `%s`\n", scratch_dir);
     fprintf(file, "- Decisions directory: `%s`\n\n", decisions_dir);
 
+    fprintf(file, "%s\n\n", AGENT_PROMPT_SKILLS_HEADING);
+    fprintf(file, "Use the Dispatch agent skills for every Dispatch job:\n\n");
+    fprintf(file, "- `dispatch-work`: start, continue or finish a task (session startup, workspaces, one commit per task, review gates, failure handling). This is your main skill.\n");
+    fprintf(file, "- `dispatch-plan`: plan or break down work into groups, tasks and dependencies when the user asks for a plan.\n");
+    fprintf(file, "- `dispatch-board`: report on, ready, review or tidy the board when the user asks.\n\n");
+    fprintf(file, "If your runner does not offer these skills, run `dispatch skills install` from the workflow directory (`dispatch skills list` shows where they are installed), or ask the user. Do not work from memory.\n\n");
+
     fprintf(file, "## Actor Usage\n\n");
-    fprintf(file, "Always identify as `%s` when a Dispatch command needs the agent actor.\n\n", name);
-    fprintf(file, "Use this actor value for task lifecycle commands:\n\n");
-    fprintf(file, "```bash\n");
-    fprintf(file, "dispatch start <TASK-ID> --actor %s\n", name);
-    fprintf(file, "dispatch finish <TASK-ID> --actor %s\n", name);
-    fprintf(file, "dispatch review <TASK-ID> --actor %s\n", name);
-    fprintf(file, "```\n\n");
-    fprintf(file, "Use this actor value for owned workspaces:\n\n");
+    fprintf(file, "Always identify as `%s` when a Dispatch command records your own action:\n\n", name);
     fprintf(file, "```bash\n");
     fprintf(file, "dispatch workspace create <TASK-ID> --actor %s\n", name);
+    fprintf(file, "dispatch start <TASK-ID> --actor %s\n", name);
+    fprintf(file, "dispatch finish <TASK-ID> --actor %s\n", name);
+    fprintf(file, "dispatch commit add <TASK-ID> <sha> --actor %s\n", name);
     fprintf(file, "```\n\n");
+    fprintf(file, "Readying and accepting tasks are the user's decisions: when the user explicitly tells you to run `ready`, `group ready` or `review`, record `--actor user`. Record `review` as `%s` only when the user assigned you as the reviewer. Never record your own work as `user` or as another agent.\n\n", name);
     fprintf(file, "Record this agent's current runner metadata with this agent name:\n\n");
     fprintf(file, "```bash\n");
     fprintf(file, "dispatch agent session %s --session-id <SESSION-ID>\n", name);
     fprintf(file, "dispatch agent session %s --current-task <TASK-ID> --last-workspace <TASK-ID>\n", name);
     fprintf(file, "dispatch agent show %s\n", name);
     fprintf(file, "dispatch agent resume %s\n", name);
-    fprintf(file, "```\n\n");
-    fprintf(file, "Do not use `user` or another agent name as the actor for this agent's own work unless the user explicitly instructs you to do so.\n");
+    fprintf(file, "```\n");
     fclose(file);
     return 1;
 }

@@ -151,6 +151,60 @@ static void doctor_check_skills(size_t *warnings) {
     skills_targets_free(&targets);
 }
 
+static int file_contains_text(const char *path, const char *needle) {
+    FILE *file = fopen(path, "r");
+    if (!file)
+        return 0;
+
+    size_t needle_len = strlen(needle);
+    size_t matched = 0;
+    int found = 0;
+    int ch;
+    while ((ch = fgetc(file)) != EOF) {
+        if ((char)ch == needle[matched]) {
+            matched++;
+            if (matched == needle_len) {
+                found = 1;
+                break;
+            }
+        } else {
+            matched = (char)ch == needle[0] ? 1 : 0;
+        }
+    }
+    fclose(file);
+    return found;
+}
+
+/* A generated prompt is stale when it predates the agent ID section, still
+ * embeds the repository instructions (the oldest prompts copied AGENTS.md in
+ * under this heading), or predates the skills section (ADR 0012). */
+static int agent_prompt_needs_refresh(const char *path) {
+    return !file_contains_text(path, "## Agent ID") ||
+           !file_contains_text(path, AGENT_PROMPT_SKILLS_HEADING) ||
+           file_contains_text(path, "## Repository Instructions From AGENTS.md");
+}
+
+/* The workflow instruction files used to carry the whole workflow (about 450
+ * lines); now the agent skills do and the files are short (ADR 0012). Doctor
+ * only reports an old copy: the file may hold the person's own additions, so
+ * it is never rewritten. */
+static void doctor_check_instruction_file(size_t *warnings, const char *path) {
+    char message[256];
+    if (!file_contains_text(path, LEGACY_TEMPLATE_MARKER))
+        return;
+    snprintf(message, sizeof(message),
+             "%s carries the old long Dispatch instructions; the agent "
+             "skills now hold them",
+             path);
+    char fix[256];
+    snprintf(fix, sizeof(fix),
+             "dispatch skills install, then shorten %s to the slim template "
+             "(README: Upgrading Older Boards)",
+             path);
+    doctor_warn(warnings, "instructions_outdated", path, message, fix);
+}
+
+
 int cmd_doctor(int argc, char **argv) {
     (void)argv;
     int json_output = cli_json();
@@ -198,6 +252,8 @@ int cmd_doctor(int argc, char **argv) {
         doctor_warn(&warnings, "agents_md_missing", NULL,
                     "AGENTS.md missing in workflow directory",
                     "add repository workflow instructions for agents");
+    doctor_check_instruction_file(&warnings, "AGENTS.md");
+    doctor_check_instruction_file(&warnings, "CLAUDE.md");
 
     if (command_exists_on_path("dispatch"))
         doctor_ok("dispatch found on PATH");
@@ -234,11 +290,18 @@ int cmd_doctor(int argc, char **argv) {
         char message[512];
         snprintf(message, sizeof(message), "agent %s prompt exists",
                  agent->name);
-        if (path_exists(agent->prompt_path))
-            doctor_ok(message);
-        else
+        if (!path_exists(agent->prompt_path)) {
             doctor_warn(&warnings, "agent_prompt_missing", agent->name,
                         message, "run dispatch normalize");
+        } else if (agent_prompt_needs_refresh(agent->prompt_path)) {
+            snprintf(message, sizeof(message),
+                     "agent %s prompt predates the Dispatch skills",
+                     agent->name);
+            doctor_warn(&warnings, "agent_prompt_outdated", agent->name,
+                        message, "run dispatch normalize");
+        } else {
+            doctor_ok(message);
+        }
 
         if (agent->run_script_path) {
             snprintf(message, sizeof(message),
@@ -468,35 +531,6 @@ int cmd_doctor(int argc, char **argv) {
     printf("Summary: %zu warning%s\n", warnings, warnings == 1 ? "" : "s");
     dispatch_board_free(&board);
     return 0;
-}
-
-static int file_contains_text(const char *path, const char *needle) {
-    FILE *file = fopen(path, "r");
-    if (!file)
-        return 0;
-
-    size_t needle_len = strlen(needle);
-    size_t matched = 0;
-    int found = 0;
-    int ch;
-    while ((ch = fgetc(file)) != EOF) {
-        if ((char)ch == needle[matched]) {
-            matched++;
-            if (matched == needle_len) {
-                found = 1;
-                break;
-            }
-        } else {
-            matched = (char)ch == needle[0] ? 1 : 0;
-        }
-    }
-    fclose(file);
-    return found;
-}
-
-static int agent_prompt_needs_refresh(const char *path) {
-    return !file_contains_text(path, "## Agent ID") ||
-           file_contains_text(path, "## Repository Instructions From AGENTS.md");
 }
 
 static int normalize_agent_prompts(DispatchBoard *board) {
