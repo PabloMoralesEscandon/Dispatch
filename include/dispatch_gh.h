@@ -39,6 +39,12 @@ typedef struct {
     char canonical[DISPATCH_ISSUE_TEXT_MAX];
 } DispatchGhIssue;
 
+typedef enum {
+    DISPATCH_GH_ISSUE_STATE_UNKNOWN = 0,
+    DISPATCH_GH_ISSUE_STATE_OPEN,
+    DISPATCH_GH_ISSUE_STATE_CLOSED
+} DispatchGhIssueState;
+
 /* Runs `gh` with the NULL-terminated argument vector (args[0] is the
  * subcommand, e.g. "issue"; "gh" is prepended automatically). Stdin is
  * redirected to /dev/null and stdout/stderr are captured separately. */
@@ -64,5 +70,17 @@ DispatchGhStatus dispatch_gh_issue_view(const DispatchIssueRef *ref,
                                         DispatchGhResult *result);
 
 void dispatch_gh_issue_free(DispatchGhIssue *issue);
+
+/* Queries an issue's open/closed state via
+ * `gh issue view <number> --repo <owner>/<repo> --json state`. */
+DispatchGhStatus dispatch_gh_issue_state(const DispatchIssueRef *ref,
+                                         DispatchGhIssueState *state,
+                                         DispatchGhResult *result);
+
+/* Closes an issue with an optional closing comment via
+ * `gh issue close <number> --repo <owner>/<repo> [--comment <comment>]`. */
+DispatchGhStatus dispatch_gh_issue_close(const DispatchIssueRef *ref,
+                                         const char *comment,
+                                         DispatchGhResult *result);
 
 #endif

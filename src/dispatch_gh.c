@@ -20,6 +20,19 @@ static int ascii_tolower(unsigned char c) {
     return (c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : (int)c;
 }
 
+static int equals_ci(const char *left, const char *right) {
+    if (!left || !right)
+        return 0;
+    while (*left && *right) {
+        if (ascii_tolower((unsigned char)*left) !=
+            ascii_tolower((unsigned char)*right))
+            return 0;
+        left++;
+        right++;
+    }
+    return *left == '\0' && *right == '\0';
+}
+
 /* Portable ASCII case-insensitive substring check. */
 static int contains_ci(const char *haystack, const char *needle) {
     if (!haystack || !needle || !needle[0])
@@ -440,4 +453,104 @@ DispatchGhStatus dispatch_gh_issue_view(const DispatchIssueRef *ref,
     if (!result)
         dispatch_gh_result_free(&local);
     return DISPATCH_GH_OK;
+}
+
+DispatchGhStatus dispatch_gh_issue_state(const DispatchIssueRef *ref,
+                                         DispatchGhIssueState *state,
+                                         DispatchGhResult *result) {
+    if (state)
+        *state = DISPATCH_GH_ISSUE_STATE_UNKNOWN;
+
+    DispatchGhResult local = {0};
+    DispatchGhResult *out = result ? result : &local;
+    memset(out, 0, sizeof(*out));
+    out->exit_code = -1;
+
+    if (!ref || !state || !ref->owner[0] || !ref->repo[0] || ref->number <= 0) {
+        out->status = DISPATCH_GH_FAILED;
+        snprintf(out->detail, sizeof(out->detail), "invalid issue reference");
+        if (!result)
+            dispatch_gh_result_free(&local);
+        return DISPATCH_GH_FAILED;
+    }
+
+    char number_str[32];
+    char repo_str[DISPATCH_ISSUE_TEXT_MAX];
+    snprintf(number_str, sizeof(number_str), "%ld", ref->number);
+    dispatch_issue_format_repo(ref, repo_str, sizeof(repo_str));
+
+    const char *args[] = {
+        "issue", "view", number_str, "--repo", repo_str, "--json", "state",
+        NULL,
+    };
+    json_t *root = NULL;
+    DispatchGhStatus status = dispatch_gh_run_json(args, &root, out);
+    if (status != DISPATCH_GH_OK) {
+        if (!result)
+            dispatch_gh_result_free(&local);
+        return status;
+    }
+
+    const char *state_text =
+        json_is_object(root)
+            ? json_string_value(json_object_get(root, "state"))
+            : NULL;
+    if (equals_ci(state_text, "OPEN")) {
+        *state = DISPATCH_GH_ISSUE_STATE_OPEN;
+    } else if (equals_ci(state_text, "CLOSED")) {
+        *state = DISPATCH_GH_ISSUE_STATE_CLOSED;
+    } else {
+        json_decref(root);
+        out->status = DISPATCH_GH_INVALID_JSON;
+        snprintf(out->detail, sizeof(out->detail),
+                 "gh JSON object missing valid state field");
+        if (!result)
+            dispatch_gh_result_free(&local);
+        return DISPATCH_GH_INVALID_JSON;
+    }
+
+    json_decref(root);
+    if (!result)
+        dispatch_gh_result_free(&local);
+    return DISPATCH_GH_OK;
+}
+
+DispatchGhStatus dispatch_gh_issue_close(const DispatchIssueRef *ref,
+                                         const char *comment,
+                                         DispatchGhResult *result) {
+    DispatchGhResult local = {0};
+    DispatchGhResult *out = result ? result : &local;
+    memset(out, 0, sizeof(*out));
+    out->exit_code = -1;
+
+    if (!ref || !ref->owner[0] || !ref->repo[0] || ref->number <= 0) {
+        out->status = DISPATCH_GH_FAILED;
+        snprintf(out->detail, sizeof(out->detail), "invalid issue reference");
+        if (!result)
+            dispatch_gh_result_free(&local);
+        return DISPATCH_GH_FAILED;
+    }
+
+    char number_str[32];
+    char repo_str[DISPATCH_ISSUE_TEXT_MAX];
+    snprintf(number_str, sizeof(number_str), "%ld", ref->number);
+    dispatch_issue_format_repo(ref, repo_str, sizeof(repo_str));
+
+    DispatchGhStatus status;
+    if (comment && comment[0]) {
+        const char *args[] = {
+            "issue", "close", number_str, "--repo", repo_str, "--comment",
+            comment, NULL,
+        };
+        status = dispatch_gh_run(args, out);
+    } else {
+        const char *args[] = {
+            "issue", "close", number_str, "--repo", repo_str, NULL,
+        };
+        status = dispatch_gh_run(args, out);
+    }
+
+    if (!result)
+        dispatch_gh_result_free(&local);
+    return status;
 }
