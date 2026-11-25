@@ -94,6 +94,19 @@ void dispatch_json_result_set_bool(DispatchJsonResult *result,
 void dispatch_json_result_add_skipped(DispatchJsonResult *result,
                                       const char *workspace_id,
                                       const char *reason);
+/* Initializes empty closed_issues and issue_close_errors arrays on result. */
+void dispatch_json_result_init_close_issues(DispatchJsonResult *result);
+/* Appends {"task": id, "issue": ref} to result.closed_issues. */
+void dispatch_json_result_add_closed_issue(DispatchJsonResult *result,
+                                           const char *task_id,
+                                           const char *issue);
+/* Appends {"task": id, "issue": ref, "code": code, "message": msg} to
+ * result.issue_close_errors. */
+void dispatch_json_result_add_issue_close_error(DispatchJsonResult *result,
+                                                const char *task_id,
+                                                const char *issue,
+                                                const char *code,
+                                                const char *message);
 
 /* Writes the task envelope for a mutation: tasks holds the targets that
  * still exist, followed by result. group fills query.group when non-NULL. */

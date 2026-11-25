@@ -782,6 +782,39 @@ void dispatch_json_result_add_skipped(DispatchJsonResult *result,
     json_array_append_new(skipped, entry);
 }
 
+void dispatch_json_result_init_close_issues(DispatchJsonResult *result) {
+    if (!json_object_get(result->extras, "closed_issues"))
+        json_object_set_new(result->extras, "closed_issues", json_array());
+    if (!json_object_get(result->extras, "issue_close_errors"))
+        json_object_set_new(result->extras, "issue_close_errors", json_array());
+}
+
+void dispatch_json_result_add_closed_issue(DispatchJsonResult *result,
+                                           const char *task_id,
+                                           const char *issue) {
+    dispatch_json_result_init_close_issues(result);
+    json_t *closed = json_object_get(result->extras, "closed_issues");
+    json_t *entry = json_object();
+    json_object_set_new(entry, "task", json_string(task_id));
+    json_object_set_new(entry, "issue", json_string(issue));
+    json_array_append_new(closed, entry);
+}
+
+void dispatch_json_result_add_issue_close_error(DispatchJsonResult *result,
+                                                const char *task_id,
+                                                const char *issue,
+                                                const char *code,
+                                                const char *message) {
+    dispatch_json_result_init_close_issues(result);
+    json_t *errors = json_object_get(result->extras, "issue_close_errors");
+    json_t *entry = json_object();
+    json_object_set_new(entry, "task", json_string(task_id));
+    json_object_set_new(entry, "issue", json_string(issue));
+    json_object_set_new(entry, "code", json_string(code));
+    json_object_set_new(entry, "message", json_string(message));
+    json_array_append_new(errors, entry);
+}
+
 static json_t *state_or_null(int known, DispatchState state) {
     return known ? json_string(dispatch_state_name(state)) : json_null();
 }

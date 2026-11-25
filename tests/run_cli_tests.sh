@@ -4793,6 +4793,172 @@ expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=(
 assert_line "--check-issues"
 assert_line "--json"
 
+# GH-6 optional: review --close-issue closes each unique linked issue with a
+# comment after accepting the task, and stays non-fatal if gh fails.
+case_dir="$(make_case_dir review-close-issue)"
+cd "$case_dir"
+git init -q repo
+git -C repo remote add origin https://github.com/acme/widgets.git
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+
+expect_ok "$BIN" task add DE "Fix login" --issue 40
+expect_ok "$BIN" task add DE "No issue task"
+expect_ok "$BIN" task add DE "Cross-repo task" --issue Other-Org/thing.js#7
+expect_ok "$BIN" task add DE "Shared issue A" --issue 41
+expect_ok "$BIN" task add DE "Shared issue B" --issue ACME/widgets#41
+expect_ok "$BIN" task add DE "Close fails" --issue 42
+expect_ok "$BIN" task add DE "Missing gh" --issue 43
+expect_ok "$BIN" task add DE "Unauth gh A" --issue 44
+expect_ok "$BIN" task add DE "Unauth gh B" --issue 45
+expect_ok "$BIN" task add DE "Not found close" --issue 46
+
+for id in DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 DE-07 DE-08 DE-09 DE-10; do
+    expect_ok "$BIN" ready "$id" --actor user
+    expect_ok "$BIN" start "$id" --actor worker
+done
+expect_ok "$BIN" commit add DE-01 abc1234 --actor worker
+expect_ok "$BIN" commit add DE-01 def5678 --actor worker
+for id in DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 DE-07 DE-08 DE-09 DE-10; do
+    expect_ok "$BIN" finish "$id" --actor worker
+done
+
+mkdir -p fake-bin
+cat > fake-bin/gh <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$case_dir/gh-close.log"
+if [ "\$1" = "issue" ] && [ "\$2" = "close" ]; then
+    case "\$3" in
+        42)
+            printf 'GraphQL: permission denied\n' >&2
+            exit 1
+            ;;
+        44|45)
+            printf 'To get started with GitHub CLI, please run: gh auth login\n' >&2
+            exit 4
+            ;;
+        46)
+            printf 'Could not resolve to an Issue with the number of 46.\n' >&2
+            exit 1
+            ;;
+        *)
+            exit 0
+            ;;
+    esac
+fi
+exit 1
+EOF
+chmod +x fake-bin/gh
+
+# Invalid task fails before invoking gh.
+rm -f "$case_dir/gh-close.log"
+expect_fail env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-99 --close-issue
+if [ -e "$case_dir/gh-close.log" ]; then
+    fail "failed review --close-issue invoked gh"
+fi
+
+# Human review --close-issue closes the issue with a comment citing task + commits.
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-01 --actor alice --close-issue
+assert_line "Reviewed DE-01"
+assert_line "Closed acme/widgets#40 for DE-01"
+assert_file_contains "$case_dir/gh-close.log" \
+    "issue close 40 --repo acme/widgets --comment Closed via Dispatch review of DE-01 (Fix login) by alice. Commits: abc1234, def5678."
+assert_file_contains dispatch.log '"command":"review","action":"issue_close","outcome":"success","message":"Closed acme/widgets#40 for DE-01","targets":{"task":"DE-01"},"context":{"issue":"acme/widgets#40"}'
+
+# Reviewing a task with no linked issue prints a clear note and skips gh.
+rm -f "$case_dir/gh-close.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-02 --close-issue
+assert_line "Reviewed DE-02"
+assert_line "No linked issue on DE-02"
+if [ -e "$case_dir/gh-close.log" ]; then
+    fail "review --close-issue on unlinked task invoked gh"
+fi
+
+# JSON review --close-issue emits closed_issues and empty issue_close_errors.
+rm -f "$case_dir/gh-close.log"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-03 --actor alice --close-issue --json
+assert_json \
+    command string review \
+    result.action string review \
+    result.task string DE-03 \
+    result.new_state string done \
+    result.closed_issues array_length 1 \
+    result.closed_issues.0.task string DE-03 \
+    result.closed_issues.0.issue string Other-Org/thing.js#7 \
+    result.issue_close_errors array_length 0
+assert_file_contains "$case_dir/gh-close.log" \
+    "issue close 7 --repo Other-Org/thing.js --comment Closed via Dispatch review of DE-03 (Cross-repo task) by alice."
+
+# Batch review deduplicates shared issues (case-insensitively) so gh closes once.
+rm -f "$case_dir/gh-close.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-04 DE-05 --close-issue
+assert_line "Reviewed DE-04"
+assert_line "Reviewed DE-05"
+assert_line "Closed acme/widgets#41 for DE-04"
+assert_line "Issue ACME/widgets#41 already closed during this review"
+if [ "$(line_count "$case_dir/gh-close.log")" -ne 1 ]; then
+    fail "expected batch review --close-issue to call gh once for shared issue"
+fi
+
+# Close failure is non-fatal: task still becomes done, text warns on stderr.
+run_split env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-06 --close-issue
+if [ "$RUN_STATUS" -ne 0 ]; then
+    fail "review --close-issue failed when gh issue close errored"
+fi
+RUN_OUTPUT="$RUN_STDOUT"
+assert_line "Reviewed DE-06"
+RUN_OUTPUT="$RUN_STDERR"
+assert_contains "Warning: could not close acme/widgets#42 for DE-06: GraphQL: permission denied"
+expect_ok "$BIN" show DE-06
+assert_line "State: done"
+
+# Missing gh in JSON mode still accepts the task and reports gh_missing in result.
+expect_json_ok env PATH="/no-such-dir" "$BIN" review DE-07 --close-issue --json
+assert_json \
+    result.new_state string done \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 1 \
+    result.issue_close_errors.0.task string DE-07 \
+    result.issue_close_errors.0.issue string acme/widgets#43 \
+    result.issue_close_errors.0.code string gh_missing
+
+# Unauthenticated gh in a batch stops invoking gh after the first auth error
+# and records gh_not_authenticated for both linked tasks.
+rm -f "$case_dir/gh-close.log"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-08 DE-09 --close-issue --json
+assert_json \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 2 \
+    result.issue_close_errors.0.task string DE-08 \
+    result.issue_close_errors.0.code string gh_not_authenticated \
+    result.issue_close_errors.1.task string DE-09 \
+    result.issue_close_errors.1.code string gh_not_authenticated
+if [ "$(line_count "$case_dir/gh-close.log")" -ne 1 ]; then
+    fail "expected batch review --close-issue to stop after 1 unauthenticated call"
+fi
+
+# Nonexistent issue maps to shared issue_not_found code in issue_close_errors.
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-10 --close-issue --json
+assert_json \
+    result.new_state string done \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 1 \
+    result.issue_close_errors.0.task string DE-10 \
+    result.issue_close_errors.0.issue string acme/widgets#46 \
+    result.issue_close_errors.0.code string issue_not_found
+
+# Shell completions offer --close-issue for review.
+expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion zsh
+assert_contains "compadd -- --actor --close-issue"
+expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from review' -l close-issue"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-review-completion.bash"
+# shellcheck disable=SC2016
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-review-completion.bash" dispatch review DE-01 --
+assert_line "--actor"
+assert_line "--close-issue"
+
 cd "$ROOT"
 
 expect_ok env DISPATCH_BIN="$BIN" "$ROOT/tests/run_tui_golden_tests.sh"
