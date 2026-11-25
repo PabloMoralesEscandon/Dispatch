@@ -20,6 +20,14 @@ dispatch completion install fish|bash|zsh
 dispatch tui
 ```
 
+## Agent skills
+
+```bash
+dispatch skills list [--project | --global] [--runner claude|codex|opencode|all] [--json]
+dispatch skills install [--project | --global] [--runner claude|codex|opencode|all] [--force] [--json]
+dispatch skills update [--project | --global] [--runner claude|codex|opencode|all] [--force] [--json]
+```
+
 ## Reading tasks
 
 ```bash
