@@ -43,6 +43,7 @@ int cli_json(void);
 void cli_error(const char *code, const char *task_id, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 void cli_json_snapshot(const DispatchBoard *board);
+void cli_json_snapshot_reset(void);
 /* Emit a success document and free result; return the exit status. */
 int cli_json_emit_tasks(const DispatchBoard *board, const char *group,
                         DispatchJsonResult *result);
