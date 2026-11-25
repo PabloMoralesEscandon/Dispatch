@@ -29,6 +29,7 @@ repository, while `work_dir` can have its own Git history for workflow state.
 - `git` and a pager for the TUI diff view (`d`). The pager is taken from
   `$PAGER`, falling back to `less` then `more`; whichever one you rely on must be
   installed, or the diff runs without paging.
+- `gh` (GitHub CLI), optional — required only for `task add --from-issue`.
 
 ## Build
 
@@ -511,6 +512,7 @@ yet.
 
 ```bash
 dispatch task add <group> <title> [--description <text>] [--actor <name>] [--no-review] [--issue <ref>]
+dispatch task add <group> --from-issue <ref> [--actor <name>] [--no-review]
 dispatch task edit <id> [--title <text>] [--description <text>] [--issue <ref>|--clear-issue] [--actor <name>]
 dispatch task move <id> <group> [--actor <name>]
 dispatch task delete <id> [--force]
@@ -558,6 +560,24 @@ tasks may link the same issue; `status` warns about it so accidental
 duplicates are easy to spot. `show` prints the linked issue and its URL, `list`
 adds `issue:#123` to the task line, and JSON task objects carry an `issue`
 object (see [JSON Output](#json-output)).
+
+To create a task directly from an existing GitHub issue, use `--from-issue`:
+
+```bash
+dispatch task add DE --from-issue 5
+dispatch task add DE --from-issue acme/widgets#12 --actor codex --no-review
+```
+
+`--from-issue` accepts the same ref forms as `--issue` (bare numbers resolve
+against the board repo's GitHub `origin` remote first), then fetches the issue
+with `gh issue view --json title,body,url`. It uses the issue's title as the
+task title, its body as the task description (normalizing CRLF line endings to
+LF), and links the canonical ref from the returned URL. Pull requests are
+rejected. `--from-issue` cannot be combined with an explicit title,
+`--description`, or `--issue`; use `task add <group> <title> --issue <ref>`
+for custom text, or `task edit` afterwards. Missing `gh`, missing
+authentication (`gh auth login`), and nonexistent issues fail cleanly without
+changing the board (see [ADR 0006](docs/adr/0006-task-from-github-issue.md)).
 
 `task move` changes the task's group while preserving its ID, workflow state,
 dependencies, commit references, workspace associations, agent session links,
