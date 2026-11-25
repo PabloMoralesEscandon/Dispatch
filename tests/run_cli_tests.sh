@@ -4562,7 +4562,10 @@ done
 expect_ok "$BIN" completion zsh
 assert_contains "move|priority) compadd -- --actor --json ;;"
 assert_contains "repair) compadd -- --json ;;"
-assert_contains "start|finish|review|unassign)"
+assert_contains "start|finish|unassign)"
+# review and status keep their issue flags alongside --json.
+assert_contains "compadd -- --actor --close-issue --json"
+assert_contains "compadd -- --check-issues --json"
 expect_ok "$BIN" completion fish
 assert_contains "__fish_seen_subcommand_from add edit move delete priority' -l json"
 assert_contains "__fish_seen_subcommand_from create adopt remove repair prune' -l json"
@@ -5017,6 +5020,397 @@ assert_contains '"subject": "DE-03"'
 assert_contains '"subject": "DE-04"'
 assert_contains '"subject": "DE-06"'
 assert_not_contains '"kind": "workspace_branch_mismatch"'
+
+# GH-6: status --check-issues queries GitHub via the shared dispatch_gh helper
+# to warn about drift between task states and linked issues, staying non-fatal
+# when gh is missing, unauthenticated, or fails on an individual issue.
+case_dir="$(make_case_dir check-issues)"
+cd "$case_dir"
+git init -q repo
+git -C repo remote add origin https://github.com/acme/widgets.git
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+
+# Usage errors for repeated or unknown status options.
+expect_fail "$BIN" status --check-issues --check-issues
+assert_contains "Usage: dispatch status [--check-issues] [--json]"
+expect_fail "$BIN" status --bogus
+assert_contains "Usage: dispatch status [--check-issues] [--json]"
+
+# A board with no linked issues never invokes gh, even with --check-issues.
+expect_ok "$BIN" task add DE "Unlinked task"
+expect_ok env PATH="/no-such-dir" "$BIN" status --check-issues
+assert_line "Warnings:"
+assert_line "  -"
+expect_json_ok env PATH="/no-such-dir" "$BIN" status --check-issues --json
+assert_json \
+    command string status \
+    query.check_issues boolean true \
+    warnings array_length 0
+
+# Build a board covering every drift, lookup error, and offline warning:
+# DE-02: done + OPEN issue -> issue_still_open
+# DE-03: done + CLOSED issue -> agrees (no warning)
+# DE-04: ready + CLOSED issue -> issue_already_closed
+# DE-05: doing + OPEN issue -> agrees (no warning)
+# DE-06: review + CLOSED cross-repo issue -> issue_already_closed
+# DE-07: proposed + duplicate of DE-02's issue (different case) -> duplicate_issue,
+#        and gh is queried only once for acme/widgets#10
+# DE-08: ready + missing issue -> issue_not_found (non-fatal)
+# DE-09: ready + 502 server failure -> gh_failed (non-fatal)
+expect_ok "$BIN" task add DE "Done open" --issue 10 --no-review
+expect_ok "$BIN" task add DE "Done closed" --issue 11 --no-review
+expect_ok "$BIN" task add DE "Ready closed" --issue 12
+expect_ok "$BIN" task add DE "Doing open" --issue 13
+expect_ok "$BIN" task add DE "Review closed" --issue Other-Org/thing.js#7
+expect_ok "$BIN" task add DE "Duplicate ref" --issue ACME/widgets#10
+expect_ok "$BIN" task add DE "Missing issue" --issue 99
+expect_ok "$BIN" task add DE "Server error issue" --issue 100
+
+expect_ok "$BIN" ready DE-02 DE-03 DE-04 DE-05 DE-06 DE-08 DE-09 --actor user
+expect_ok "$BIN" start DE-02 --actor worker
+expect_ok "$BIN" commit add DE-02 deadbee --actor worker
+expect_ok "$BIN" finish DE-02 --actor worker
+expect_ok "$BIN" start DE-03 --actor worker
+expect_ok "$BIN" commit add DE-03 cafebab --actor worker
+expect_ok "$BIN" finish DE-03 --actor worker
+expect_ok "$BIN" start DE-05 --actor worker
+expect_ok "$BIN" start DE-06 --actor worker
+expect_ok "$BIN" commit add DE-06 feedfac --actor worker
+expect_ok "$BIN" finish DE-06 --actor worker
+
+# Plain status (without --check-issues) never calls gh, keeps duplicate_issue.
+mkdir -p fake-bin
+cat > fake-bin/gh <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$case_dir/gh-calls.log"
+if [ "\$1" = "issue" ] && [ "\$2" = "view" ]; then
+    num="\$3"
+    repo=""
+    shift 3
+    while [ \$# -gt 0 ]; do
+        case "\$1" in
+            --repo) repo="\$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    case "\$repo#\$num" in
+        acme/widgets#10) printf '{"state":"OPEN"}\n'; exit 0 ;;
+        acme/widgets#11) printf '{"state":"CLOSED"}\n'; exit 0 ;;
+        acme/widgets#12) printf '{"state":"CLOSED"}\n'; exit 0 ;;
+        acme/widgets#13) printf '{"state":"OPEN"}\n'; exit 0 ;;
+        Other-Org/thing.js#7) printf '{"state":"CLOSED"}\n'; exit 0 ;;
+        acme/widgets#99)
+            printf 'Could not resolve to an Issue with the number of 99.\n' >&2
+            exit 1
+            ;;
+        acme/widgets#100)
+            printf 'HTTP 502: Bad Gateway\n' >&2
+            exit 1
+            ;;
+    esac
+fi
+printf 'unexpected gh invocation: %s\n' "\$*" >&2
+exit 1
+EOF
+chmod +x fake-bin/gh
+
+rm -f "$case_dir/gh-calls.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status
+assert_line "  DE-07 links ACME/widgets#10, also linked to DE-02"
+assert_not_contains "is still open"
+assert_not_contains "is closed"
+if [ -e "$case_dir/gh-calls.log" ]; then
+    fail "status without --check-issues invoked gh"
+fi
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --json
+assert_json \
+    command string status \
+    query.check_issues boolean false \
+    warnings array_length 1 \
+    warnings.0.code string duplicate_issue
+if [ -e "$case_dir/gh-calls.log" ]; then
+    fail "status --json without --check-issues invoked gh"
+fi
+
+# Human status --check-issues reports all drift and lookup warnings.
+rm -f "$case_dir/gh-calls.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues
+assert_line "  DE-07 links ACME/widgets#10, also linked to DE-02"
+assert_line "  DE-02 is done, but linked issue acme/widgets#10 is still open"
+assert_line "  DE-04 is ready, but linked issue acme/widgets#12 is closed"
+assert_line "  DE-06 is review, but linked issue Other-Org/thing.js#7 is closed"
+assert_line "  DE-08: could not check linked issue acme/widgets#99 (Could not resolve to an Issue with the number of 99.)"
+assert_line "  DE-09: could not check linked issue acme/widgets#100 (HTTP 502: Bad Gateway)"
+assert_not_contains "DE-03 is done"
+assert_not_contains "DE-05 is doing"
+# Deduplication: 7 unique issues across 8 linked tasks (DE-07 reuses DE-02's #10).
+if [ "$(line_count "$case_dir/gh-calls.log")" -ne 7 ]; then
+    fail "expected 7 deduplicated gh calls, got $(line_count "$case_dir/gh-calls.log")"
+fi
+
+# JSON mode works with flags in either order, reuses shared gh error codes,
+# and keeps stderr clean even when gh writes errors to stderr.
+rm -f "$case_dir/gh-calls.log"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --json --check-issues
+assert_json \
+    schema_version integer 1 \
+    command string status \
+    query.check_issues boolean true \
+    warnings array_length 6 \
+    warnings.0.code string duplicate_issue \
+    warnings.0.task_id string DE-07 \
+    warnings.0.agent null - \
+    warnings.1.code string issue_still_open \
+    warnings.1.task_id string DE-02 \
+    warnings.1.agent null - \
+    warnings.1.issue string acme/widgets#10 \
+    warnings.1.message string "DE-02 is done, but linked issue acme/widgets#10 is still open" \
+    warnings.2.code string issue_already_closed \
+    warnings.2.task_id string DE-04 \
+    warnings.2.agent null - \
+    warnings.2.issue string acme/widgets#12 \
+    warnings.2.message string "DE-04 is ready, but linked issue acme/widgets#12 is closed" \
+    warnings.3.code string issue_already_closed \
+    warnings.3.task_id string DE-06 \
+    warnings.3.agent null - \
+    warnings.3.issue string Other-Org/thing.js#7 \
+    warnings.4.code string issue_not_found \
+    warnings.4.task_id string DE-08 \
+    warnings.4.agent null - \
+    warnings.4.issue string acme/widgets#99 \
+    warnings.5.code string gh_failed \
+    warnings.5.task_id string DE-09 \
+    warnings.5.agent null - \
+    warnings.5.issue string acme/widgets#100
+
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues --json
+assert_json \
+    query.check_issues boolean true \
+    warnings array_length 6
+
+# Missing gh on PATH is non-fatal: emits one gh_missing warning and keeps
+# offline warnings intact.
+expect_ok env PATH="/no-such-dir" "$BIN" status --check-issues
+assert_line "  DE-07 links ACME/widgets#10, also linked to DE-02"
+assert_line "  cannot check linked issues: gh is not installed or not on PATH"
+expect_json_ok env PATH="/no-such-dir" "$BIN" status --check-issues --json
+assert_json \
+    query.check_issues boolean true \
+    warnings array_length 2 \
+    warnings.0.code string duplicate_issue \
+    warnings.1.code string gh_missing \
+    warnings.1.task_id null - \
+    warnings.1.agent null - \
+    warnings.1.message string "cannot check linked issues: gh is not installed or not on PATH"
+
+# Unauthenticated gh (exit code 4) emits one gh_not_authenticated warning and
+# stops querying remaining issues.
+mkdir -p unauth-bin
+cat > unauth-bin/gh <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$case_dir/unauth-calls.log"
+printf 'To get started with GitHub CLI, please run: gh auth login\n' >&2
+exit 4
+EOF
+chmod +x unauth-bin/gh
+
+rm -f "$case_dir/unauth-calls.log"
+expect_ok env PATH="$case_dir/unauth-bin:$PATH" "$BIN" status --check-issues
+assert_line "  DE-07 links ACME/widgets#10, also linked to DE-02"
+assert_line "  cannot check linked issues: gh is not logged in (run: gh auth login)"
+if [ "$(line_count "$case_dir/unauth-calls.log")" -ne 1 ]; then
+    fail "expected unauthenticated gh check to stop after 1 call"
+fi
+rm -f "$case_dir/unauth-calls.log"
+expect_json_ok env PATH="$case_dir/unauth-bin:$PATH" "$BIN" status --check-issues --json
+assert_json \
+    warnings array_length 2 \
+    warnings.0.code string duplicate_issue \
+    warnings.1.code string gh_not_authenticated \
+    warnings.1.task_id null - \
+    warnings.1.agent null -
+if [ "$(line_count "$case_dir/unauth-calls.log")" -ne 1 ]; then
+    fail "expected unauthenticated JSON check to stop after 1 call"
+fi
+
+# Shell completions offer --check-issues and --json for status.
+expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion zsh
+assert_contains "compadd -- --check-issues --json"
+expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from status' -l check-issues"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-status-completion.bash"
+# shellcheck disable=SC2016
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-status-completion.bash" dispatch status --
+assert_line "--check-issues"
+assert_line "--json"
+
+# GH-6 optional: review --close-issue closes each unique linked issue with a
+# comment after accepting the task, and stays non-fatal if gh fails.
+case_dir="$(make_case_dir review-close-issue)"
+cd "$case_dir"
+git init -q repo
+git -C repo remote add origin https://github.com/acme/widgets.git
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Development --prefix DE
+
+expect_ok "$BIN" task add DE "Fix login" --issue 40
+expect_ok "$BIN" task add DE "No issue task"
+expect_ok "$BIN" task add DE "Cross-repo task" --issue Other-Org/thing.js#7
+expect_ok "$BIN" task add DE "Shared issue A" --issue 41
+expect_ok "$BIN" task add DE "Shared issue B" --issue ACME/widgets#41
+expect_ok "$BIN" task add DE "Close fails" --issue 42
+expect_ok "$BIN" task add DE "Missing gh" --issue 43
+expect_ok "$BIN" task add DE "Unauth gh A" --issue 44
+expect_ok "$BIN" task add DE "Unauth gh B" --issue 45
+expect_ok "$BIN" task add DE "Not found close" --issue 46
+
+for id in DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 DE-07 DE-08 DE-09 DE-10; do
+    expect_ok "$BIN" ready "$id" --actor user
+    expect_ok "$BIN" start "$id" --actor worker
+done
+expect_ok "$BIN" commit add DE-01 abc1234 --actor worker
+expect_ok "$BIN" commit add DE-01 def5678 --actor worker
+for id in DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 DE-07 DE-08 DE-09 DE-10; do
+    expect_ok "$BIN" finish "$id" --actor worker
+done
+
+mkdir -p fake-bin
+cat > fake-bin/gh <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$case_dir/gh-close.log"
+if [ "\$1" = "issue" ] && [ "\$2" = "close" ]; then
+    case "\$3" in
+        42)
+            printf 'GraphQL: permission denied\n' >&2
+            exit 1
+            ;;
+        44|45)
+            printf 'To get started with GitHub CLI, please run: gh auth login\n' >&2
+            exit 4
+            ;;
+        46)
+            printf 'Could not resolve to an Issue with the number of 46.\n' >&2
+            exit 1
+            ;;
+        *)
+            exit 0
+            ;;
+    esac
+fi
+exit 1
+EOF
+chmod +x fake-bin/gh
+
+# Invalid task fails before invoking gh.
+rm -f "$case_dir/gh-close.log"
+expect_fail env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-99 --close-issue
+if [ -e "$case_dir/gh-close.log" ]; then
+    fail "failed review --close-issue invoked gh"
+fi
+
+# Human review --close-issue closes the issue with a comment citing task + commits.
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-01 --actor alice --close-issue
+assert_line "Reviewed DE-01"
+assert_line "Closed acme/widgets#40 for DE-01"
+assert_file_contains "$case_dir/gh-close.log" \
+    "issue close 40 --repo acme/widgets --comment Closed via Dispatch review of DE-01 (Fix login) by alice. Commits: abc1234, def5678."
+assert_file_contains dispatch.log '"command":"review","action":"issue_close","outcome":"success","message":"Closed acme/widgets#40 for DE-01","targets":{"task":"DE-01"},"context":{"issue":"acme/widgets#40"}'
+
+# Reviewing a task with no linked issue prints a clear note and skips gh.
+rm -f "$case_dir/gh-close.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-02 --close-issue
+assert_line "Reviewed DE-02"
+assert_line "No linked issue on DE-02"
+if [ -e "$case_dir/gh-close.log" ]; then
+    fail "review --close-issue on unlinked task invoked gh"
+fi
+
+# JSON review --close-issue emits closed_issues and empty issue_close_errors.
+rm -f "$case_dir/gh-close.log"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-03 --actor alice --close-issue --json
+assert_json \
+    command string review \
+    result.action string review \
+    result.task string DE-03 \
+    result.new_state string done \
+    result.closed_issues array_length 1 \
+    result.closed_issues.0.task string DE-03 \
+    result.closed_issues.0.issue string Other-Org/thing.js#7 \
+    result.issue_close_errors array_length 0
+assert_file_contains "$case_dir/gh-close.log" \
+    "issue close 7 --repo Other-Org/thing.js --comment Closed via Dispatch review of DE-03 (Cross-repo task) by alice."
+
+# Batch review deduplicates shared issues (case-insensitively) so gh closes once.
+rm -f "$case_dir/gh-close.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-04 DE-05 --close-issue
+assert_line "Reviewed DE-04"
+assert_line "Reviewed DE-05"
+assert_line "Closed acme/widgets#41 for DE-04"
+assert_line "Issue ACME/widgets#41 already closed during this review"
+if [ "$(line_count "$case_dir/gh-close.log")" -ne 1 ]; then
+    fail "expected batch review --close-issue to call gh once for shared issue"
+fi
+
+# Close failure is non-fatal: task still becomes done, text warns on stderr.
+run_split env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-06 --close-issue
+if [ "$RUN_STATUS" -ne 0 ]; then
+    fail "review --close-issue failed when gh issue close errored"
+fi
+RUN_OUTPUT="$RUN_STDOUT"
+assert_line "Reviewed DE-06"
+RUN_OUTPUT="$RUN_STDERR"
+assert_contains "Warning: could not close acme/widgets#42 for DE-06: GraphQL: permission denied"
+expect_ok "$BIN" show DE-06
+assert_line "State: done"
+
+# Missing gh in JSON mode still accepts the task and reports gh_missing in result.
+expect_json_ok env PATH="/no-such-dir" "$BIN" review DE-07 --close-issue --json
+assert_json \
+    result.new_state string done \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 1 \
+    result.issue_close_errors.0.task string DE-07 \
+    result.issue_close_errors.0.issue string acme/widgets#43 \
+    result.issue_close_errors.0.code string gh_missing
+
+# Unauthenticated gh in a batch stops invoking gh after the first auth error
+# and records gh_not_authenticated for both linked tasks.
+rm -f "$case_dir/gh-close.log"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-08 DE-09 --close-issue --json
+assert_json \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 2 \
+    result.issue_close_errors.0.task string DE-08 \
+    result.issue_close_errors.0.code string gh_not_authenticated \
+    result.issue_close_errors.1.task string DE-09 \
+    result.issue_close_errors.1.code string gh_not_authenticated
+if [ "$(line_count "$case_dir/gh-close.log")" -ne 1 ]; then
+    fail "expected batch review --close-issue to stop after 1 unauthenticated call"
+fi
+
+# Nonexistent issue maps to shared issue_not_found code in issue_close_errors.
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review DE-10 --close-issue --json
+assert_json \
+    result.new_state string done \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 1 \
+    result.issue_close_errors.0.task string DE-10 \
+    result.issue_close_errors.0.issue string acme/widgets#46 \
+    result.issue_close_errors.0.code string issue_not_found
+
+# Shell completions offer --close-issue for review.
+expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion zsh
+assert_contains "compadd -- --actor --close-issue"
+expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from review' -l close-issue"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-review-completion.bash"
+# shellcheck disable=SC2016
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-review-completion.bash" dispatch review DE-01 --
+assert_line "--actor"
+assert_line "--close-issue"
 
 cd "$ROOT"
 

@@ -483,6 +483,10 @@ static json_t *query_json(const DispatchJsonRequest *request) {
         }
     }
     json_object_set_new(object, "states", states);
+    if (request->include_warnings) {
+        json_object_set_new(object, "check_issues",
+                            json_boolean(request->check_issues));
+    }
     return object;
 }
 
@@ -569,10 +573,11 @@ static int board_has_task(const DispatchBoard *board, const char *task_id) {
     return find_task(board, task_id) != NULL;
 }
 
-static json_t *warnings_json(const DispatchBoard *board, int include_warnings) {
+static json_t *warnings_json(const DispatchBoard *board,
+                             const DispatchJsonRequest *request) {
     json_t *warnings = json_array();
     char message[512];
-    if (!include_warnings)
+    if (!request->include_warnings)
         return warnings;
 
     for (size_t i = 0; i < board->tasks.count; i++) {
@@ -612,6 +617,18 @@ static json_t *warnings_json(const DispatchBoard *board, int include_warnings) {
                  agent->current_task);
         append_warning(warnings, "missing_current_task", message, NULL,
                        agent->name);
+    }
+    for (size_t i = 0; i < request->extra_warning_count; i++) {
+        const DispatchJsonWarning *extra = &request->extra_warnings[i];
+        json_t *warning = json_object();
+        json_object_set_new(warning, "code", json_string(extra->code));
+        json_object_set_new(warning, "message", json_string(extra->message));
+        json_object_set_new(warning, "task_id",
+                            optional_string(extra->task_id));
+        json_object_set_new(warning, "agent", optional_string(extra->agent));
+        if (extra->issue)
+            json_object_set_new(warning, "issue", json_string(extra->issue));
+        json_array_append_new(warnings, warning);
     }
     return warnings;
 }
@@ -659,8 +676,7 @@ int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
     json_object_set_new(root, "query", query_json(request));
     json_object_set_new(root, "summary", summary_json(board, returned));
     json_object_set_new(root, "tasks", tasks);
-    json_object_set_new(root, "warnings",
-                        warnings_json(board, request->include_warnings));
+    json_object_set_new(root, "warnings", warnings_json(board, request));
 
     return dump_document(stream, root);
 }
@@ -786,6 +802,39 @@ void dispatch_json_result_add_skipped(DispatchJsonResult *result,
     json_object_set_new(entry, "workspace", json_string(workspace_id));
     json_object_set_new(entry, "reason", json_string(reason));
     json_array_append_new(skipped, entry);
+}
+
+void dispatch_json_result_init_close_issues(DispatchJsonResult *result) {
+    if (!json_object_get(result->extras, "closed_issues"))
+        json_object_set_new(result->extras, "closed_issues", json_array());
+    if (!json_object_get(result->extras, "issue_close_errors"))
+        json_object_set_new(result->extras, "issue_close_errors", json_array());
+}
+
+void dispatch_json_result_add_closed_issue(DispatchJsonResult *result,
+                                           const char *task_id,
+                                           const char *issue) {
+    dispatch_json_result_init_close_issues(result);
+    json_t *closed = json_object_get(result->extras, "closed_issues");
+    json_t *entry = json_object();
+    json_object_set_new(entry, "task", json_string(task_id));
+    json_object_set_new(entry, "issue", json_string(issue));
+    json_array_append_new(closed, entry);
+}
+
+void dispatch_json_result_add_issue_close_error(DispatchJsonResult *result,
+                                                const char *task_id,
+                                                const char *issue,
+                                                const char *code,
+                                                const char *message) {
+    dispatch_json_result_init_close_issues(result);
+    json_t *errors = json_object_get(result->extras, "issue_close_errors");
+    json_t *entry = json_object();
+    json_object_set_new(entry, "task", json_string(task_id));
+    json_object_set_new(entry, "issue", json_string(issue));
+    json_object_set_new(entry, "code", json_string(code));
+    json_object_set_new(entry, "message", json_string(message));
+    json_array_append_new(errors, entry);
 }
 
 static json_t *state_or_null(int known, DispatchState state) {

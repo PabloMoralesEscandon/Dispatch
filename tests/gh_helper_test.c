@@ -166,6 +166,75 @@ int main(int argc, char **argv) {
     }
     dispatch_gh_result_free(&res);
 
+    /* dispatch_gh_issue_state: open, closed (case-insensitive), and invalid. */
+    char log_path[1024];
+    char script[1536];
+    snprintf(log_path, sizeof(log_path), "%s/gh-calls.log", dir);
+    snprintf(script, sizeof(script),
+             "printf '%%s\\n' \"$*\" >> '%s'\n"
+             "printf '{\"state\":\"OPEN\"}\\n'\n",
+             log_path);
+    write_stub(dir, script);
+    DispatchGhIssueState issue_state = DISPATCH_GH_ISSUE_STATE_UNKNOWN;
+    status = dispatch_gh_issue_state(&ref, &issue_state, &res);
+    check(status == DISPATCH_GH_OK &&
+              issue_state == DISPATCH_GH_ISSUE_STATE_OPEN,
+          "issue_state OPEN");
+    dispatch_gh_result_free(&res);
+
+    write_stub(dir, "printf '{\"state\":\"closed\"}\\n'\n");
+    status = dispatch_gh_issue_state(&ref, &issue_state, &res);
+    check(status == DISPATCH_GH_OK &&
+              issue_state == DISPATCH_GH_ISSUE_STATE_CLOSED,
+          "issue_state closed case-insensitive");
+    dispatch_gh_result_free(&res);
+
+    write_stub(dir, "printf '{\"state\":\"MERGED\"}\\n'\n");
+    status = dispatch_gh_issue_state(&ref, &issue_state, &res);
+    check(status == DISPATCH_GH_INVALID_JSON &&
+              strcmp(dispatch_gh_error_code(status), "gh_failed") == 0,
+          "issue_state rejects unexpected state");
+    dispatch_gh_result_free(&res);
+
+    /* dispatch_gh_issue_close: with comment, without comment, and failures. */
+    snprintf(script, sizeof(script),
+             "printf '%%s\\n' \"$*\" >> '%s'\n"
+             "exit 0\n",
+             log_path);
+    write_stub(dir, script);
+    status = dispatch_gh_issue_close(&ref, "Accepted DE-01", &res);
+    check(status == DISPATCH_GH_OK, "issue_close with comment succeeds");
+    dispatch_gh_result_free(&res);
+
+    status = dispatch_gh_issue_close(&ref, NULL, &res);
+    check(status == DISPATCH_GH_OK, "issue_close without comment succeeds");
+    dispatch_gh_result_free(&res);
+
+    write_stub(dir, "printf 'GraphQL: permission denied\\n' >&2\nexit 1\n");
+    status = dispatch_gh_issue_close(&ref, "Accepted DE-01", &res);
+    check(status == DISPATCH_GH_FAILED &&
+              strstr(res.detail, "GraphQL: permission denied") != NULL,
+          "issue_close preserves stderr detail");
+    dispatch_gh_result_free(&res);
+
+    FILE *log = fopen(log_path, "r");
+    check(log != NULL, "gh call log created");
+    if (log) {
+        char buf[4096] = {0};
+        size_t n = fread(buf, 1, sizeof(buf) - 1, log);
+        buf[n] = '\0';
+        fclose(log);
+        check(strstr(buf,
+                     "issue view 5 --repo acme/widgets --json state\n") != NULL,
+              "issue_state passes --repo and --json state");
+        check(strstr(buf,
+                     "issue close 5 --repo acme/widgets --comment Accepted "
+                     "DE-01\n") != NULL,
+              "issue_close passes --repo and --comment");
+        check(strstr(buf, "issue close 5 --repo acme/widgets\n") != NULL,
+              "issue_close without comment omits --comment");
+    }
+
     if (failures) {
         fprintf(stderr, "%d gh helper test failure(s)\n", failures);
         return 1;

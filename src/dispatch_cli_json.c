@@ -180,10 +180,10 @@ int cli_json_end(int status) {
     }
     free(context.message);
     for (size_t i = 0; i < context.warning_count; i++) {
-        free(context.warnings[i].code);
-        free(context.warnings[i].message);
-        free(context.warnings[i].task_id);
-        free(context.warnings[i].agent);
+        free((char *)context.warnings[i].code);
+        free((char *)context.warnings[i].message);
+        free((char *)context.warnings[i].task_id);
+        free((char *)context.warnings[i].agent);
     }
     free(context.warnings);
     dispatch_json_snapshot_free(&context.before);

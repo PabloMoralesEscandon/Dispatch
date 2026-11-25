@@ -1,5 +1,10 @@
 #include "dispatch_cli_internal.h"
 
+#include "dispatch_gh.h"
+#include "dispatch_issue.h"
+
+#include <strings.h>
+
 int cmd_ready(int argc, char **argv) {
     /* With task IDs, ready is a mutation and --json selects the result
      * document; without them it is the read-only queue listing. */
@@ -313,10 +318,157 @@ int cmd_finish(int argc, char **argv) {
     return status;
 }
 
+static char *format_review_close_comment(const DispatchTask *task,
+                                         const char *actor) {
+    const char *title = task_display_title(task);
+    size_t commits_len = 0;
+    for (size_t i = 0; i < task->commits.count; i++)
+        commits_len += strlen(task->commits.items[i]) + 2;
+    size_t size =
+        strlen(task->id) + strlen(title) + strlen(actor) + commits_len + 96;
+    char *comment = malloc(size);
+    if (!comment) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    int pos = snprintf(comment, size,
+                       "Closed via Dispatch review of %s (%s) by %s.",
+                       task->id, title, actor);
+    if (pos > 0 && (size_t)pos < size && task->commits.count > 0) {
+        size_t used = (size_t)pos;
+        used += (size_t)snprintf(comment + used, size - used, " Commits: ");
+        for (size_t i = 0; i < task->commits.count && used < size; i++) {
+            used += (size_t)snprintf(comment + used, size - used, "%s%s",
+                                     i == 0 ? "" : ", ",
+                                     task->commits.items[i]);
+        }
+        if (used < size)
+            snprintf(comment + used, size - used, ".");
+    }
+    return comment;
+}
+
+static int issue_already_closed_in_batch(const char *const *closed_refs,
+                                         size_t count, const char *issue) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcasecmp(closed_refs[i], issue) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void format_gh_close_detail(DispatchGhStatus status,
+                                   const DispatchGhResult *gh_result,
+                                   char *out, size_t out_size) {
+    if (status == DISPATCH_GH_MISSING) {
+        snprintf(out, out_size, "gh is not installed or not on PATH");
+    } else if (status == DISPATCH_GH_NOT_AUTHENTICATED) {
+        snprintf(out, out_size, "gh is not logged in (run: gh auth login)");
+    } else if (gh_result && gh_result->detail[0]) {
+        snprintf(out, out_size, "%s", gh_result->detail);
+    } else {
+        snprintf(out, out_size, "gh failed");
+    }
+}
+
+static void close_reviewed_issues(DispatchBoard *board, int ids_end,
+                                  char **argv, const char *actor,
+                                  DispatchJsonResult *json_result) {
+    if (json_result)
+        dispatch_json_result_init_close_issues(json_result);
+
+    const char **closed_refs = NULL;
+    size_t closed_count = 0;
+    size_t closed_capacity = 0;
+    DispatchGhStatus fatal_status = DISPATCH_GH_OK;
+    char fatal_detail[256] = {0};
+
+    for (int i = 2; i < ids_end; i++) {
+        DispatchTask *task = dispatch_board_find_task(board, argv[i]);
+        if (!task || !task->issue || !task->issue[0]) {
+            if (!json_result)
+                printf("No linked issue on %s\n", argv[i]);
+            continue;
+        }
+        if (issue_already_closed_in_batch(closed_refs, closed_count,
+                                          task->issue)) {
+            if (!json_result) {
+                printf("Issue %s already closed during this review\n",
+                       task->issue);
+            }
+            continue;
+        }
+
+        DispatchIssueRef ref;
+        if (!dispatch_issue_parse_canonical(task->issue, &ref))
+            continue;
+
+        char detail[256] = {0};
+        DispatchGhStatus status;
+        if (fatal_status != DISPATCH_GH_OK) {
+            status = fatal_status;
+            snprintf(detail, sizeof(detail), "%s", fatal_detail);
+        } else {
+            char *comment = format_review_close_comment(task, actor);
+            DispatchGhResult gh_result = {0};
+            status = dispatch_gh_issue_close(&ref, comment, &gh_result);
+            free(comment);
+            if (status != DISPATCH_GH_OK)
+                format_gh_close_detail(status, &gh_result, detail,
+                                       sizeof(detail));
+            dispatch_gh_result_free(&gh_result);
+            if (status == DISPATCH_GH_MISSING ||
+                status == DISPATCH_GH_NOT_AUTHENTICATED) {
+                fatal_status = status;
+                snprintf(fatal_detail, sizeof(fatal_detail), "%s", detail);
+            }
+        }
+
+        if (status == DISPATCH_GH_OK) {
+            if (closed_count >= closed_capacity) {
+                size_t next = closed_capacity ? closed_capacity * 2 : 4;
+                closed_refs =
+                    cli_realloc_array(closed_refs, next, sizeof(*closed_refs));
+                closed_capacity = next;
+            }
+            closed_refs[closed_count++] = task->issue;
+
+            DispatchLogField targets[] = {
+                {"task", task->id},
+            };
+            DispatchLogField context[] = {
+                {"issue", task->issue},
+            };
+            char message[256];
+            snprintf(message, sizeof(message), "Closed %s for %s", task->issue,
+                     task->id);
+            append_dispatch_log(actor, "review", "issue_close", targets, 1,
+                                context, 1, message);
+            if (json_result)
+                dispatch_json_result_add_closed_issue(json_result, task->id,
+                                                      task->issue);
+            else
+                printf("Closed %s for %s\n", task->issue, task->id);
+        } else {
+            const char *code = dispatch_gh_error_code(status);
+            if (json_result) {
+                dispatch_json_result_add_issue_close_error(
+                    json_result, task->id, task->issue, code, detail);
+            } else {
+                fprintf(stderr, "Warning: could not close %s for %s: %s\n",
+                        task->issue, task->id, detail);
+            }
+        }
+    }
+
+    free(closed_refs);
+}
+
 int cmd_review(int argc, char **argv) {
     if (argc < 3) {
         cli_error("usage", NULL,
-                  "Usage: dispatch review <id> [<id> ...] [--actor <name>]\n");
+                  "Usage: dispatch review <id> [<id> ...] [--actor <name>] "
+                  "[--close-issue]\n");
         return 1;
     }
 
@@ -326,19 +478,23 @@ int cmd_review(int argc, char **argv) {
         ids_end++;
     if (ids_end == 2) {
         cli_error("usage", NULL,
-                  "Usage: dispatch review <id> [<id> ...] [--actor <name>]\n");
+                  "Usage: dispatch review <id> [<id> ...] [--actor <name>] "
+                  "[--close-issue]\n");
         return 1;
     }
 
     const char *actor = "user";
+    int close_issue = 0;
     for (int i = ids_end; i < argc; i++) {
         if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc &&
             argv[i + 1][0] != '\0') {
             actor = argv[++i];
+        } else if (strcmp(argv[i], "--close-issue") == 0) {
+            close_issue = 1;
         } else {
             cli_error("usage", NULL,
                       "Usage: dispatch review <id> [<id> ...] "
-                      "[--actor <name>]\n");
+                      "[--actor <name>] [--close-issue]\n");
             return 1;
         }
     }
@@ -365,6 +521,8 @@ int cmd_review(int argc, char **argv) {
         locked_board_close(&locked);
         return 1;
     }
+    /* Release the board lock before any network calls for --close-issue. */
+    dispatch_store_lock_release(&locked.lock);
 
     DispatchJsonResult *json_result =
         cli_json() ? dispatch_json_result_new("review") : NULL;
@@ -384,6 +542,9 @@ int cmd_review(int argc, char **argv) {
         append_dispatch_log(actor, "review", "review", targets, 1, context, 1,
                             message);
     }
+    if (close_issue)
+        close_reviewed_issues(board, ids_end, argv, actor, json_result);
+
     int status = json_result ? cli_json_emit_tasks(board, NULL, json_result)
                              : 0;
     locked_board_close(&locked);

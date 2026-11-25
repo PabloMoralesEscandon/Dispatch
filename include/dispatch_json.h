@@ -8,6 +8,18 @@
 
 #define DISPATCH_JSON_STATE(state) (1U << (unsigned int)(state))
 
+/* Non-fatal warning emitted in a JSON document's top-level warnings array
+ * instead of stray stderr text: status --check-issues drift warnings and
+ * mutating-command operational warnings share this shape. Owners decide
+ * whether the strings are borrowed or allocated. */
+typedef struct {
+    const char *code;
+    const char *message;
+    const char *task_id;
+    const char *agent;
+    const char *issue; /* optional canonical "owner/repo#N" */
+} DispatchJsonWarning;
+
 typedef struct {
     const char *command;
     const char *task_id;
@@ -15,6 +27,9 @@ typedef struct {
     int include_done;
     unsigned int state_mask;
     int include_warnings;
+    int check_issues;
+    const DispatchJsonWarning *extra_warnings;
+    size_t extra_warning_count;
 } DispatchJsonRequest;
 
 /* Removes one --json argument at or after first_arg and updates argc. */
@@ -63,14 +78,6 @@ void dispatch_json_snapshot_take(DispatchJsonSnapshot *snapshot,
                                  const DispatchBoard *board);
 void dispatch_json_snapshot_free(DispatchJsonSnapshot *snapshot);
 
-/* Non-fatal warning recorded during a JSON command and emitted in its
- * top-level warnings array instead of stray stderr text. */
-typedef struct {
-    char *code;
-    char *message;
-    char *task_id;
-    char *agent;
-} DispatchJsonWarning;
 
 /* The result object of a mutating command, built up by the command and
  * consumed by one of the mutation emitters. */
@@ -94,6 +101,19 @@ void dispatch_json_result_set_int(DispatchJsonResult *result,
 void dispatch_json_result_add_skipped(DispatchJsonResult *result,
                                       const char *workspace_id,
                                       const char *reason);
+/* Initializes empty closed_issues and issue_close_errors arrays on result. */
+void dispatch_json_result_init_close_issues(DispatchJsonResult *result);
+/* Appends {"task": id, "issue": ref} to result.closed_issues. */
+void dispatch_json_result_add_closed_issue(DispatchJsonResult *result,
+                                           const char *task_id,
+                                           const char *issue);
+/* Appends {"task": id, "issue": ref, "code": code, "message": msg} to
+ * result.issue_close_errors. */
+void dispatch_json_result_add_issue_close_error(DispatchJsonResult *result,
+                                                const char *task_id,
+                                                const char *issue,
+                                                const char *code,
+                                                const char *message);
 
 /* Writes the task envelope for a mutation: tasks holds the targets that
  * still exist, followed by warnings and result. group fills query.group
