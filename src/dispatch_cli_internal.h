@@ -152,6 +152,13 @@ int workspace_git_worktree_present_at(const char *path);
 int workspace_git_worktree_inspect(const char *repo_path,
                                    const char *workspace_path,
                                    int *is_worktree, char **branch);
+/* Heading that marks a generated agent prompt pointing at the agent skills
+ * (ADR 0012). A prompt without it was written by an older Dispatch, and
+ * normalize regenerates it. */
+#define AGENT_PROMPT_SKILLS_HEADING "## Dispatch Skills"
+/* A heading every version of the old long AGENTS.md / CLAUDE.md template had
+ * and the slim template (ADR 0012) does not. */
+#define LEGACY_TEMPLATE_MARKER "## Task Execution Protocol"
 int write_agent_prompt(const char *path, const char *name, const char *runner, const char *model, const char *agent_dir, const char *scratch_dir, const char *decisions_dir);
 int write_agent_run_script(const char *path, const char *command);
 
