@@ -24,13 +24,13 @@ what work belongs in the group.
 Set at creation:
 
 ```text
-dispatch group add <name> --prefix <PREFIX> [--description <text>]
+dispatch group add <name> --prefix <PREFIX> [--description <text>] [--actor <name>]
 ```
 
 Set or update on an existing group:
 
 ```text
-dispatch group edit <prefix> --description <text>
+dispatch group edit <prefix> --description <text> [--actor <name>]
 ```
 
 `group edit` takes the group prefix (the stable ID agents already use in

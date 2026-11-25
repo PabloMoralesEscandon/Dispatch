@@ -19,12 +19,10 @@ read, approve or tidy the board use the `dispatch-board` skill.
 3. Never edit `dispatch.json` directly.
 4. Never infer task state from `dispatch.json`.
 5. Pass an explicit `--actor` on every change that accepts one. Your own
-   planning changes (`task add`, `task edit`, `task move`) record your own
-   agent name (for example `claude` or `codex-server`), never `user`.
-   Approvals are the user's decisions and record `user` (see "Leave tasks
-   proposed" below). (`group add`, `group edit`, `dep add` and `dep remove`
-   take no actor and are logged as `user`; every `task` command does take
-   one.)
+   planning changes (`group add`, `group edit`, `task add`, `task edit`,
+   `task move`, `dep add`, `dep remove`) record your own agent name (for
+   example `claude` or `codex-server`), never `user`. Approvals are the
+   user's decisions and record `user` (see "Leave tasks proposed" below).
 
 The storage file is an implementation detail. Do not inspect it with `cat`,
 `sed`, `jq`, `rg`, editors, scripts, or JSON parsers. If you need task state,
@@ -102,14 +100,14 @@ of an existing group is a planning mistake. If a group you extend has no
 recorded scope yet, record one:
 
 ```bash
-dispatch group edit <prefix> --description <text>
+dispatch group edit <prefix> --description <text> --actor <your-agent-name>
 ```
 
 Create a new group only when no recorded scope fits, and always give it a
 `--description` so the next planner can reuse it:
 
 ```bash
-dispatch group add "Benchmarks" --prefix BM --description "Performance measurement and regression tracking"
+dispatch group add "Benchmarks" --prefix BM --description "Performance measurement and regression tracking" --actor <your-agent-name>
 ```
 
 Never create a catch-all group such as "Issues", "Backlog", "Misc" or "Todo".
@@ -128,9 +126,11 @@ came from.
 
 ### 3. Add dependencies and review gates
 
-- Connect tasks with `dispatch dep add <dependency-id> <dependent-id>` so work
-  happens in order. Use `dispatch dep remove` to undo a wrong edge, and
-  `dispatch list` to inspect the resulting sequences.
+- Connect tasks with
+  `dispatch dep add <dependency-id> <dependent-id> --actor <your-agent-name>`
+  so work happens in order. Use `dispatch dep remove` (with the same
+  `--actor`) to undo a wrong edge, and `dispatch list` to inspect the
+  resulting sequences.
 - Keep review gates (the default) on tasks a human should check before
   dependent work continues: designs, contracts, risky changes, and the final
   task of a sequence.
@@ -207,8 +207,8 @@ dispatch task add DE "Test JSON output commands" --issue 42 --actor claude \
   --description "Verify valid JSON and expected fields for every command."
 # Created DE-15
 
-dispatch dep add DE-13 DE-14  # DE-14 depends on DE-13
-dispatch dep add DE-14 DE-15  # DE-15 depends on DE-14
+dispatch dep add DE-13 DE-14 --actor claude  # DE-14 depends on DE-13
+dispatch dep add DE-14 DE-15 --actor claude  # DE-15 depends on DE-14
 dispatch list DE
 ```
 
@@ -219,5 +219,5 @@ closes the sequence with a review gate. All three link issue #42 and stay
 `dispatch group ready DE`) approves it.
 
 If the issue had been a whole new area with no fitting scope, the same flow
-would start with one `dispatch group add ... --description ...` and put all the
-tasks in that new group.
+would start with one `dispatch group add ... --description ... --actor claude`
+and put all the tasks in that new group.

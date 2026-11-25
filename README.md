@@ -576,9 +576,9 @@ pane and agent `run.sh` scripts or resume commands in other panes.
 ### Groups
 
 ```bash
-dispatch group add <name> [--prefix XX] [--description <text>]
+dispatch group add <name> [--prefix XX] [--description <text>] [--actor <name>]
 dispatch group ready <group> [--actor <name>] [--no-review]
-dispatch group edit <prefix> --description <text>
+dispatch group edit <prefix> --description <text> [--actor <name>]
 dispatch group list
 dispatch group show <prefix>
 ```
@@ -587,7 +587,9 @@ Groups are workflow lanes or topics. Task IDs are generated from the group
 prefix, for example `DE-01`. Pass `--description` on `group add` or update it
 later with `group edit` to record what work belongs in the group; `group list`
 and `group show` inspect recorded scopes and per-group task counts (see
-[group scope](docs/group-scope.md)).
+[group scope](docs/group-scope.md)). `group add` and `group edit` record
+`--actor` in `dispatch.log`, or `user` when it is omitted; an agent that
+creates or rescopes a group while planning passes its own name.
 
 `group ready` marks every proposed task in the group as ready in one operation.
 Tasks already blocked, assigned, doing, in review, or done are left unchanged.
@@ -712,8 +714,8 @@ output, or `NO_COLOR=1` to disable it.
 ### Dependencies
 
 ```bash
-dispatch dep add <dependency-id> <dependent-id>
-dispatch dep remove <dependency-id> <dependent-id>
+dispatch dep add <dependency-id> <dependent-id> [--actor <name>]
+dispatch dep remove <dependency-id> <dependent-id> [--actor <name>]
 dispatch blocked [--json]
 ```
 
@@ -722,6 +724,11 @@ the prerequisite, and the second argument is the task that waits for it. A task
 that has been approved for work is blocked when any dependency is not done.
 Tasks that have not been readied yet still display as proposed, even when they
 have unmet dependencies. Dependency cycles are rejected.
+
+`dep add` and `dep remove` record the change in `dispatch.log` and in the
+dependent task's history (`dependency_add` or `dependency_remove`, with the
+dependency ID as the note) under `--actor`, or `user` when it is omitted.
+Re-adding an existing dependency changes nothing and adds no history entry.
 
 ### Commit References
 

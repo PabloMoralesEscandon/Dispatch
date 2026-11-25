@@ -248,6 +248,15 @@ int cmd_repo(int argc, char **argv) {
     return status;
 }
 
+static int actor_is_valid_or_error(const char *actor) {
+    if (dispatch_actor_label_is_valid(actor))
+        return 1;
+    cli_error("invalid_actor", NULL,
+              "Actor must start with an ASCII letter or digit and contain only "
+              "letters, digits, '.', '_' or '-'\n");
+    return 0;
+}
+
 /* Why dispatch_board_add_group refused a group, for the JSON error code. */
 static const char *group_add_failure_code(const char *name,
                                           const char *prefix) {
@@ -269,23 +278,28 @@ static int cmd_group_add(int argc, char **argv) {
     if (argc < 4) {
         cli_error("usage", NULL,
                   "Usage: dispatch group add <name> [--prefix XX] "
-                  "[--description <text>]\n");
+                  "[--description <text>] [--actor <name>]\n");
         return 1;
     }
 
     const char *name = argv[3];
     const char *prefix = NULL;
     const char *description = NULL;
+    const char *actor = "user";
     for (int i = 4; i < argc; i++) {
         if (strcmp(argv[i], "--prefix") == 0 && (i + 1) < argc) {
             prefix = argv[++i];
         } else if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
             description = argv[++i];
+        } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
         } else {
             cli_error("usage", NULL, "Unknown group option: %s\n", argv[i]);
             return 1;
         }
     }
+    if (!actor_is_valid_or_error(actor))
+        return 1;
 
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
@@ -318,7 +332,7 @@ static int cmd_group_add(int argc, char **argv) {
     };
     char message[256];
     snprintf(message, sizeof(message), "Added group %s", group->name);
-    append_dispatch_log("user", "group", "add", targets, 1, context, 2,
+    append_dispatch_log(actor, "group", "add", targets, 1, context, 2,
                         message);
     int status = 0;
     if (cli_json()) {
@@ -435,14 +449,33 @@ static int cmd_group_ready(int argc, char **argv) {
 }
 
 static int cmd_group_edit(int argc, char **argv) {
-    if (argc != 6 || strcmp(argv[4], "--description") != 0) {
-        cli_error("usage", NULL,
-                  "Usage: dispatch group edit <prefix> --description <text>\n");
+    const char *usage = "Usage: dispatch group edit <prefix> --description "
+                        "<text> [--actor <name>]\n";
+    if (argc < 4) {
+        cli_error("usage", NULL, "%s", usage);
         return 1;
     }
 
     const char *group_id = argv[3];
-    const char *description = argv[5];
+    const char *description = NULL;
+    const char *actor = "user";
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--description") == 0 && (i + 1) < argc) {
+            description = argv[++i];
+        } else if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
+        } else {
+            cli_error("usage", NULL, "Unknown group edit option: %s\n",
+                      argv[i]);
+            return 1;
+        }
+    }
+    if (!description) {
+        cli_error("usage", NULL, "%s", usage);
+        return 1;
+    }
+    if (!actor_is_valid_or_error(actor))
+        return 1;
 
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
@@ -476,7 +509,7 @@ static int cmd_group_edit(int argc, char **argv) {
     char message[256];
     snprintf(message, sizeof(message), "Updated group %s description",
              group->prefix);
-    append_dispatch_log("user", "group", "edit", targets, 1, context, 1,
+    append_dispatch_log(actor, "group", "edit", targets, 1, context, 1,
                         message);
     int status = 0;
     if (cli_json()) {
@@ -602,11 +635,12 @@ int cmd_group(int argc, char **argv) {
         return cmd_group_show(argc, argv);
 
     fprintf(stderr, "Usage: dispatch group add <name> [--prefix XX] "
-                    "[--description <text>]\n");
+                    "[--description <text>] [--actor <name>]\n");
     fprintf(stderr,
             "       dispatch group ready <group> [--actor <name>] [--no-review]\n");
     fprintf(stderr,
-            "       dispatch group edit <prefix> --description <text>\n");
+            "       dispatch group edit <prefix> --description <text> "
+            "[--actor <name>]\n");
     fprintf(stderr, "       dispatch group list\n");
     fprintf(stderr, "       dispatch group show <prefix>\n");
     return 1;
@@ -1225,21 +1259,39 @@ int cmd_task(int argc, char **argv) {
     return status;
 }
 
+static void print_dep_usage_error(void) {
+    cli_error("usage", NULL,
+              "Usage: dispatch dep add <dependency-id> <dependent-id> "
+              "[--actor <name>]\n");
+    cli_error("usage", NULL,
+              "       dispatch dep remove <dependency-id> <dependent-id> "
+              "[--actor <name>]\n");
+    cli_error("usage", NULL,
+              "Example: dispatch dep add DE-01 DE-02 means DE-02 depends "
+              "on DE-01\n");
+}
+
 int cmd_dep(int argc, char **argv) {
-    if (argc != 5 ||
+    if (argc < 5 ||
         (strcmp(argv[2], "add") != 0 && strcmp(argv[2], "remove") != 0)) {
-        cli_error("usage", NULL,
-                  "Usage: dispatch dep add <dependency-id> <dependent-id>\n");
-        cli_error("usage", NULL,
-                  "       dispatch dep remove <dependency-id> <dependent-id>\n");
-        cli_error("usage", NULL,
-                  "Example: dispatch dep add DE-01 DE-02 means DE-02 depends "
-                  "on DE-01\n");
+        print_dep_usage_error();
         return 1;
     }
 
     const char *from_id = argv[3];
     const char *to_id = argv[4];
+    const char *actor = "user";
+    for (int i = 5; i < argc; i++) {
+        if (strcmp(argv[i], "--actor") == 0 && (i + 1) < argc) {
+            actor = argv[++i];
+        } else {
+            cli_error("usage", NULL, "Unknown dep %s option: %s\n", argv[2],
+                      argv[i]);
+            return 1;
+        }
+    }
+    if (!actor_is_valid_or_error(actor))
+        return 1;
 
     LockedBoard locked;
     if (!locked_board_load_or_error(&locked))
@@ -1278,6 +1330,13 @@ int cmd_dep(int argc, char **argv) {
         return 1;
     }
 
+    /* Record the change on the dependent task, whose depends_on changed; an
+     * add of a dependency that was already there changes nothing. */
+    if (!adding || !already_present)
+        dispatch_task_append_history(
+            to, actor, adding ? "dependency_add" : "dependency_remove",
+            from_id);
+
     if (!locked_board_save_or_error(&locked)) {
         locked_board_close(&locked);
         return 1;
@@ -1295,7 +1354,7 @@ int cmd_dep(int argc, char **argv) {
     snprintf(message, sizeof(message), "%s dependency %s -> %s",
              strcmp(argv[2], "add") == 0 ? "Added" : "Removed", from_id,
              to_id);
-    append_dispatch_log("user", "dep",
+    append_dispatch_log(actor, "dep",
                         strcmp(argv[2], "add") == 0 ? "dependency_add"
                                                      : "dependency_remove",
                         targets, 2, NULL, 0, message);
