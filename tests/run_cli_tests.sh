@@ -2513,9 +2513,9 @@ assert_line "Origin: adopted"
 
 # Completion offers the new subcommand and flags.
 expect_ok "$BIN" completion zsh
-assert_contains "compadd -- create adopt list show remove prune"
-assert_contains "adopt) compadd -- --actor --path --branch --sequence --external ;;"
-assert_contains "remove) compadd -- --force --delete-worktree ;;"
+assert_contains "compadd -- create adopt list show remove repair prune"
+assert_contains "adopt) compadd -- --actor --path --branch --sequence --external --json ;;"
+assert_contains "remove) compadd -- --force --delete-worktree --json ;;"
 expect_ok "$BIN" completion fish
 assert_contains "__fish_seen_subcommand_from adopt' -l external -r"
 assert_contains "__fish_seen_subcommand_from remove' -l delete-worktree"
@@ -2832,9 +2832,9 @@ assert_contains 'dispatch completion candidates "$1"'
 assert_contains "compadd -- all"
 assert_contains "_dispatch_compadd_candidates tasks"
 assert_contains "_dispatch_compadd_candidates runners"
-assert_contains "compadd -- add edit delete"
-assert_contains "add) compadd -- --description --actor --no-review --issue ;;"
-assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor ;;"
+assert_contains "compadd -- add edit move delete priority"
+assert_contains "add) compadd -- --description --actor --no-review --issue --json ;;"
+assert_contains "edit) compadd -- --title --description --issue --clear-issue --actor --json ;;"
 
 expect_fail "$BIN" completion zsh extra
 assert_contains "Usage: dispatch completion candidates"
@@ -3843,7 +3843,9 @@ assert_contains "Dispatch: a command line workflow board."
 assert_contains "agent create/list/show/command/session/resume"
 assert_contains "workspace create/adopt/list/show/remove/repair/prune"
 assert_contains "completion candidates"
-assert_not_contains "--json"
+assert_contains "--json"
+assert_contains "task add/edit/move/delete/priority"
+assert_contains "agent create/archive/restore/session/command/resume"
 assert_not_contains "clear"
 assert_not_contains "project"
 assert_not_contains "recurrence"
@@ -4498,6 +4500,51 @@ log_complete dispatch agent list --j
 assert_line "--json"
 log_complete dispatch workspace show DE-01 --j
 assert_line "--json"
+# Mutating commands offer --json in bash, zsh, and fish completions.
+for mut_args in \
+    "init repo" \
+    "repo set repo" \
+    "normalize" \
+    "task add DE Title" \
+    "task edit DE-01" \
+    "task move DE-01 DE" \
+    "task delete DE-01" \
+    "task priority DE-01 5" \
+    "group add QA" \
+    "group ready DE" \
+    "group edit DE" \
+    "dep add DE-01 DE-02" \
+    "dep remove DE-01 DE-02" \
+    "commit add DE-01 abc1234" \
+    "ready DE-01" \
+    "start DE-01" \
+    "finish DE-01" \
+    "review DE-01" \
+    "unassign DE-01" \
+    "agent create" \
+    "agent archive worker" \
+    "agent restore worker" \
+    "agent session worker" \
+    "agent command worker" \
+    "agent resume worker" \
+    "workspace create DE-01" \
+    "workspace adopt DE-01" \
+    "workspace remove DE-01" \
+    "workspace repair DE-01" \
+    "workspace prune"; do
+    # shellcheck disable=SC2086
+    log_complete dispatch $mut_args --j
+    assert_line "--json"
+done
+expect_ok "$BIN" completion zsh
+assert_contains "move|priority) compadd -- --actor --json ;;"
+assert_contains "repair) compadd -- --json ;;"
+assert_contains "start|finish|review|unassign)"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from add edit move delete priority' -l json"
+assert_contains "__fish_seen_subcommand_from create adopt remove repair prune' -l json"
+assert_contains "__fish_seen_subcommand_from create archive restore session command resume' -l json"
+assert_contains "__fish_seen_subcommand_from init normalize list show ready blocked reviews proposed status doctor start finish review unassign' -l json"
 
 case_dir="$(make_case_dir issue-tui)"
 cd "$case_dir"

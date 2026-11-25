@@ -54,6 +54,13 @@ void dispatch_cli_print_help(void) {
     puts("  init, repo show/set, agent create/list/show/command/session/resume, workspace create/adopt/list/show/remove/repair/prune,");
     puts("  group add/ready, task add/edit/move/delete, dep add/remove, commit add/list/show, completion candidates,");
     puts("  ready, reviews, proposed, start, finish, review, normalize, status, doctor, log, tui, list, show, blocked");
+    puts("");
+    puts("JSON output:");
+    puts("  Pass --json to read commands (list, show, ready, blocked, reviews, proposed, status, doctor,");
+    puts("  agent list/show, workspace list/show, log) and mutating commands (init, repo set, normalize,");
+    puts("  task add/edit/move/delete/priority, group add/ready/edit, dep add/remove, commit add,");
+    puts("  ready <id>, start, finish, review, unassign, agent create/archive/restore/session/command/resume,");
+    puts("  workspace create/adopt/remove/repair/prune).");
 }
 
 int dispatch_cli_is_command(const char *command) {
