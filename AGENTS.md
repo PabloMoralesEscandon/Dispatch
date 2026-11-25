@@ -58,7 +58,7 @@ dispatch agent restore <name>
 dispatch agent command <name> [--print-command]
 dispatch workspace create <TASK-ID> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
 dispatch workspace adopt <TASK-ID> --actor <agent-id> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]
-dispatch workspace list
+dispatch workspace list [--external <tool>:<id>]
 dispatch workspace show <TASK-ID-or-workspace>
 dispatch workspace remove <TASK-ID-or-workspace> [--force] [--delete-worktree]
 dispatch workspace repair <TASK-ID-or-workspace>
