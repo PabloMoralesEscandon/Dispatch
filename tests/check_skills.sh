@@ -11,6 +11,9 @@
 #    skills (fenced blocks and inline code spans) is a real command according to
 #    `dispatch --help`, and every top-level command listed there is mentioned by
 #    at least one skill, apart from the commented exclusions below.
+# 3. Templates: every `dispatch <command> [<subcommand>]` in code in the slim
+#    AGENTS.md / CLAUDE.md templates (ADR 0012) is a real command too, and the
+#    templates name every expected skill. They do not count towards coverage.
 #
 # The binary is $DISPATCH_BIN, defaulting to the freshly built ./dispatch of
 # this checkout, never one found on PATH.
@@ -21,6 +24,8 @@ SKILLS_DIR="${1:-$ROOT/skills}"
 BIN="${DISPATCH_BIN:-$ROOT/dispatch}"
 
 EXPECTED_SKILLS="dispatch-plan dispatch-work dispatch-board"
+# The slim instruction templates that dispatch init scaffolds (ADR 0012).
+TEMPLATE_FILES="${DISPATCH_TEMPLATES:-$ROOT/AGENTS.md $ROOT/CLAUDE.md}"
 
 # Top-level commands that no skill needs to mention. Keep each one commented.
 # (Currently empty: `tui` and `completion install` are covered by
@@ -140,8 +145,12 @@ is_subcommand() { printf '%s\n' "$sub_commands" | grep -Fxq -- "$1 $2"; }
 # Code text from every Markdown file of the skills: fenced block lines, and
 # inline code spans from prose lines. Each output line is
 # "<file>:<line>\t<code>".
-code_text() {
-    find "$SKILLS_DIR" -name '*.md' -type f | LC_ALL=C sort | while IFS= read -r file; do
+code_text() { # [file...] (default: every Markdown file of the skills)
+    if [ "$#" -gt 0 ]; then
+        printf '%s\n' "$@"
+    else
+        find "$SKILLS_DIR" -name '*.md' -type f | LC_ALL=C sort
+    fi | while IFS= read -r file; do
         awk -v f="${file#"$SKILLS_DIR"/}" '
             /^[ \t]*```/ { fence = !fence; next }
             fence { print f ":" NR "\t" $0; next }
@@ -157,7 +166,8 @@ code_text() {
 
 # Every "dispatch <word> [<word>]" in code. A command must follow "dispatch"
 # directly; words that are options, placeholders or IDs end the match.
-mentions="$(code_text | awk -F '\t' '
+command_mentions() { # [file...]
+    code_text "$@" | awk -F '\t' '
     {
         where = $1; code = " " $2
         while (match(code, /[ \/(]dispatch +[a-z][a-z-]*( +[a-z][a-z-]*)?/)) {
@@ -166,9 +176,12 @@ mentions="$(code_text | awk -F '\t' '
             split(m, w, " ")
             print where "\t" w[2] "\t" w[3]
         }
-    }')"
+    }'
+}
+mentions="$(command_mentions)"
 
 mentioned_commands=""
+check_mentions() { # mentions
 while IFS=$'\t' read -r where cmd sub; do
     [ -n "$where" ] || continue
     if ! is_top_command "$cmd"; then
@@ -186,8 +199,10 @@ while IFS=$'\t' read -r where cmd sub; do
         fi
     fi
 done <<EOF
-$mentions
+$1
 EOF
+}
+check_mentions "$mentions"
 
 for cmd in $top_commands; do
     case " $EXCLUDED_COMMANDS " in *" $cmd "*) continue ;; esac
@@ -196,6 +211,23 @@ for cmd in $top_commands; do
         *) err "'dispatch $cmd' is listed in dispatch --help but no skill mentions it" ;;
     esac
 done
+
+# --- 3. Templates -----------------------------------------------------------
+
+skill_mentioned_commands="$mentioned_commands"
+for template in $TEMPLATE_FILES; do
+    if [ ! -f "$template" ]; then
+        err "template not found: $template"
+        continue
+    fi
+    check_mentions "$(command_mentions "$template")"
+    for skill in $EXPECTED_SKILLS; do
+        if ! grep -Fq "\`$skill\`" "$template"; then
+            err "$(basename "$template"): does not name the $skill skill"
+        fi
+    done
+done
+mentioned_commands="$skill_mentioned_commands"
 
 if [ "$errors" -ne 0 ]; then
     printf 'FAIL: %d agent skill check(s) failed\n' "$errors" >&2
