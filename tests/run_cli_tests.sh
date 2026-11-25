@@ -3340,6 +3340,10 @@ assert_file_contains CLAUDE.md "# Dispatch Agent Instructions"
 # GH-1: agents on new boards learn to link GitHub issues.
 assert_file_contains AGENTS.md "[--no-review] [--issue <ref>]"
 assert_file_contains CLAUDE.md "dispatch task edit <TASK-ID> --issue <ref>|--clear-issue"
+assert_file_contains AGENTS.md "dispatch repo set <path>"
+assert_file_contains CLAUDE.md "dispatch repo set <path>"
+assert_file_contains AGENTS.md "dispatch task priority <TASK-ID> <value>"
+assert_file_contains CLAUDE.md "dispatch task priority <TASK-ID> <value>"
 expect_ok "$BIN" doctor
 assert_contains "AGENTS.md found in workflow directory"
 # Re-init with an existing board must not scaffold or recreate files.
@@ -3427,6 +3431,7 @@ assert_contains "Repo: $other_real"
 expect_ok "$BIN" show DE-01
 assert_contains "Title: Root"
 expect_fail "$BIN" repo set
+expect_fail "$BIN" repo show
 expect_fail "$BIN" repo bogus other-repo
 
 case_dir="$(make_case_dir tui-palette-help)"
@@ -3447,9 +3452,14 @@ cd "$case_dir"
 
 expect_ok "$BIN" --help
 assert_contains "Dispatch: a command line workflow board."
-assert_contains "agent create/list/show/command/session/resume"
+assert_contains "repo [set]"
+assert_not_contains "repo show/set"
+assert_contains "agent create/list/show/command/session/resume/archive/restore"
 assert_contains "workspace create/adopt/list/show/remove/repair/prune"
-assert_contains "completion candidates"
+assert_contains "group add/ready/edit/list/show"
+assert_contains "task add/edit/move/delete/priority"
+assert_contains "completion candidates/bash/zsh/fish/install"
+assert_contains "finish, review, unassign, normalize"
 assert_not_contains "--json"
 assert_not_contains "clear"
 assert_not_contains "project"
