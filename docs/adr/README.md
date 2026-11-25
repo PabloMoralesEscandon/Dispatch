@@ -12,3 +12,4 @@ the old one.
 | [0003](0003-workspace-adopt.md) | Adopt a worktree created outside Dispatch | Accepted |
 | [0004](0004-json-reads-agents-workspaces-log.md) | JSON reads for agents, workspaces, and the log | Accepted |
 | [0005](0005-portable-tui-goldens.md) | Portable TUI golden frames | Accepted |
+| [0006](0006-adopted-workspace-followups.md) | Adopted workspace TUI markers, doctor checks, and external lookup | Accepted |

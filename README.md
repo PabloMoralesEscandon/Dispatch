@@ -328,7 +328,7 @@ command, and writes the same command to `.dispatch/agents/<name>/resume.sh`.
 ```bash
 dispatch workspace create <task-id> --actor <agent-id> [--repo <path>] [--dir <path>] [--branch <name>] [--sequence]
 dispatch workspace adopt <task-id> --actor <agent-id> --path <dir> [--branch <name>] [--sequence] [--external <tool>:<id>]
-dispatch workspace list [--json]
+dispatch workspace list [--external <tool>:<id>] [--json]
 dispatch workspace show <task-id-or-workspace> [--json]
 dispatch workspace remove <task-id-or-workspace> [--force] [--delete-worktree]
 dispatch workspace repair <task-id-or-workspace>
@@ -371,6 +371,16 @@ belong to only one active record.
 
 Adopted workspaces behave like created ones for `start`, `show`, `list`, and
 the TUI, and `workspace show` prints `Origin: adopted` and the external ID.
+Look up a single record by its external ID with:
+
+```bash
+dispatch workspace list --external orca:ws-42 [--json]
+```
+
+If no active workspace carries that external ID, `workspace list --external`
+succeeds with an empty listing (`(no workspaces)` in text mode, `"workspaces": []`
+in JSON mode).
+
 The worktree belongs to the tool that made it, so Dispatch leaves it on disk:
 
 - `workspace remove` clears only the record, even if the worktree is dirty or
@@ -380,12 +390,15 @@ The worktree belongs to the tool that made it, so Dispatch leaves it on disk:
   their worktrees, and `workspace prune --stale` clears adopted records whose
   worktree directory no longer exists.
 - `doctor` reports a missing adopted worktree as `workspace_path_missing`
-  rather than a relocation, and `workspace repair` refuses adopted records;
-  remove the record and adopt the worktree at its new path instead.
+  rather than a relocation, warns (`workspace_not_a_worktree`) when an adopted
+  path still exists but is no longer a git worktree of the board repository,
+  and warns (`workspace_branch_mismatch`) when its checked-out branch differs
+  from the recorded branch. `workspace repair` refuses adopted records; remove
+  the record and adopt the worktree at its new path instead.
 
 `workspace adopt` adds a `workspace_adopt` entry to the task history and a
-`dispatch.log` record. See [ADR 0003](docs/adr/0003-workspace-adopt.md) for the
-design choices.
+`dispatch.log` record. See [ADR 0003](docs/adr/0003-workspace-adopt.md) and
+[ADR 0006](docs/adr/0006-adopted-workspace-followups.md) for the design choices.
 
 ### TUI
 
@@ -454,10 +467,12 @@ ignore OSC 52 clipboard writes; when no clipboard path is available, Dispatch
 shows the run command in the status bar.
 
 The workspaces view shows actor, path, branch, task state, workspace state, git
-worktree presence, and dirty status. `n` runs the existing workspace creation
-flow, `x` removes the selected workspace after typing its task ID, `X` force
-removes after the same confirmation, and `P` prunes done clean workspaces after
-typing `prune`.
+worktree presence, dirty status, and origin (`created` or `adopted`). The
+workspace inspector also shows the origin and, for adopted records, the
+external ID. `n` runs the existing workspace creation flow, `x` removes the
+selected workspace after typing its task ID (noting in the prompt that only the
+record is removed for adopted workspaces), `X` force removes after the same
+confirmation, and `P` prunes done clean workspaces after typing `prune`.
 
 The logs view reads `dispatch.log` and filters records by actor, command,
 action, task, agent, or workspace. Press `F` to set a filter, `C` to clear it,

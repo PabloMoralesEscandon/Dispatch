@@ -967,7 +967,7 @@ assert_json \
     workspaces.0.actor string json-agent
 
 expect_fail "$BIN" workspace list --json --json
-assert_contains "Usage: dispatch workspace list [--json]"
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
 assert_not_contains '"schema_version"'
 expect_fail "$BIN" workspace show --json
 assert_contains "Usage: dispatch workspace show <task-id-or-workspace> [--json]"
@@ -4088,7 +4088,8 @@ assert_line "log"
 expect_ok "$BIN" completion zsh
 assert_contains "_dispatch_log_command"
 assert_contains "list) compadd -- --all --json ;;"
-assert_contains "list|show) compadd -- --json ;;"
+assert_contains "list) compadd -- --external --json ;;"
+assert_contains "show) compadd -- --json ;;"
 expect_ok "$BIN" completion fish
 assert_contains "__fish_seen_subcommand_from log' -l task -r -a '(__dispatch_candidates tasks)'"
 assert_contains "__fish_seen_subcommand_from list show' -l json"
@@ -4136,6 +4137,208 @@ if [ -e opened-url ]; then
 fi
 PATH=/no-such-dir expect_ok "$BIN" tui --key-smoke task o
 assert_contains "is not available; issue: https://github.com/acme/widgets/issues/12"
+
+# GH-13: adopted workspace follow-ups: external ID lookup, doctor checks for
+# non-worktree paths and branch drift, and TUI markers/inspector/prompts.
+case_dir="$(make_case_dir adopted-followups)"
+cd "$case_dir"
+mkdir repo
+expect_ok "$BIN" init repo
+expect_ok git -C repo init
+expect_ok git -C repo -c user.name=Dispatch -c user.email=dispatch@example.invalid commit --allow-empty -m init
+expect_ok "$BIN" group add Development --prefix DE
+for title in Created AdoptedOne AdoptedTwo AdoptedNoExt AdoptedDetached AdoptedReplaced DoingTask; do
+    expect_ok "$BIN" task add DE "$title" --no-review
+done
+expect_ok "$BIN" ready DE-01 DE-02 DE-03 DE-04 DE-05 DE-06 DE-07 --actor user --no-review
+
+expect_ok "$BIN" workspace create DE-01 --actor worker
+expect_ok git -C repo worktree add -b orca/one ../orca-one HEAD
+expect_ok git -C repo worktree add -b orca/two ../orca-two HEAD
+expect_ok git -C repo worktree add -b orca/four ../orca-four HEAD
+expect_ok git -C repo worktree add --detach ../orca-detached HEAD
+expect_ok git -C repo worktree add -b orca/six ../orca-six HEAD
+expect_ok git -C repo worktree add -b orca/seven ../orca-seven HEAD
+
+expect_ok "$BIN" workspace adopt DE-02 --actor orca-bot --path orca-one --external orca:ws-1
+expect_ok "$BIN" workspace adopt DE-03 --actor orca-bot --path orca-two --external orca:ws-2
+expect_ok "$BIN" workspace adopt DE-04 --actor orca-bot --path orca-four
+expect_ok "$BIN" workspace adopt DE-05 --actor orca-bot --path orca-detached --branch orca/detached
+expect_ok "$BIN" workspace adopt DE-06 --actor orca-bot --path orca-six --external orca:ws-6
+
+# Existing ADR 0003 invariant: a doing task cannot be adopted.
+expect_ok "$BIN" start DE-07 --actor orca-bot
+expect_fail "$BIN" workspace adopt DE-07 --actor orca-bot --path orca-seven
+assert_contains "Task DE-07 must be ready and unassigned"
+expect_json_error already_assigned "$BIN" workspace adopt DE-07 --actor orca-bot --path orca-seven --json
+
+# Lookup by external ID (text and JSON, both flag orders).
+expect_ok "$BIN" workspace list --external orca:ws-1
+assert_contains "DE-02"
+assert_contains "[adopted orca:ws-1]"
+assert_not_contains "DE-01"
+assert_not_contains "DE-03"
+
+expect_ok "$BIN" workspace list --external orca:ws-1 --json
+assert_json \
+    schema_version integer 1 \
+    command string "workspace list" \
+    query.workspace null - \
+    query.external_id string orca:ws-1 \
+    summary.total integer 6 \
+    summary.returned integer 1 \
+    summary.active integer 6 \
+    summary.removed integer 0 \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-02 \
+    workspaces.0.adopted boolean true \
+    workspaces.0.external_id string orca:ws-1
+
+expect_ok "$BIN" workspace list --json --external orca:ws-2
+assert_json \
+    query.workspace null - \
+    query.external_id string orca:ws-2 \
+    summary.returned integer 1 \
+    workspaces array_length 1 \
+    workspaces.0.id string DE-03 \
+    workspaces.0.external_id string orca:ws-2
+
+# Missing external ID succeeds with an empty result.
+expect_ok "$BIN" workspace list --external orca:missing
+assert_line "(no workspaces)"
+expect_ok "$BIN" workspace list --external orca:missing --json
+assert_json \
+    command string "workspace list" \
+    query.workspace null - \
+    query.external_id string orca:missing \
+    summary.total integer 6 \
+    summary.returned integer 0 \
+    summary.active integer 6 \
+    workspaces array_length 0
+
+# Unfiltered list and show report query.external_id as null.
+expect_ok "$BIN" workspace list --json
+assert_json \
+    query.workspace null - \
+    query.external_id null - \
+    summary.returned integer 6
+expect_ok "$BIN" workspace show DE-02 --json
+assert_json \
+    query.workspace string DE-02 \
+    query.external_id null -
+
+# Usage and format errors for workspace list --external.
+expect_fail "$BIN" workspace list --external
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_fail "$BIN" workspace list --external --json
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_fail "$BIN" workspace list --external orca:ws-1 --external orca:ws-2
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_fail "$BIN" workspace list --external orca:ws-1 extra
+assert_contains "Usage: dispatch workspace list [--external <tool>:<id>] [--json]"
+expect_fail "$BIN" workspace list --external orca
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace list --external ""
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace list --external "orca:has space"
+assert_contains "External ID must be <tool>:<id>"
+expect_fail "$BIN" workspace list --external Bad:ws-1 --json
+assert_contains "External ID must be <tool>:<id>"
+assert_not_contains '"schema_version"'
+
+# Completion offers --external on workspace list across zsh, fish, and bash.
+expect_ok "$BIN" completion zsh
+assert_contains "list) compadd -- --external --json ;;"
+expect_ok "$BIN" completion fish
+assert_contains "__fish_seen_subcommand_from list' -l external -r"
+"$BIN" completion bash > "$TMP_ROOT/dispatch-ws-list-completion.bash"
+# shellcheck disable=SC2016
+PATH="$(dirname "$BIN"):$PATH" expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-ws-list-completion.bash" dispatch workspace list --e
+assert_line "--external"
+
+# TUI smoke and headless renders for adopted workspaces and prompts.
+expect_ok "$BIN" tui --workspaces-smoke
+assert_contains "DE-01 ready active actor:worker branch:agent/worker/DE-01 git:present dirty:no origin:created path:"
+assert_contains "DE-02 ready active actor:orca-bot branch:orca/one git:present dirty:no origin:adopted external:orca:ws-1 path:"
+assert_contains "DE-04 ready active actor:orca-bot branch:orca/four git:present dirty:no origin:adopted path:"
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-02
+assert_line "Origin: adopted"
+assert_line "External ID: orca:ws-1"
+assert_line "Remove prompt: Type DE-02 to remove record (adopted worktree kept): "
+assert_line "Force remove prompt: Type DE-02 to force remove record (adopted worktree kept): "
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-04
+assert_line "Origin: adopted"
+assert_line "External ID: -"
+
+expect_ok "$BIN" tui --workspace-inspect-smoke DE-01
+assert_line "Origin: created"
+assert_not_contains "External ID:"
+assert_line "Remove prompt: Type DE-01 to remove: "
+assert_line "Force remove prompt: Type DE-01 to remove: "
+
+expect_ok "$BIN" tui --render-smoke workspaces 100 30
+assert_contains "Dirty Git     Origin  Branch / Path"
+assert_contains "DE-01    ready    active    worker                   clean git     created "
+assert_contains "DE-02    ready    active    orca-bot                 clean git     adopted "
+
+expect_ok "$BIN" tui --render-smoke workspaces 100 30 "ji"
+assert_line "  Origin         adopted"
+assert_line "  External ID    orca:ws-1"
+
+expect_ok "$BIN" tui --render-smoke workspaces 100 30 "jjji"
+assert_line "  Origin         adopted"
+assert_line "  External ID    -"
+
+expect_ok "$BIN" tui --render-smoke board 100 30 "ji"
+assert_line "  Origin         adopted orca:ws-1"
+
+# Doctor: healthy adopted worktrees (including a detached HEAD adopted with
+# --branch) emit no worktree or branch mismatch warnings.
+expect_ok "$BIN" doctor --json
+assert_not_contains '"kind": "workspace_not_a_worktree"'
+assert_not_contains '"kind": "workspace_branch_mismatch"'
+
+# Branch drift on an adopted worktree triggers workspace_branch_mismatch.
+expect_ok git -C orca-one checkout -q -b orca/drifted
+expect_ok "$BIN" doctor
+assert_contains "[ok] workspace DE-02 path exists"
+assert_contains "[warn] adopted workspace DE-02 is on branch orca/drifted, expected orca/one"
+assert_contains "check out orca/one in the worktree"
+expect_ok "$BIN" doctor --json
+assert_contains '"kind": "workspace_branch_mismatch"'
+assert_contains '"subject": "DE-02"'
+
+# Switching back clears the warning.
+expect_ok git -C orca-one checkout -q orca/one
+expect_ok "$BIN" doctor --json
+assert_not_contains '"kind": "workspace_branch_mismatch"'
+
+# Path exists but is no longer a git worktree of the board repo:
+# 1) Removed cleanly with git worktree remove, then replaced by a plain dir.
+expect_ok git -C repo worktree remove orca-two
+mkdir orca-two
+# 2) Deleted without git worktree prune (stanza is prunable), then plain dir.
+rm -rf orca-four
+mkdir orca-four
+# 3) Deleted without git worktree prune, then replaced by an unrelated repo.
+rm -rf orca-six
+expect_ok git -C "$case_dir" init -q orca-six
+
+expect_ok "$BIN" doctor
+assert_contains "[ok] workspace DE-03 path exists"
+assert_contains "[warn] adopted workspace DE-03 path is not a git worktree of $case_dir/repo: $case_dir/orca-two"
+assert_contains "[warn] adopted workspace DE-04 path is not a git worktree of $case_dir/repo: $case_dir/orca-four"
+assert_contains "[warn] adopted workspace DE-06 path is not a git worktree of $case_dir/repo: $case_dir/orca-six"
+assert_not_contains "adopted workspace DE-02 path is not a git worktree"
+expect_ok "$BIN" doctor --json
+assert_contains '"kind": "workspace_not_a_worktree"'
+assert_contains '"subject": "DE-03"'
+assert_contains '"subject": "DE-04"'
+assert_contains '"subject": "DE-06"'
+assert_not_contains '"kind": "workspace_branch_mismatch"'
 
 cd "$ROOT"
 

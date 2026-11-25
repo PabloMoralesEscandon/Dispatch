@@ -872,13 +872,16 @@ static int tui_workspaces_smoke(void) {
             task ? dispatch_state_name(dispatch_task_effective_state(&board,
                                                                      task))
                  : "missing";
-        printf("%s %s %s actor:%s branch:%s git:%s dirty:%s path:%s\n",
+        printf("%s %s %s actor:%s branch:%s git:%s dirty:%s origin:%s",
                workspace->task_id, task_state,
                dispatch_workspace_state_name(workspace->state),
                workspace->actor, workspace->branch,
                path_has_git_metadata(workspace->path) ? "present" : "missing",
                workspace_is_dirty(workspace) ? "yes" : "no",
-               workspace->path);
+               workspace->adopted ? "adopted" : "created");
+        if (workspace->external_id)
+            printf(" external:%s", workspace->external_id);
+        printf(" path:%s\n", workspace->path);
     }
     dispatch_board_free(&board);
     return 0;
@@ -913,12 +916,21 @@ static int tui_workspace_inspect_smoke(const char *target) {
     printf("Actor: %s\n", workspace->actor);
     printf("Branch: %s\n", workspace->branch);
     printf("Path: %s\n", workspace->path);
+    printf("Origin: %s\n", workspace->adopted ? "adopted" : "created");
+    if (workspace->adopted)
+        printf("External ID: %s\n",
+               workspace->external_id ? workspace->external_id : "-");
     printf("Git worktree: %s\n",
            path_has_git_metadata(workspace->path) ? "present" : "missing");
     printf("Dirty: %s\n", workspace_is_dirty(workspace) ? "yes" : "no");
     printf("Sequence tasks: %zu\n", workspace->sequence_tasks.count);
     printf("Review gate: %s\n",
            workspace->review_gate ? workspace->review_gate : "-");
+    char prompt[256];
+    workspace_remove_prompt_label(workspace, 0, prompt, sizeof(prompt));
+    printf("Remove prompt: %s\n", prompt);
+    workspace_remove_prompt_label(workspace, 1, prompt, sizeof(prompt));
+    printf("Force remove prompt: %s\n", prompt);
     dispatch_board_free(&board);
     return 0;
 }
