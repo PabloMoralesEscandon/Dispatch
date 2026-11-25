@@ -562,13 +562,13 @@ like other read commands.
 The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
 `agents_md_missing`, `dispatch_not_on_path`, `workflow_entry_missing`,
 `workflow_entry_unexpected_type`, `completion_home_unset`,
-`completion_missing`, `agent_prompt_missing`,
+`completion_missing`, `agent_prompt_missing`, `agent_prompt_outdated`,
 `agent_run_script_not_executable`, `missing_current_task`,
 `workspace_path_missing`, `workspace_path_moved`, `workspace_not_a_worktree`,
 `workspace_branch_mismatch`, `orphaned_workspace`, `missing_commits`,
 `dep_self`, `dep_missing_reference`, `dep_duplicate`,
 `assignment_state_mismatch`, `start_provenance_mismatch`, `skills_missing`,
-and `skills_outdated`. Kinds shared
+`skills_outdated`, and `instructions_outdated`. Kinds shared
 with status warnings (`missing_commits`, `missing_current_task`,
 `assignment_state_mismatch`) describe the same conditions.
 `workspace_not_a_worktree` fires when an adopted workspace path exists on disk
@@ -583,6 +583,16 @@ fix `dispatch skills update`, or `dispatch skills update --global` for a
 global copy) fires once per installed copy that an older Dispatch installed
 and nobody edited since. Copies the user edited are not reported. Both were
 added in a compatible release.
+`instructions_outdated` (subject: `AGENTS.md` or `CLAUDE.md`, fix
+`dispatch skills install, then shorten <file> to the slim template (README:
+Upgrading Older Boards)`) fires when a workflow instruction file still carries
+the old long Dispatch instructions, detected by their
+`## Task Execution Protocol` heading; doctor never rewrites the file.
+`agent_prompt_outdated` (subject: the agent name, fix
+`run dispatch normalize`) fires when an agent's generated prompt predates the
+`## Dispatch Skills` section or still embeds the repository instructions;
+`normalize` regenerates it. Both were added in a compatible release
+([ADR 0012](adr/0012-slim-templates.md)).
 
 ## Mutation results
 

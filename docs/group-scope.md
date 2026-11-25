@@ -61,8 +61,10 @@ error.
 
 ## Planning Instructions
 
-The Planning Work section of the embedded CLAUDE.md/AGENTS.md templates
-changes so reuse is the default:
+The planning instructions (first the Planning Work section of the embedded
+CLAUDE.md/AGENTS.md templates, now the `dispatch-plan` skill, see
+[ADR 0010](adr/0010-agent-skills.md) and [ADR 0012](adr/0012-slim-templates.md))
+make reuse the default:
 
 1. First step: run `dispatch group list` and read the scopes.
 2. If an existing group's scope covers the planned work, add tasks there.
@@ -71,7 +73,7 @@ changes so reuse is the default:
 4. A task's group must match that group's recorded scope; creating a
    near-duplicate of an existing group is a planning mistake.
 
-The worked example in the templates leads with `dispatch group list` and
+The worked example in the skill leads with `dispatch group list` and
 shows reuse; `dispatch group add` appears as the deliberate exception, with
 `--description` in the example invocation.
 
