@@ -40,6 +40,11 @@ int dispatch_exec_run(const char *const argv[],
 int dispatch_exec_capture(const char *const argv[],
                           const DispatchExecOptions *options, char **output,
                           size_t *output_size, DispatchExecResult *result);
+int dispatch_exec_capture_streams(const char *const argv[],
+                                  const DispatchExecOptions *options,
+                                  char **stdout_output, size_t *stdout_size,
+                                  char **stderr_output, size_t *stderr_size,
+                                  DispatchExecResult *result);
 int dispatch_exec_feed(const char *const argv[],
                        const DispatchExecOptions *options, const void *input,
                        size_t input_size, DispatchExecResult *result);
