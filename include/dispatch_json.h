@@ -8,6 +8,10 @@
 
 #define DISPATCH_JSON_STATE(state) (1U << (unsigned int)(state))
 
+/* Non-fatal warning emitted in a JSON document's top-level warnings array
+ * instead of stray stderr text: status --check-issues drift warnings and
+ * mutating-command operational warnings share this shape. Owners decide
+ * whether the strings are borrowed or allocated. */
 typedef struct {
     const char *code;
     const char *message;
@@ -74,6 +78,7 @@ void dispatch_json_snapshot_take(DispatchJsonSnapshot *snapshot,
                                  const DispatchBoard *board);
 void dispatch_json_snapshot_free(DispatchJsonSnapshot *snapshot);
 
+
 /* The result object of a mutating command, built up by the command and
  * consumed by one of the mutation emitters. */
 typedef struct DispatchJsonResult DispatchJsonResult;
@@ -90,6 +95,8 @@ void dispatch_json_result_set_string(DispatchJsonResult *result,
                                      const char *key, const char *value);
 void dispatch_json_result_set_bool(DispatchJsonResult *result,
                                    const char *key, int value);
+void dispatch_json_result_set_int(DispatchJsonResult *result,
+                                  const char *key, long long value);
 /* Appends {"workspace": id, "reason": reason} to result.skipped. */
 void dispatch_json_result_add_skipped(DispatchJsonResult *result,
                                       const char *workspace_id,
@@ -109,18 +116,30 @@ void dispatch_json_result_add_issue_close_error(DispatchJsonResult *result,
                                                 const char *message);
 
 /* Writes the task envelope for a mutation: tasks holds the targets that
- * still exist, followed by result. group fills query.group when non-NULL. */
+ * still exist, followed by warnings and result. group fills query.group
+ * when non-NULL. */
 int dispatch_json_emit_mutation(FILE *stream, const DispatchBoard *board,
                                 const char *command, const char *group,
                                 const DispatchJsonSnapshot *before,
-                                const DispatchJsonResult *result);
+                                const DispatchJsonResult *result,
+                                const DispatchJsonWarning *warnings,
+                                size_t warning_count);
 
 /* Writes the workspace envelope for a mutation with the given records,
- * followed by result. */
+ * followed by warnings and result. */
 int dispatch_json_emit_workspace_mutation(
     FILE *stream, const DispatchBoard *board, const char *command,
     const DispatchWorkspace *records, size_t record_count,
-    const DispatchJsonSnapshot *before, const DispatchJsonResult *result);
+    const DispatchJsonSnapshot *before, const DispatchJsonResult *result,
+    const DispatchJsonWarning *warnings, size_t warning_count);
+
+/* Writes the agent envelope for a mutation with the given agent record (if
+ * non-NULL), followed by warnings and result. */
+int dispatch_json_emit_agent_mutation(
+    FILE *stream, const DispatchBoard *board, const char *command,
+    const DispatchAgent *agent, const DispatchJsonSnapshot *before,
+    const DispatchJsonResult *result, const DispatchJsonWarning *warnings,
+    size_t warning_count);
 
 /* Writes {"schema_version", "command", "error": {code, message, task_id}}. */
 int dispatch_json_emit_error(FILE *stream, const char *command,

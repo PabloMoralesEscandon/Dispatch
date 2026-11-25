@@ -8,24 +8,8 @@
 int cmd_ready(int argc, char **argv) {
     /* With task IDs, ready is a mutation and --json selects the result
      * document; without them it is the read-only queue listing. */
-    int has_operand = 0;
-    for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--json") != 0)
-            has_operand = 1;
-    }
-    int json_output = 0;
-    if (!dispatch_cli_extract_json_flag(&argc, argv, 2, &json_output)) {
-        if (has_operand)
-            cli_json_begin("ready");
-        cli_error("usage", NULL,
-                  "Usage: dispatch ready [--json] | dispatch ready <id> "
-                  "[<id> ...] [--actor <name>] [--no-review]\n");
-        return 1;
-    }
     if (argc == 2)
-        return cmd_ready_list(json_output);
-    if (json_output)
-        cli_json_begin("ready");
+        return cmd_ready_list(cli_json());
 
     /* Leading arguments are task IDs; options follow the last ID. */
     int ids_end = 2;
