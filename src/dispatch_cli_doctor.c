@@ -103,6 +103,54 @@ static void doctor_check_completion(size_t *warnings, const char *shell_name) {
     free(path);
 }
 
+/* Agent skills (ADR 0011): each bundled skill should be installed for at
+ * least one runner, in the workflow directory or globally, and no
+ * Dispatch-installed copy should be older than this binary. Copies the user
+ * edited are theirs and are not reported. */
+static void doctor_check_skills(size_t *warnings) {
+    const char *home = getenv("HOME");
+    SkillTargets targets;
+    skills_collect_targets(1, home && home[0], "all", &targets);
+    const char **names;
+    size_t name_count = skills_bundled_names(&names);
+    for (size_t s = 0; s < name_count; s++) {
+        size_t installed = 0, outdated = 0;
+        for (size_t i = 0; i < targets.count; i++) {
+            const SkillTarget *target = &targets.items[i];
+            if (strcmp(target->skill, names[s]) != 0 ||
+                target->status == SKILL_MISSING)
+                continue;
+            installed++;
+            if (target->status != SKILL_OUTDATED)
+                continue;
+            outdated++;
+            char message[1024];
+            snprintf(message, sizeof(message),
+                     "skill %s at %s is older than this dispatch (%s < %s)",
+                     names[s], target->path,
+                     target->installed_version ? target->installed_version
+                                               : "unknown",
+                     DISPATCH_VERSION);
+            doctor_warn(warnings, "skills_outdated", names[s], message,
+                        strcmp(target->scope, "global") == 0
+                            ? "dispatch skills update --global"
+                            : "dispatch skills update");
+        }
+        char message[512];
+        if (installed == 0) {
+            snprintf(message, sizeof(message),
+                     "skill %s is not installed for any runner", names[s]);
+            doctor_warn(warnings, "skills_missing", names[s], message,
+                        "dispatch skills install");
+        } else if (outdated == 0) {
+            snprintf(message, sizeof(message), "skill %s installed (%zu %s)",
+                     names[s], installed, installed == 1 ? "copy" : "copies");
+            doctor_ok(message);
+        }
+    }
+    skills_targets_free(&targets);
+}
+
 int cmd_doctor(int argc, char **argv) {
     (void)argv;
     int json_output = cli_json();
@@ -177,6 +225,7 @@ int cmd_doctor(int argc, char **argv) {
     doctor_check_completion(&warnings, "fish");
     doctor_check_completion(&warnings, "bash");
     doctor_check_completion(&warnings, "zsh");
+    doctor_check_skills(&warnings);
 
     char *current_repo_path = dispatch_resolve_path(".", board.repo_path);
 
