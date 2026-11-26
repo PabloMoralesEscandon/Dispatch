@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-25
+- **Refined by:** [ADR 0013](0013-shared-issue-links.md), which treats an
+  issue linked by several tasks as one piece of work: `duplicate_issue` only
+  across groups, `issue_still_open` only once every linking task is done, and
+  `review --close-issue` closes only for the last open linking task.
 
 ## Context
 

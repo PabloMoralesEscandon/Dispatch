@@ -78,16 +78,11 @@ void cli_error(const char *code, const char *task_id, const char *fmt, ...) {
     append_message(text);
 }
 
-void cli_warning(const char *code, const char *task_id, const char *agent,
-                 const char *fmt, ...) {
-    if (!context.active)
-        return;
-
+static void add_warning(const char *code, const char *task_id,
+                        const char *agent, const char *issue,
+                        const char *fmt, va_list args) {
     char text[2048];
-    va_list args;
-    va_start(args, fmt);
     vsnprintf(text, sizeof(text), fmt, args);
-    va_end(args);
 
     size_t len = strlen(text);
     while (len > 0 && text[len - 1] == '\n')
@@ -106,6 +101,27 @@ void cli_warning(const char *code, const char *task_id, const char *agent,
     warning->message = cli_strdup(text);
     warning->task_id = task_id && task_id[0] ? cli_strdup(task_id) : NULL;
     warning->agent = agent && agent[0] ? cli_strdup(agent) : NULL;
+    warning->issue = issue && issue[0] ? cli_strdup(issue) : NULL;
+}
+
+void cli_warning(const char *code, const char *task_id, const char *agent,
+                 const char *fmt, ...) {
+    if (!context.active)
+        return;
+    va_list args;
+    va_start(args, fmt);
+    add_warning(code, task_id, agent, NULL, fmt, args);
+    va_end(args);
+}
+
+void cli_issue_warning(const char *code, const char *task_id,
+                       const char *issue, const char *fmt, ...) {
+    if (!context.active)
+        return;
+    va_list args;
+    va_start(args, fmt);
+    add_warning(code, task_id, NULL, issue, fmt, args);
+    va_end(args);
 }
 
 void cli_json_snapshot(const DispatchBoard *board) {
@@ -186,6 +202,8 @@ int cli_json_emit_object(void *object) {
         json_object_set_new(warning, "agent",
                             item->agent ? json_string(item->agent)
                                         : json_null());
+        if (item->issue)
+            json_object_set_new(warning, "issue", json_string(item->issue));
         json_array_append_new(warnings, warning);
     }
     json_object_set_new(root, "warnings", warnings);
@@ -208,6 +226,7 @@ int cli_json_end(int status) {
         free((char *)context.warnings[i].message);
         free((char *)context.warnings[i].task_id);
         free((char *)context.warnings[i].agent);
+        free((char *)context.warnings[i].issue);
     }
     free(context.warnings);
     dispatch_json_snapshot_free(&context.before);

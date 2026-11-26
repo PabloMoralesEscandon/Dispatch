@@ -28,6 +28,9 @@ typedef struct {
     unsigned int state_mask;
     int include_warnings;
     int check_issues;
+    /* show: add issue_siblings (IDs of the other tasks linking the same
+     * issue, in board order) to each task object. */
+    int include_issue_siblings;
     const DispatchJsonWarning *extra_warnings;
     size_t extra_warning_count;
 } DispatchJsonRequest;

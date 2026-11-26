@@ -177,6 +177,13 @@ contact GitHub to fill it, so a linked issue is not guaranteed to exist;
 `task add --from-issue` fetches the issue through `gh` and links the canonical
 ref from its returned URL.
 
+Several tasks may link the same issue. `show --json` adds `issue_siblings` to
+its task object: an array of the IDs of the other tasks linking the same issue
+(compared case-insensitively), in board order, and empty when there are none
+or the task links no issue. Other commands' task objects do not carry it. The
+field is additive, so `schema_version` stays `1`
+([ADR 0013](adr/0013-shared-issue-links.md)).
+
 `workspace` is `null` when no active workspace covers the task. Otherwise it
 contains:
 
@@ -237,8 +244,12 @@ The version 1 warning codes are:
 - `assignment_state_mismatch` for an assigned task outside doing or review.
 - `missing_current_task` for an agent session that references an unknown task.
 - `duplicate_issue` for a task linking the same issue as an earlier task in
-  board order. Repos compare case-insensitively. `task_id` names the later
-  task, and the message names the earlier one.
+  board order, when the tasks linking that issue span more than one group.
+  Tasks of one group may share an issue without a warning: they are one piece
+  of work split into tasks ([ADR 0013](adr/0013-shared-issue-links.md)).
+  Repos compare case-insensitively. `task_id` names the later task, and the
+  message names every other task linking the issue, in board order
+  (`"ST-04 links acme/widgets#22, also linked to OT-01, ST-05"`).
 
 When `--check-issues` is passed to `status`, Dispatch queries GitHub via `gh`
 for each unique linked issue on the board (deduplicated case-insensitively on
@@ -250,7 +261,8 @@ document when `gh` is missing, unauthenticated, or fails on an issue.
 The `--check-issues` warning codes are:
 
 - `issue_still_open` for a `done` task whose linked GitHub issue is still
-  `OPEN`. Includes `issue` (`"owner/repo#N"`).
+  `OPEN`, emitted only when every task linking that issue is `done` (until
+  then an open shared issue is expected). Includes `issue` (`"owner/repo#N"`).
 - `issue_already_closed` for a non-`done` task (`proposed`, `ready`, `blocked`,
   `doing`, `review`, or `paused`) whose linked GitHub issue is `CLOSED`.
   Includes `issue` (`"owner/repo#N"`).
@@ -280,6 +292,10 @@ text to stderr:
   `skills install|update`, see [Skills responses](#skills-responses)) leaves
   an installed agent skill alone because the user edited it, Dispatch did not
   install it, or a newer Dispatch did.
+- `issue_left_open` when `review --close-issue` leaves a shared issue open
+  because other tasks linking it are not `done` yet (see
+  [Mutation results](#mutation-results)). Like the per-task issue checks, it
+  also includes `issue`.
 
 ## Workspace responses
 
@@ -687,7 +703,7 @@ do not know.
 | `ready <id>...` | `ready` | Each named task | — |
 | `start` | `start` | The started task | — |
 | `finish` | `finish` | The finished task | `review_required` (boolean) |
-| `review` | `review` | The accepted task | With `--close-issue`: `closed_issues` (array of `{"task", "issue"}`), `issue_close_errors` (array of `{"task", "issue", "code", "message"}`) |
+| `review` | `review` | The accepted task | With `--close-issue`: `closed_issues` (array of `{"task", "issue"}`), `issue_close_errors` (array of `{"task", "issue", "code", "message"}`); an issue left open for open sibling tasks is an `issue_left_open` warning |
 | `unassign` | `unassign` | The unassigned task | `previous_assignee` (string or null) |
 | `commit add` | `commit_add` | The task | `commit` (the recorded ref) |
 | `agent create` | `agent_create` | None | `agent` (name), `scratch_dir`, `decisions_dir`, `command` (strings) |
@@ -740,6 +756,27 @@ each failure in `result.issue_close_errors`, reusing the shared GitHub CLI
 error codes (`gh_missing`, `gh_not_authenticated`, `issue_not_found`, or
 `gh_failed`). Without `--close-issue`, `closed_issues` and
 `issue_close_errors` are omitted.
+
+An issue linked by several tasks is closed only by the review of the last
+linking task that is not yet `done`
+([ADR 0013](adr/0013-shared-issue-links.md)). While another linking task is
+still open, `review --close-issue` leaves the issue open without calling `gh`
+and adds an `issue_left_open` warning to the top-level `warnings` array. It
+carries `task_id` (the reviewed task), `agent: null`, `issue`
+(`"owner/repo#N"`), and a message naming the tasks that still link it:
+
+```json
+{
+  "code": "issue_left_open",
+  "message": "Left acme/widgets#21 open for ST-02: still linked by ST-03",
+  "task_id": "ST-02",
+  "agent": null,
+  "issue": "acme/widgets#21"
+}
+```
+
+The issue appears in neither `closed_issues` nor `issue_close_errors`. A batch
+review that accepts every remaining linking task closes the issue once.
 
 ## Error documents
 

@@ -757,6 +757,51 @@ dispatch_board_earlier_task_with_issue(const DispatchBoard *board,
     return NULL;
 }
 
+int dispatch_tasks_share_issue(const DispatchTask *a, const DispatchTask *b) {
+    return a && b && a != b && a->issue && a->issue[0] && b->issue &&
+           strcasecmp(a->issue, b->issue) == 0;
+}
+
+int dispatch_board_issue_spans_groups(const DispatchBoard *board,
+                                      const DispatchTask *task) {
+    if (!board || !task)
+        return 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *candidate = &board->tasks.items[i];
+        if (dispatch_tasks_share_issue(task, candidate) &&
+            strcmp(candidate->group, task->group) != 0)
+            return 1;
+    }
+    return 0;
+}
+
+size_t dispatch_board_format_issue_siblings(const DispatchBoard *board,
+                                            const DispatchTask *task,
+                                            int not_done_only, char *out,
+                                            size_t out_size) {
+    size_t count = 0;
+    size_t used = 0;
+    if (out && out_size > 0)
+        out[0] = '\0';
+    if (!board || !task)
+        return 0;
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *candidate = &board->tasks.items[i];
+        if (!dispatch_tasks_share_issue(task, candidate))
+            continue;
+        if (not_done_only && candidate->state == DISPATCH_STATE_DONE)
+            continue;
+        if (out && used < out_size) {
+            int written = snprintf(out + used, out_size - used, "%s%s",
+                                   count == 0 ? "" : ", ", candidate->id);
+            if (written > 0)
+                used += (size_t)written;
+        }
+        count++;
+    }
+    return count;
+}
+
 const char *dispatch_state_name(DispatchState state) {
     switch (state) {
     case DISPATCH_STATE_PROPOSED:

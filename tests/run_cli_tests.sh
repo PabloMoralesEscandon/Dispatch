@@ -4140,7 +4140,7 @@ fi
 
 # show prints the linked issue and its URL; list adds issue:#N to the line.
 expect_ok "$BIN" show DE-01
-assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12)"
+assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12) (also DE-04)"
 expect_ok "$BIN" show DE-05
 assert_line "Issue: -"
 expect_ok "$BIN" list
@@ -4159,7 +4159,14 @@ assert_json \
 expect_ok "$BIN" show DE-05 --json
 assert_json tasks.0.issue null -
 
-# Two tasks may link the same issue, and status warns about it.
+# Two tasks of one group may share an issue without a warning (ADR 0013);
+# status warns once they span different groups.
+expect_ok "$BIN" status
+assert_not_contains "also linked to"
+expect_ok "$BIN" status --json
+assert_json warnings array_length 0
+expect_ok "$BIN" group add Other --prefix OT
+expect_ok "$BIN" task move DE-04 OT
 expect_ok "$BIN" status
 assert_line "  DE-04 links acme/widgets#12, also linked to DE-01"
 expect_ok "$BIN" status --json
@@ -4191,10 +4198,14 @@ assert_json \
     tasks.3.issue null - \
     tasks.4.issue null -
 expect_ok "$BIN" status
+assert_not_contains "also linked to"
+expect_ok "$BIN" group add Other --prefix OT
+expect_ok "$BIN" task move GH-03 OT
+expect_ok "$BIN" status
 assert_line "  GH-03 links ACME/widgets#12, also linked to GH-01"
 expect_ok "$BIN" normalize
 expect_ok "$BIN" show GH-01
-assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12)"
+assert_line "Issue: acme/widgets#12 (https://github.com/acme/widgets/issues/12) (also GH-03)"
 assert_line "  issue_link by user: acme/widgets#12"
 expect_ok "$BIN" task edit GH-05 --issue Other-Org/thing.js#8
 assert_line "Linked GH-05 to Other-Org/thing.js#8"
@@ -5101,7 +5112,8 @@ assert_json \
 # DE-04: ready + CLOSED issue -> issue_already_closed
 # DE-05: doing + OPEN issue -> agrees (no warning)
 # DE-06: review + CLOSED cross-repo issue -> issue_already_closed
-# DE-07: proposed + duplicate of DE-02's issue (different case) -> duplicate_issue,
+# DE-07: done in another group + duplicate of DE-02's issue (different case)
+#        -> duplicate_issue and issue_still_open (every linking task is done),
 #        and gh is queried only once for acme/widgets#10
 # DE-08: ready + missing issue -> issue_not_found (non-fatal)
 # DE-09: ready + 502 server failure -> gh_failed (non-fatal)
@@ -5110,7 +5122,7 @@ expect_ok "$BIN" task add DE "Done closed" --issue 11 --no-review
 expect_ok "$BIN" task add DE "Ready closed" --issue 12
 expect_ok "$BIN" task add DE "Doing open" --issue 13
 expect_ok "$BIN" task add DE "Review closed" --issue Other-Org/thing.js#7
-expect_ok "$BIN" task add DE "Duplicate ref" --issue ACME/widgets#10
+expect_ok "$BIN" task add DE "Duplicate ref" --issue ACME/widgets#10 --no-review
 expect_ok "$BIN" task add DE "Missing issue" --issue 99
 expect_ok "$BIN" task add DE "Server error issue" --issue 100
 
@@ -5125,6 +5137,12 @@ expect_ok "$BIN" start DE-05 --actor worker
 expect_ok "$BIN" start DE-06 --actor worker
 expect_ok "$BIN" commit add DE-06 feedfac --actor worker
 expect_ok "$BIN" finish DE-06 --actor worker
+expect_ok "$BIN" group add Other --prefix OT
+expect_ok "$BIN" task move DE-07 OT
+expect_ok "$BIN" ready DE-07 --actor user
+expect_ok "$BIN" start DE-07 --actor worker
+expect_ok "$BIN" commit add DE-07 0ddba11 --actor worker
+expect_ok "$BIN" finish DE-07 --actor worker
 
 # Plain status (without --check-issues) never calls gh, keeps duplicate_issue.
 mkdir -p fake-bin
@@ -5187,6 +5205,7 @@ assert_line "  DE-07 links ACME/widgets#10, also linked to DE-02"
 assert_line "  DE-02 is done, but linked issue acme/widgets#10 is still open"
 assert_line "  DE-04 is ready, but linked issue acme/widgets#12 is closed"
 assert_line "  DE-06 is review, but linked issue Other-Org/thing.js#7 is closed"
+assert_line "  DE-07 is done, but linked issue ACME/widgets#10 is still open"
 assert_line "  DE-08: could not check linked issue acme/widgets#99 (Could not resolve to an Issue with the number of 99.)"
 assert_line "  DE-09: could not check linked issue acme/widgets#100 (HTTP 502: Bad Gateway)"
 assert_not_contains "DE-03 is done"
@@ -5204,7 +5223,7 @@ assert_json \
     schema_version integer 1 \
     command string status \
     query.check_issues boolean true \
-    warnings array_length 6 \
+    warnings array_length 7 \
     warnings.0.code string duplicate_issue \
     warnings.0.task_id string DE-07 \
     warnings.0.agent null - \
@@ -5222,19 +5241,21 @@ assert_json \
     warnings.3.task_id string DE-06 \
     warnings.3.agent null - \
     warnings.3.issue string Other-Org/thing.js#7 \
-    warnings.4.code string issue_not_found \
-    warnings.4.task_id string DE-08 \
-    warnings.4.agent null - \
-    warnings.4.issue string acme/widgets#99 \
-    warnings.5.code string gh_failed \
-    warnings.5.task_id string DE-09 \
+    warnings.4.code string issue_still_open \
+    warnings.4.task_id string DE-07 \
+    warnings.5.code string issue_not_found \
+    warnings.5.task_id string DE-08 \
     warnings.5.agent null - \
-    warnings.5.issue string acme/widgets#100
+    warnings.5.issue string acme/widgets#99 \
+    warnings.6.code string gh_failed \
+    warnings.6.task_id string DE-09 \
+    warnings.6.agent null - \
+    warnings.6.issue string acme/widgets#100
 
 expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues --json
 assert_json \
     query.check_issues boolean true \
-    warnings array_length 6
+    warnings array_length 7
 
 # Missing gh on PATH is non-fatal: emits one gh_missing warning and keeps
 # offline warnings intact.
@@ -5446,6 +5467,154 @@ assert_json \
     result.issue_close_errors.0.task string DE-10 \
     result.issue_close_errors.0.issue string acme/widgets#46 \
     result.issue_close_errors.0.code string issue_not_found
+
+# GH-29 / ADR 0013: several tasks may share one GitHub issue. Tasks of one
+# group sharing an issue are one piece of work split up: no duplicate_issue,
+# issue_still_open only once every linking task is done, and
+# review --close-issue closes the issue only for the last open linking task.
+case_dir="$(make_case_dir shared-issue-links)"
+cd "$case_dir"
+git init -q repo
+git -C repo remote add origin https://github.com/acme/widgets.git
+expect_ok "$BIN" init repo
+expect_ok "$BIN" group add Feature --prefix ST
+expect_ok "$BIN" group add Other --prefix OT
+
+# ST-01..03 share #21 (one group); OT-01, ST-04, ST-05 share #22 (two
+# groups); ST-06 and ST-07 share #23; ST-08 has no issue.
+expect_ok "$BIN" task add ST "Step one" --issue 21
+expect_ok "$BIN" task add ST "Step two" --issue 21
+expect_ok "$BIN" task add ST "Step three" --issue 21
+expect_ok "$BIN" task add OT "Other side" --issue 22
+expect_ok "$BIN" task add ST "Cross one" --issue 22
+expect_ok "$BIN" task add ST "Cross two" --issue 22
+expect_ok "$BIN" task add ST "Pair one" --issue 23
+expect_ok "$BIN" task add ST "Pair two" --issue 23
+expect_ok "$BIN" task add ST "No issue"
+for id in ST-01 ST-02 ST-03 OT-01 ST-04 ST-05 ST-06 ST-07; do
+    expect_ok "$BIN" ready "$id" --actor user
+    expect_ok "$BIN" start "$id" --actor worker
+    expect_ok "$BIN" commit add "$id" "c0ffee$(printf '%s' "$id" | tr -d 'A-Z-')" --actor worker
+    expect_ok "$BIN" finish "$id" --actor worker
+done
+
+mkdir -p fake-bin
+cat > fake-bin/gh <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$case_dir/gh-calls.log"
+if [ "\$1" = "issue" ] && [ "\$2" = "view" ]; then
+    printf '{"state":"OPEN"}\n'
+    exit 0
+fi
+if [ "\$1" = "issue" ] && [ "\$2" = "close" ]; then
+    exit 0
+fi
+exit 1
+EOF
+chmod +x fake-bin/gh
+
+# Same group: no duplicate_issue. Different groups: one warning per later
+# task, naming every other task linking the issue.
+expect_ok "$BIN" status
+assert_not_contains "acme/widgets#21, also linked"
+assert_not_contains "acme/widgets#23, also linked"
+assert_line "  ST-04 links acme/widgets#22, also linked to OT-01, ST-05"
+assert_line "  ST-05 links acme/widgets#22, also linked to OT-01, ST-04"
+expect_json_ok "$BIN" status --json
+assert_json \
+    warnings array_length 2 \
+    warnings.0.code string duplicate_issue \
+    warnings.0.task_id string ST-04 \
+    warnings.0.message string "ST-04 links acme/widgets#22, also linked to OT-01, ST-05" \
+    warnings.1.code string duplicate_issue \
+    warnings.1.task_id string ST-05
+
+# show lists the sibling tasks; list is unchanged.
+expect_ok "$BIN" show ST-02
+assert_line "Issue: acme/widgets#21 (https://github.com/acme/widgets/issues/21) (also ST-01, ST-03)"
+expect_ok "$BIN" show ST-08
+assert_line "Issue: -"
+expect_json_ok "$BIN" show ST-02 --json
+assert_json \
+    tasks.0.issue.number integer 21 \
+    tasks.0.issue_siblings array_length 2 \
+    tasks.0.issue_siblings.0 string ST-01 \
+    tasks.0.issue_siblings.1 string ST-03
+expect_json_ok "$BIN" show ST-08 --json
+assert_json tasks.0.issue_siblings array_length 0
+expect_ok "$BIN" list
+assert_line "  ST-01    review     Step one  commits:1  issue:#21"
+expect_json_ok "$BIN" list --json
+assert_not_contains '"issue_siblings"'
+
+# review --close-issue with sibling tasks still open leaves the issue open,
+# names the siblings, and never calls gh issue close.
+rm -f "$case_dir/gh-calls.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review ST-01 --actor alice --close-issue
+assert_line "Reviewed ST-01"
+assert_line "Left acme/widgets#21 open for ST-01: still linked by ST-02, ST-03"
+assert_not_contains "Closed acme/widgets#21"
+if [ -e "$case_dir/gh-calls.log" ]; then
+    fail "review --close-issue with open siblings invoked gh"
+fi
+expect_ok "$BIN" show ST-01
+assert_line "State: done"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review ST-02 --actor alice --close-issue --json
+assert_json \
+    result.new_state string done \
+    result.closed_issues array_length 0 \
+    result.issue_close_errors array_length 0 \
+    warnings array_length 1 \
+    warnings.0.code string issue_left_open \
+    warnings.0.task_id string ST-02 \
+    warnings.0.agent null - \
+    warnings.0.issue string acme/widgets#21 \
+    warnings.0.message string "Left acme/widgets#21 open for ST-02: still linked by ST-03"
+if [ -e "$case_dir/gh-calls.log" ]; then
+    fail "review --close-issue --json with open siblings invoked gh"
+fi
+
+# issue_still_open waits until every task linking the issue is done.
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues
+assert_not_contains "is still open"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues --json
+assert_json \
+    warnings array_length 2 \
+    warnings.0.code string duplicate_issue \
+    warnings.1.code string duplicate_issue
+expect_ok "$BIN" review ST-03 --actor alice
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues
+assert_line "  ST-01 is done, but linked issue acme/widgets#21 is still open"
+assert_line "  ST-02 is done, but linked issue acme/widgets#21 is still open"
+assert_line "  ST-03 is done, but linked issue acme/widgets#21 is still open"
+assert_not_contains "acme/widgets#22 is still open"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" status --check-issues --json
+assert_json \
+    warnings array_length 5 \
+    warnings.2.code string issue_still_open \
+    warnings.2.task_id string ST-01 \
+    warnings.2.issue string acme/widgets#21 \
+    warnings.3.task_id string ST-02 \
+    warnings.4.task_id string ST-03
+
+# Once every other linking task is done, the last review closes the issue.
+expect_ok "$BIN" review OT-01 ST-04 --actor alice
+rm -f "$case_dir/gh-calls.log"
+expect_json_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review ST-05 --actor alice --close-issue --json
+assert_json \
+    result.closed_issues array_length 1 \
+    result.closed_issues.0.task string ST-05 \
+    result.closed_issues.0.issue string acme/widgets#22 \
+    warnings array_length 0
+assert_file_contains "$case_dir/gh-calls.log" "issue close 22 --repo acme/widgets"
+expect_ok "$BIN" review ST-06 --actor alice
+rm -f "$case_dir/gh-calls.log"
+expect_ok env PATH="$case_dir/fake-bin:$PATH" "$BIN" review ST-07 --actor alice --close-issue
+assert_line "Closed acme/widgets#23 for ST-07"
+assert_not_contains "Left acme/widgets#23 open"
+if [ "$(line_count "$case_dir/gh-calls.log")" -ne 1 ]; then
+    fail "expected the last review of a shared issue to close it once"
+fi
 
 # Shell completions offer --close-issue for review.
 expect_ok env PATH="$ROOT/build:$PATH" "$BIN" completion zsh

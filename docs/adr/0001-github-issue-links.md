@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-16
+- **Refined by:** [ADR 0013](0013-shared-issue-links.md): tasks of one group
+  may share an issue without a `duplicate_issue` warning.
 
 ## Context
 

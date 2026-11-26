@@ -307,6 +307,7 @@ int cmd_show(int argc, char **argv) {
             .command = "show",
             .task_id = task->id,
             .include_done = -1,
+            .include_issue_siblings = 1,
         };
         int result =
             cli_json_finish_emit(dispatch_json_emit(stdout, &board, &request));
@@ -326,7 +327,12 @@ int cmd_show(int argc, char **argv) {
     if (task->issue && dispatch_issue_parse_canonical(task->issue, &issue)) {
         char url[DISPATCH_ISSUE_TEXT_MAX];
         dispatch_issue_format_url(&issue, url, sizeof(url));
-        printf("Issue: %s (%s)\n", task->issue, url);
+        char siblings[384];
+        if (dispatch_board_format_issue_siblings(&board, task, 0, siblings,
+                                                 sizeof(siblings)) > 0)
+            printf("Issue: %s (%s) (also %s)\n", task->issue, url, siblings);
+        else
+            printf("Issue: %s (%s)\n", task->issue, url);
     } else {
         printf("Issue: -\n");
     }
@@ -821,7 +827,9 @@ static void collect_issue_check_warnings(const DispatchBoard *board,
 
         DispatchState state = task_presentation_state(board, task);
         if (state == DISPATCH_STATE_DONE &&
-            entry->state == DISPATCH_GH_ISSUE_STATE_OPEN) {
+            entry->state == DISPATCH_GH_ISSUE_STATE_OPEN &&
+            dispatch_board_format_issue_siblings(board, task, 1, NULL, 0) ==
+                0) {
             snprintf(message, sizeof(message),
                      "%s is done, but linked issue %s is still open", task->id,
                      task->issue);
@@ -959,11 +967,13 @@ int cmd_status(int argc, char **argv) {
                    task->assigned_to, dispatch_state_name(state));
             warnings++;
         }
-        const DispatchTask *duplicate =
-            dispatch_board_earlier_task_with_issue(&board, task);
-        if (duplicate) {
-            printf("  %s links %s, also linked to %s\n", task->id,
-                   task->issue, duplicate->id);
+        if (dispatch_board_earlier_task_with_issue(&board, task) &&
+            dispatch_board_issue_spans_groups(&board, task)) {
+            char siblings[384];
+            dispatch_board_format_issue_siblings(&board, task, 0, siblings,
+                                                 sizeof(siblings));
+            printf("  %s links %s, also linked to %s\n",
+                   task->id, task->issue, siblings);
             warnings++;
         }
     }
