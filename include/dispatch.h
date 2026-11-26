@@ -202,6 +202,21 @@ const DispatchTask *
 dispatch_board_earlier_task_with_issue(const DispatchBoard *board,
                                        const DispatchTask *task);
 
+/* 1 when a and b are different tasks linking the same issue. */
+int dispatch_tasks_share_issue(const DispatchTask *a, const DispatchTask *b);
+/* 1 when another task linking the same issue as `task` is in a different
+ * group (ADR 0013: same-group sharing is one piece of work split up). */
+int dispatch_board_issue_spans_groups(const DispatchBoard *board,
+                                      const DispatchTask *task);
+/* Writes the IDs of the other tasks linking `task`'s issue, in board order
+ * and separated by ", ", into out (truncated to out_size). With
+ * not_done_only, skips tasks whose stored state is done. Returns how many
+ * sibling tasks matched. out may be NULL to only count. */
+size_t dispatch_board_format_issue_siblings(const DispatchBoard *board,
+                                            const DispatchTask *task,
+                                            int not_done_only, char *out,
+                                            size_t out_size);
+
 const char *dispatch_state_name(DispatchState state);
 int dispatch_state_from_name(const char *name, DispatchState *state);
 const char *dispatch_workspace_state_name(DispatchWorkspaceState state);

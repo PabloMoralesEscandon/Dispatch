@@ -403,6 +403,22 @@ static void close_reviewed_issues(DispatchBoard *board, int ids_end,
         if (!dispatch_issue_parse_canonical(task->issue, &ref))
             continue;
 
+        /* ADR 0013: an issue shared by several tasks is one piece of work,
+         * so it stays open until the last task linking it is done. */
+        char siblings[384];
+        if (dispatch_board_format_issue_siblings(board, task, 1, siblings,
+                                                 sizeof(siblings)) > 0) {
+            if (json_result) {
+                cli_issue_warning("issue_left_open", task->id, task->issue,
+                                  "Left %s open for %s: still linked by %s",
+                                  task->issue, task->id, siblings);
+            } else {
+                printf("Left %s open for %s: still linked by %s\n",
+                       task->issue, task->id, siblings);
+            }
+            continue;
+        }
+
         char detail[256] = {0};
         DispatchGhStatus status;
         if (fatal_status != DISPATCH_GH_OK) {

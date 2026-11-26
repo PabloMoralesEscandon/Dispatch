@@ -45,6 +45,11 @@ void cli_error(const char *code, const char *task_id, const char *fmt, ...)
 void cli_warning(const char *code, const char *task_id, const char *agent,
                  const char *fmt, ...)
     __attribute__((format(printf, 4, 5)));
+/* Like cli_warning for a per-task issue warning: the JSON warning also
+ * carries the canonical "owner/repo#N" issue. */
+void cli_issue_warning(const char *code, const char *task_id,
+                       const char *issue, const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
 void cli_json_snapshot(const DispatchBoard *board);
 void cli_json_snapshot_reset(void);
 int cli_json_finish_emit(int ok);

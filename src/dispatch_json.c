@@ -565,6 +565,10 @@ static json_t *extra_warnings_json(const DispatchJsonWarning *items,
     for (size_t i = 0; i < count; i++) {
         append_warning(warnings, items[i].code, items[i].message,
                        items[i].task_id, items[i].agent);
+        if (items[i].issue)
+            json_object_set_new(json_array_get(warnings,
+                                               json_array_size(warnings) - 1),
+                                "issue", json_string(items[i].issue));
     }
     return warnings;
 }
@@ -598,11 +602,14 @@ static json_t *warnings_json(const DispatchBoard *board,
             append_warning(warnings, "assignment_state_mismatch", message,
                            task->id, NULL);
         }
-        const DispatchTask *duplicate =
-            dispatch_board_earlier_task_with_issue(board, task);
-        if (duplicate) {
-            snprintf(message, sizeof(message), "%s links %s, also linked to %s",
-                     task->id, task->issue, duplicate->id);
+        if (dispatch_board_earlier_task_with_issue(board, task) &&
+            dispatch_board_issue_spans_groups(board, task)) {
+            char siblings[384];
+            dispatch_board_format_issue_siblings(board, task, 0, siblings,
+                                                 sizeof(siblings));
+            snprintf(message, sizeof(message),
+                     "%s links %s, also linked to %s",
+                     task->id, task->issue, siblings);
             append_warning(warnings, "duplicate_issue", message, task->id,
                            NULL);
         }
@@ -651,6 +658,17 @@ int dispatch_cli_extract_json_flag(int *argc, char **argv, int first_arg,
     return 1;
 }
 
+static json_t *issue_siblings_json(const DispatchBoard *board,
+                                   const DispatchTask *task) {
+    json_t *array = json_array();
+    for (size_t i = 0; i < board->tasks.count; i++) {
+        const DispatchTask *candidate = &board->tasks.items[i];
+        if (dispatch_tasks_share_issue(task, candidate))
+            json_array_append_new(array, json_string(candidate->id));
+    }
+    return array;
+}
+
 int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
                        const DispatchJsonRequest *request) {
     json_t *tasks = json_array();
@@ -659,7 +677,11 @@ int dispatch_json_emit(FILE *stream, const DispatchBoard *board,
         const DispatchTask *task = &board->tasks.items[i];
         if (!task_matches(board, task, request))
             continue;
-        json_array_append_new(tasks, task_json(board, task));
+        json_t *object = task_json(board, task);
+        if (request->include_issue_siblings)
+            json_object_set_new(object, "issue_siblings",
+                                issue_siblings_json(board, task));
+        json_array_append_new(tasks, object);
         returned++;
     }
 
