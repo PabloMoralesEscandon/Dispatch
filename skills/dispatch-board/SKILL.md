@@ -135,7 +135,9 @@ dispatch review DE-13 --actor <your-agent-name>
 ```
 
 `--close-issue` closes each accepted task's linked GitHub issue through `gh`
-with a comment naming the task, reviewer and commits. A `gh` failure is a
+with a comment naming the task, reviewer and commits. An issue shared with
+tasks that are not done yet stays open; `review` names them (an
+`issue_left_open` warning under `--json`). A `gh` failure is a
 warning: the review itself still succeeds, so report the warning and offer to
 close the issue by hand. After review, dependent tasks may become ready;
 `dispatch ready` shows them.
@@ -149,9 +151,10 @@ dispatch normalize              # recompute derived state, repair invariants
 ```
 
 - `status` warns offline about done tasks without commits, assignment
-  mismatches and several tasks linking the same issue. `--check-issues` asks
-  GitHub (via `gh`) and warns when a done task's issue is still open or an open
-  task's issue is already closed; missing or logged-out `gh` is a warning, not
+  mismatches and tasks of different groups linking the same issue.
+  `--check-issues` asks GitHub (via `gh`) and warns when every task linking an
+  issue is done but the issue is still open, or an open task's issue is
+  already closed; missing or logged-out `gh` is a warning, not
   a failure.
 - `doctor` reports problems with suggested fixes, including agent skills that
   are missing or older than the binary; `normalize` is the safe repair for

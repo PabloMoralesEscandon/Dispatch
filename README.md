@@ -241,10 +241,11 @@ another process updates it.
 
 `status` prints a compact board overview: task counts by state, ready and review
 queues, blocked count, enabled/archived agent counts, workspace counts, and
-warnings such as completed tasks without recorded commits or several tasks
-linking the same GitHub issue. Plain `status` never touches the network; pass
-`--check-issues` to query GitHub via `gh` and also warn when a done task's
-linked issue is still open or an open task's linked issue is closed. When `gh`
+warnings such as completed tasks without recorded commits or tasks of
+different groups linking the same GitHub issue. Plain `status` never touches
+the network; pass `--check-issues` to query GitHub via `gh` and also warn when
+every task linking an issue is done but the issue is still open, or an open
+task's linked issue is closed. When `gh`
 is missing, not logged in, or fails on an individual issue, `status
 --check-issues` emits a non-fatal warning and still reports the rest of the
 board.
@@ -651,14 +652,21 @@ without a GitHub `origin` are rejected without changing the board.
 
 Linking a different issue replaces the current one. Each change appends an
 `issue_link` or `issue_unlink` entry to task history and `dispatch.log`, with
-the ref in the history note and in the log record's `context.issue`. Several
-tasks may link the same issue; `status` warns about it offline so accidental
-duplicates are easy to spot. Pass `--check-issues` to `status` to opt into
-checking linked issue states on GitHub via `gh` (warning when a done task's
-issue is still open or an open task's issue is closed), and pass `--close-issue`
-to `review` to close each accepted task's linked issue with a comment; see
-[ADR 0008](docs/adr/0008-check-linked-issues.md). `show` prints the linked
-issue and its URL, `list` adds `issue:#123` to the task line, and JSON task
+the ref in the history note and in the log record's `context.issue`.
+
+Several tasks may link the same issue: an issue usually describes a feature
+that is split into several tasks of one group. Dispatch treats those tasks as
+one piece of work ([ADR 0013](docs/adr/0013-shared-issue-links.md)): `status`
+warns offline (`duplicate_issue`) only when the tasks linking an issue are in
+different groups, which is more likely a mistake. Pass `--check-issues` to
+`status` to opt into checking linked issue states on GitHub via `gh` (warning
+when every task linking an issue is done but the issue is still open, or an
+open task's issue is closed), and pass `--close-issue` to `review` to close
+each accepted task's linked issue with a comment once no other task linking it
+is still open; see [ADR 0008](docs/adr/0008-check-linked-issues.md). `show`
+prints the linked issue, its URL, and any other tasks linking it
+(`Issue: acme/widgets#21 (https://github.com/acme/widgets/issues/21) (also
+ST-02, ST-03)`), `list` adds `issue:#123` to the task line, and JSON task
 objects carry an `issue` object (see [JSON Output](#json-output)).
 
 To create a task directly from an existing GitHub issue, use `--from-issue`:
@@ -791,7 +799,9 @@ the same task. `finish` records the completing actor and moves the task to
 `--close-issue` to also close each task's linked GitHub issue via `gh` with a
 comment citing the task, actor, and recorded commits (recording an `issue_close`
 entry in `dispatch.log` and warning without failing the review if `gh` cannot
-close the issue).
+close the issue). An issue that other tasks still link while they are not done
+is left open: `review` prints `Left <issue> open for <task>: still linked by
+<ids>` (an `issue_left_open` warning under `--json`) and does not call `gh`.
 
 `unassign` clears an abandoned or stuck task assignment (`assigned_to`,
 `started_by`, and `started_at`) without editing `dispatch.json`. `--actor` is
@@ -898,8 +908,8 @@ Among task read commands, only `status` populates `warnings`. Warning objects
 contain a stable `code`, a human-readable `message`, and nullable `task_id` and
 `agent` fields (plus `issue` on per-task issue check warnings). Version 1
 reports missing commits, assignment/state mismatches, agent sessions that
-reference missing tasks, and tasks that link the same issue as an earlier task,
-plus GitHub issue drift and shared `gh` error warnings when `--check-issues` is
+reference missing tasks, and tasks that link the same issue as an earlier task
+in a different group, plus GitHub issue drift and shared `gh` error warnings when `--check-issues` is
 passed. Mutating commands also use `warnings` for non-fatal operational
 warnings (such as a failed `dispatch.log` append, scaffolding failure during
 `init`, or a non-git path on `repo set`) instead of printing stray text to

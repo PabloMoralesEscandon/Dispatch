@@ -159,9 +159,13 @@ dispatch task add DE --from-issue 42 --actor <your-agent-name>
 ```
 
 A ref is `#123`, `123`, `owner/repo#123`, or the issue URL; bare numbers
-resolve against the repository's GitHub `origin` remote. Several tasks may link
-the same issue (a split issue); `status` notes that as a warning so accidental
-duplicates are easy to spot.
+resolve against the repository's GitHub `origin` remote.
+
+Linking one issue to several tasks of the same group is fine and expected: the
+issue is one feature split into tasks, so link every task of it. Tasks of
+different groups should not share an issue; `status` warns (`duplicate_issue`)
+when they do. A shared issue stays open until its last task is done:
+`review --close-issue` closes it only for the last one.
 
 ### 5. Leave tasks proposed
 
