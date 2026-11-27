@@ -459,32 +459,9 @@ int create_agent_dirs(const char *agent_dir, char **scratch_dir,
     return 1;
 }
 
-/* Write an instruction file only when it does not exist yet: scaffolding
- * must never clobber user edits. */
-static void scaffold_workflow_file(const char *path, const char *content) {
-    FILE *file = fopen(path, "r");
-    if (file) {
-        fclose(file);
-        return;
-    }
-    file = fopen(path, "w");
-    if (!file) {
-        if (cli_json()) {
-            cli_warning("scaffold_failed", NULL, NULL,
-                        "could not create %s: %s", path, strerror(errno));
-        } else {
-            fprintf(stderr, "Could not create %s: %s\n", path, strerror(errno));
-        }
-        return;
-    }
-    fputs(content, file);
-    fclose(file);
-    if (!cli_json())
-        printf("Created %s\n", path);
-}
-
-/* On a fresh init, create the .dispatch/ tree and the workflow instruction
- * files from the embedded templates. */
+/* On a fresh init, create the .dispatch/ tree (agent support directories).
+ * Workflow instructions live in the embedded agent skills (ADR 0014), so
+ * init no longer writes AGENTS.md or CLAUDE.md. */
 static void scaffold_workflow_dir(void) {
     if (!make_dir_if_needed(".dispatch") ||
         !make_dir_if_needed(".dispatch/agents")) {
@@ -497,8 +474,6 @@ static void scaffold_workflow_dir(void) {
                     strerror(errno));
         }
     }
-    scaffold_workflow_file("AGENTS.md", dispatch_template_agents_md);
-    scaffold_workflow_file("CLAUDE.md", dispatch_template_claude_md);
 }
 
 static int run_command(const DispatchCliCommand *command, int argc,

@@ -504,6 +504,8 @@ int skills_install_for_init(size_t *changed, size_t *skipped) {
     if (!cli_json() && *changed > 0) {
         printf("Installed agent skills for claude, codex and opencode in "
                ".claude/skills, .agents/skills and .opencode/skills\n");
+        printf("Hint: run dispatch skills install --global for sessions "
+               "started outside the workflow directory\n");
     }
     skills_targets_free(&targets);
     return ok;
