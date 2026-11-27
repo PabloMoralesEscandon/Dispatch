@@ -24,6 +24,7 @@ dispatch tui
 
 ```bash
 dispatch skills list [--project | --global] [--runner claude|codex|opencode|all] [--json]
+dispatch skills show <name> [--json]
 dispatch skills install [--project | --global] [--runner claude|codex|opencode|all] [--force] [--json]
 dispatch skills update [--project | --global] [--runner claude|codex|opencode|all] [--force] [--json]
 ```

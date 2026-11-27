@@ -1,6 +1,6 @@
 ---
 name: dispatch-board
-description: Check, review or tidy the Dispatch board. Use when the person asks what is ready, blocked, in review or in progress on their Dispatch board, asks to ready (approve) or review (accept) Dispatch tasks, to close linked GitHub issues, to check board health, or to clean up stuck assignments, stale workspaces, agents or priorities. For the person's own session rather than a worker agent.
+description: Check, review, set up or tidy a Dispatch board; applies to any command run against a Dispatch board. Use when asked to run any Dispatch command, check what is ready, blocked, in review or in progress, ready (approve) or review (accept) tasks, close linked GitHub issues, check board health, manage agent skills, or clean up stuck assignments, stale workspaces, agents or priorities. Covers the critical rules (CLI only, never read or edit dispatch.json, explicit --actor) and finding the workflow directory from a worktree. For the person's own session or any ad-hoc command against a Dispatch board.
 ---
 
 # Dispatch: read, approve and tidy the board
@@ -26,6 +26,8 @@ plan new tasks use the `dispatch-plan` skill; to carry out a task use the
    initiate (`unassign`, `task priority`, `task move`), and `review` when the
    user explicitly assigned you as the reviewer. Never record your own work as
    `user`.
+6. Commit after every completed Dispatch task.
+7. Use the Dispatch task title as the commit message.
 
 The storage file is an implementation detail, and so is `dispatch.log`. Do not
 inspect or edit them with `cat`, `sed`, `jq`, `rg`, editors, scripts, or JSON
@@ -34,31 +36,40 @@ it).
 
 ## Find The Workflow Directory
 
-Dispatch state normally lives one directory above the product repository:
+Dispatch state normally lives one directory above the main product repository
+checkout:
 
 ```text
 work_dir/
   .git/
   dispatch.json
+  dispatch.log
   repo/
 ```
 
-Run Dispatch from `work_dir`. If the session started inside the product
-repository or one of its task worktrees, the board is usually in the parent of
-the main checkout: `cd` there and check that `dispatch repo` prints the
-repository you expect. If it reports no board, you are in the wrong directory.
+Run Dispatch commands from `work_dir`. If the session started inside the
+product repository (`work_dir/repo`), `work_dir` is `..`. If the session
+started in a task worktree outside `work_dir` (for example one created by Orca
+or `workspace create --dir`), `..` is not the workflow directory: find the
+main checkout with `git worktree list` (its first entry, or the parent of
+`git rev-parse --git-common-dir`), then `cd` one directory above that checkout
+and check that `dispatch repo` prints the repository you expect. If it reports
+no board, you are in the wrong directory; do not run `dispatch init` unless
+the person asks for a new board.
 
 Setting up a board is a one-off the person asks for explicitly:
-`dispatch init repo` creates `dispatch.json` (plus `AGENTS.md` and
-`CLAUDE.md`) for the repository at `repo`, `dispatch repo set <path>` repoints
-an existing board after the repository moved, and
-`dispatch completion install bash|zsh|fish` installs shell completion.
-`dispatch init` also installs these skills in the workflow directory;
-`dispatch skills list` shows where they are installed and whether they match
-the binary, `dispatch skills install --global` puts them in each runner's user
-skills directory, and `dispatch skills update` refreshes copies older than the
-binary. Neither replaces a skill the person edited unless they ask for
-`--force`.
+`dispatch init repo` creates `dispatch.json` for the repository at `repo` and
+installs these skills in the workflow directory (project scope),
+`dispatch repo set <path>` repoints an existing board after the repository
+moved, and `dispatch completion install bash|zsh|fish` installs shell
+completion. `dispatch skills list` shows where the skills are installed and
+whether they match the binary, `dispatch skills install --global` puts them in
+each runner's user skills directory so sessions started outside the workflow
+directory (such as task worktrees) find them too, `dispatch skills update`
+refreshes copies older than the binary, and `dispatch skills show <name>`
+prints a bundled skill's `SKILL.md` to stdout so launchers for runners without
+skill support can embed the rules in a prompt. Neither `install` nor `update`
+replaces a skill the person edited unless they ask for `--force`.
 `dispatch tui` (or plain `dispatch`) opens the interactive board for the
 person; it is not for agents.
 
