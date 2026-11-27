@@ -13,7 +13,7 @@ const DispatchCliCommand commands[] = {
     {"dep", "Manage dependencies"},
     {"commit", "Manage task commit references"},
     {"completion", "Print shell completion candidates"},
-    {"skills", "List, install and update the agent skills"},
+    {"skills", "List, show, install and update the agent skills"},
     {"ready", "List ready work or mark a task ready"},
     {"reviews", "List tasks waiting for review"},
     {"proposed", "List tasks waiting for approval"},
@@ -55,7 +55,7 @@ void dispatch_cli_print_help(void) {
     puts("  init, repo [set], agent create/list/show/command/session/resume/archive/restore,");
     puts("  workspace create/adopt/list/show/remove/repair/prune, group add/ready/edit/list/show,");
     puts("  task add/edit/move/delete/priority, dep add/remove, commit add/list/show,");
-    puts("  completion candidates/bash/zsh/fish/install, skills list/install/update,");
+    puts("  completion candidates/bash/zsh/fish/install, skills list/show/install/update,");
     puts("  ready, reviews, proposed, start, finish, review, unassign, normalize, status,");
     puts("  doctor, log, tui, list, show, blocked");
     puts("");
@@ -64,7 +64,7 @@ void dispatch_cli_print_help(void) {
     puts("  agent list/show, workspace list/show, log) and mutating commands (init, repo set, normalize,");
     puts("  task add/edit/move/delete/priority, group add/ready/edit, dep add/remove, commit add,");
     puts("  ready <id>, start, finish, review, unassign, agent create/archive/restore/session/command/resume,");
-    puts("  workspace create/adopt/remove/repair/prune, skills list/install/update).");
+    puts("  workspace create/adopt/remove/repair/prune, skills list/show/install/update).");
     puts("");
     printf("Version: %s (dispatch --version)\n", DISPATCH_VERSION);
 }
@@ -585,6 +585,7 @@ static const struct {
     {"workspace", "repair", "workspace repair"},
     {"workspace", "prune", "workspace prune"},
     {"skills", "list", "skills list"},
+    {"skills", "show", "skills show"},
     {"skills", "install", "skills install"},
     {"skills", "update", "skills update"},
 };

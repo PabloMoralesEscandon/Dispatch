@@ -1,5 +1,5 @@
-/* dispatch skills list|install|update: install the agent skills embedded in
- * the binary into each runner's skills directory (ADR 0011). */
+/* dispatch skills list|show|install|update: inspect and install the agent
+ * skills embedded in the binary (ADR 0011, ADR 0014). */
 
 #include "dispatch_cli_internal.h"
 
@@ -801,21 +801,89 @@ static int skills_apply(int argc, char **argv, int update) {
     return 0;
 }
 
+static const DispatchSkillFile *find_bundled_skill_md(const char *name) {
+    for (size_t i = 0; i < dispatch_skill_file_count; i++) {
+        const DispatchSkillFile *file = &dispatch_skill_files[i];
+        if (strcmp(file->skill, name) == 0 &&
+            strcmp(file->path, "SKILL.md") == 0) {
+            return file;
+        }
+    }
+    return NULL;
+}
+
+static int skills_show(int argc, char **argv) {
+    if (argc != 4) {
+        cli_error("usage", NULL, "Usage: dispatch skills show <name> [--json]\n");
+        return 1;
+    }
+
+    const char *name = argv[3];
+    const DispatchSkillFile *skill_md = find_bundled_skill_md(name);
+    if (!skill_md) {
+        const char **names;
+        size_t name_count = skills_bundled_names(&names);
+        char available[256] = {0};
+        size_t used = 0;
+        for (size_t i = 0; i < name_count && used < sizeof(available); i++) {
+            int written = snprintf(available + used, sizeof(available) - used,
+                                   "%s%s", i == 0 ? "" : ", ", names[i]);
+            if (written > 0)
+                used += (size_t)written;
+        }
+        cli_error("skill_not_found", NULL,
+                  "Unknown skill %s; bundled skills: %s\n", name, available);
+        return 1;
+    }
+
+    if (cli_json()) {
+        json_t *root = json_object();
+        json_object_set_new(root, "schema_version", json_integer(1));
+        json_object_set_new(root, "command", json_string("skills show"));
+        json_object_set_new(root, "dispatch_version",
+                            json_string(DISPATCH_VERSION));
+        json_t *skill = json_object();
+        json_object_set_new(skill, "name", json_string(name));
+        json_object_set_new(skill, "version", json_string(DISPATCH_VERSION));
+        json_t *files = json_array();
+        for (size_t i = 0; i < dispatch_skill_file_count; i++) {
+            if (strcmp(dispatch_skill_files[i].skill, name) == 0)
+                json_array_append_new(
+                    files, json_string(dispatch_skill_files[i].path));
+        }
+        json_object_set_new(skill, "files", files);
+        json_object_set_new(skill, "content",
+                            json_stringn(skill_md->data, skill_md->size));
+        json_object_set_new(root, "skill", skill);
+        return cli_json_emit_object(root);
+    }
+
+    if (skill_md->size > 0 &&
+        fwrite(skill_md->data, 1, skill_md->size, stdout) != skill_md->size) {
+        cli_error("io_failed", NULL, "Could not write skill %s: %s\n", name,
+                  strerror(errno));
+        return 1;
+    }
+    return 0;
+}
+
 int cmd_skills(int argc, char **argv) {
     if (argc < 3) {
         cli_error("usage", NULL,
-                  "Usage: dispatch skills list|install|update [options]\n");
+                  "Usage: dispatch skills list|show|install|update [options]\n");
         return 1;
     }
     if (strcmp(argv[2], "list") == 0)
         return skills_list(argc, argv);
+    if (strcmp(argv[2], "show") == 0)
+        return skills_show(argc, argv);
     if (strcmp(argv[2], "install") == 0)
         return skills_apply(argc, argv, 0);
     if (strcmp(argv[2], "update") == 0)
         return skills_apply(argc, argv, 1);
     cli_error("usage", NULL,
               "Unknown skills command: %s\nUsage: dispatch skills "
-              "list|install|update [options]\n",
+              "list|show|install|update [options]\n",
               argv[2]);
     return 1;
 }
