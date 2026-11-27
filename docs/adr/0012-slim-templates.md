@@ -1,6 +1,6 @@
 # 0012: Slim AGENTS.md / CLAUDE.md and agent prompts down to the skills
 
-- **Status:** Accepted
+- **Status:** Superseded by [0014](0014-skills-only-agent-instructions.md)
 - **Date:** 2026-11-25
 
 ## Context

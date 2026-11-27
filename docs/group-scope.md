@@ -63,7 +63,8 @@ error.
 
 The planning instructions (first the Planning Work section of the embedded
 CLAUDE.md/AGENTS.md templates, now the `dispatch-plan` skill, see
-[ADR 0010](adr/0010-agent-skills.md) and [ADR 0012](adr/0012-slim-templates.md))
+[ADR 0010](adr/0010-agent-skills.md) and
+[ADR 0014](adr/0014-skills-only-agent-instructions.md))
 make reuse the default:
 
 1. First step: run `dispatch group list` and read the scopes.
