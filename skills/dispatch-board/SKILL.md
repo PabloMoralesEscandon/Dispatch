@@ -10,7 +10,8 @@ for the person's own session: reporting the state of the board, making the
 approval and review decisions they ask for, and keeping the board healthy. To
 plan new tasks use the `dispatch-plan` skill; to carry out a task use the
 `dispatch-work` skill. The full command list is in
-[references/commands.md](references/commands.md).
+[references/commands.md](references/commands.md), and what each warning means
+and what to do about it is in [references/warnings.md](references/warnings.md).
 
 ## Critical Rules
 
@@ -170,6 +171,9 @@ dispatch normalize              # recompute derived state, repair invariants
 - `doctor` reports problems with suggested fixes, including agent skills that
   are missing or older than the binary; `normalize` is the safe repair for
   derived state and stale assignments.
+- Every warning code from `status`, `doctor` and `--json` results, with what
+  it means and what to do, is in [references/warnings.md](references/warnings.md).
+  Match on the code, not the message.
 - A stuck or abandoned assignment (an agent died mid-task) is cleared with
   `dispatch unassign <TASK-ID> --actor <your-agent-name>`: a `doing` task returns to
   `ready` (or `blocked`). It refuses `review` and `done` tasks and leaves

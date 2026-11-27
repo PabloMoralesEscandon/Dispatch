@@ -359,3 +359,8 @@ not need a second query. Failures keep a non-zero exit status, print nothing on
 stdout and a JSON error document on stderr; match on `error.code`, not the
 message. The full contract is in `docs/json-output-contract.md` in the
 Dispatch repository.
+
+A command that succeeded can still return `warnings` (in `--json`) or print
+one. They do not undo the change. The `dispatch-board` skill's
+`references/warnings.md` lists every code with what it means and what to do;
+report the ones you cannot fix as part of your own task.

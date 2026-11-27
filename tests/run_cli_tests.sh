@@ -5670,10 +5670,12 @@ for dir in $project_skill_dirs; do
         fi
         assert_file_contains "$dir/$skill/.dispatch-skill.json" '"dispatch_version": "0.1.0"'
     done
-    if ! cmp -s "$ROOT/skills/dispatch-board/references/commands.md" \
-        "$dir/dispatch-board/references/commands.md"; then
-        fail "init did not install the dispatch-board reference file in $dir"
-    fi
+    for ref in commands.md warnings.md; do
+        if ! cmp -s "$ROOT/skills/dispatch-board/references/$ref" \
+            "$dir/dispatch-board/references/$ref"; then
+            fail "init did not install the dispatch-board reference $ref in $dir"
+        fi
+    done
 done
 if [ -e "$skills_home/.claude" ] || [ -e "$skills_home/.agents" ] || [ -e "$skills_home/.config" ]; then
     fail "init must not install global skills"
@@ -5708,6 +5710,7 @@ assert_json command string "skills list" dispatch_version string 0.1.0 \
     query.scope string all query.runner string all skills array_length 3 \
     skills.0.name string dispatch-board skills.0.version string 0.1.0 \
     skills.0.files.1 string references/commands.md \
+    skills.0.files.2 string references/warnings.md \
     skills.0.installations array_length 6 \
     skills.0.installations.0.status string current \
     skills.0.installations.0.installed_version string 0.1.0 \
@@ -5846,9 +5849,10 @@ assert_json \
     dispatch_version string 0.1.0 \
     skill.name string dispatch-board \
     skill.version string 0.1.0 \
-    skill.files array_length 2 \
+    skill.files array_length 3 \
     skill.files.0 string SKILL.md \
     skill.files.1 string references/commands.md \
+    skill.files.2 string references/warnings.md \
     skill.content string "*" \
     warnings array_length 0
 assert_contains "name: dispatch-board"
