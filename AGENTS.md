@@ -55,9 +55,11 @@ does not offer them:
 
 - From the workflow directory, `dispatch skills install` installs them there
   for Claude Code, Codex and opencode.
-- A session started inside the product repository may not look in the
-  workflow directory; `dispatch skills install --global` installs them for
-  every session of each runner.
+- A session started inside the product repository or a task worktree outside
+  the workflow directory will not look there; `dispatch skills install --global`
+  installs them for every session of each runner.
+- For runners without skill support, `dispatch skills show <name>` prints a
+  skill's `SKILL.md` to stdout.
 
-If you cannot install them, ask the user before changing the board. Do not
-work from memory of older, longer versions of this file.
+If you cannot install or read them, ask the user before changing the board. Do
+not work from memory of older, longer versions of this file.

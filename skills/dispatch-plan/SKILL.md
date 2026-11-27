@@ -1,6 +1,6 @@
 ---
 name: dispatch-plan
-description: Plan, break down or organise work into Dispatch tasks. Use when asked to plan a feature, turn a GitHub issue into Dispatch tasks, split work into groups, tasks and dependencies, or add review gates on a Dispatch board. Covers reusing groups by their recorded scope, granular task titles, dependencies, issue links and leaving new tasks proposed.
+description: Plan, break down or organise work into Dispatch tasks; applies to any command run against a Dispatch board for planning. Use when asked to plan a feature, turn a GitHub issue into Dispatch tasks, split work into groups, tasks and dependencies, add review gates, or run any Dispatch planning command against a Dispatch board. Covers the critical rules (CLI only, never read or edit dispatch.json, explicit --actor), finding the workflow directory from a worktree, reusing groups by scope, granular task titles, dependencies, issue links and leaving new tasks proposed.
 ---
 
 # Dispatch: plan work
@@ -23,6 +23,8 @@ read, approve or tidy the board use the `dispatch-board` skill.
    `task move`, `dep add`, `dep remove`) record your own agent name (for
    example `claude` or `codex-server`), never `user`. Approvals are the
    user's decisions and record `user` (see "Leave tasks proposed" below).
+6. Commit after every completed Dispatch task.
+7. Use the Dispatch task title as the commit message.
 
 The storage file is an implementation detail. Do not inspect it with `cat`,
 `sed`, `jq`, `rg`, editors, scripts, or JSON parsers. If you need task state,
@@ -30,23 +32,26 @@ ask the CLI (add `--json` when you need to parse it).
 
 ## Find The Workflow Directory
 
-Dispatch state normally lives one directory above the product repository:
+Dispatch state normally lives one directory above the main product repository
+checkout:
 
 ```text
 work_dir/
   .git/
   dispatch.json
   dispatch.log
-  AGENTS.md / CLAUDE.md
   repo/
 ```
 
-Run Dispatch from `work_dir`. If your session started inside the product
-repository (`work_dir/repo` or one of its worktrees), the board is usually in
-the parent directory: run `cd ..` (or `cd` to the main checkout's parent) and
-check that `dispatch repo` prints the repository you are working on. If it says
-there is no board, you are in the wrong directory; do not run `dispatch init`
-unless the user asks for a new board.
+Run Dispatch commands from `work_dir`. If your session started inside the
+product repository (`work_dir/repo`), `work_dir` is `..`. If your session
+started in a task worktree outside `work_dir` (for example one created by Orca
+or `workspace create --dir`), `..` is not the workflow directory: find the
+main checkout with `git worktree list` (its first entry, or the parent of
+`git rev-parse --git-common-dir`), then `cd` one directory above that checkout
+and check that `dispatch repo` prints the repository you are working on. If it
+says there is no board, you are in the wrong directory; do not run
+`dispatch init` unless the user asks for a new board.
 
 ## How Dispatch Works
 

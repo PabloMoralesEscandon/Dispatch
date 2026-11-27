@@ -13,7 +13,7 @@ const DispatchCliCommand commands[] = {
     {"dep", "Manage dependencies"},
     {"commit", "Manage task commit references"},
     {"completion", "Print shell completion candidates"},
-    {"skills", "List, install and update the agent skills"},
+    {"skills", "List, show, install and update the agent skills"},
     {"ready", "List ready work or mark a task ready"},
     {"reviews", "List tasks waiting for review"},
     {"proposed", "List tasks waiting for approval"},
@@ -55,7 +55,7 @@ void dispatch_cli_print_help(void) {
     puts("  init, repo [set], agent create/list/show/command/session/resume/archive/restore,");
     puts("  workspace create/adopt/list/show/remove/repair/prune, group add/ready/edit/list/show,");
     puts("  task add/edit/move/delete/priority, dep add/remove, commit add/list/show,");
-    puts("  completion candidates/bash/zsh/fish/install, skills list/install/update,");
+    puts("  completion candidates/bash/zsh/fish/install, skills list/show/install/update,");
     puts("  ready, reviews, proposed, start, finish, review, unassign, normalize, status,");
     puts("  doctor, log, tui, list, show, blocked");
     puts("");
@@ -64,7 +64,7 @@ void dispatch_cli_print_help(void) {
     puts("  agent list/show, workspace list/show, log) and mutating commands (init, repo set, normalize,");
     puts("  task add/edit/move/delete/priority, group add/ready/edit, dep add/remove, commit add,");
     puts("  ready <id>, start, finish, review, unassign, agent create/archive/restore/session/command/resume,");
-    puts("  workspace create/adopt/remove/repair/prune, skills list/install/update).");
+    puts("  workspace create/adopt/remove/repair/prune, skills list/show/install/update).");
     puts("");
     printf("Version: %s (dispatch --version)\n", DISPATCH_VERSION);
 }
@@ -459,32 +459,9 @@ int create_agent_dirs(const char *agent_dir, char **scratch_dir,
     return 1;
 }
 
-/* Write an instruction file only when it does not exist yet: scaffolding
- * must never clobber user edits. */
-static void scaffold_workflow_file(const char *path, const char *content) {
-    FILE *file = fopen(path, "r");
-    if (file) {
-        fclose(file);
-        return;
-    }
-    file = fopen(path, "w");
-    if (!file) {
-        if (cli_json()) {
-            cli_warning("scaffold_failed", NULL, NULL,
-                        "could not create %s: %s", path, strerror(errno));
-        } else {
-            fprintf(stderr, "Could not create %s: %s\n", path, strerror(errno));
-        }
-        return;
-    }
-    fputs(content, file);
-    fclose(file);
-    if (!cli_json())
-        printf("Created %s\n", path);
-}
-
-/* On a fresh init, create the .dispatch/ tree and the workflow instruction
- * files from the embedded templates. */
+/* On a fresh init, create the .dispatch/ tree (agent support directories).
+ * Workflow instructions live in the embedded agent skills (ADR 0014), so
+ * init no longer writes AGENTS.md or CLAUDE.md. */
 static void scaffold_workflow_dir(void) {
     if (!make_dir_if_needed(".dispatch") ||
         !make_dir_if_needed(".dispatch/agents")) {
@@ -497,8 +474,6 @@ static void scaffold_workflow_dir(void) {
                     strerror(errno));
         }
     }
-    scaffold_workflow_file("AGENTS.md", dispatch_template_agents_md);
-    scaffold_workflow_file("CLAUDE.md", dispatch_template_claude_md);
 }
 
 static int run_command(const DispatchCliCommand *command, int argc,
@@ -585,6 +560,7 @@ static const struct {
     {"workspace", "repair", "workspace repair"},
     {"workspace", "prune", "workspace prune"},
     {"skills", "list", "skills list"},
+    {"skills", "show", "skills show"},
     {"skills", "install", "skills install"},
     {"skills", "update", "skills update"},
 };

@@ -1,0 +1,3 @@
+Created dispatch.json for repo <tmp>/work/repo
+Installed agent skills for claude, codex and opencode in .claude/skills, .agents/skills and .opencode/skills
+Hint: run dispatch skills install --global for sessions started outside the workflow directory

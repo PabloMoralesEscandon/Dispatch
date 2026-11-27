@@ -93,3 +93,6 @@ plan skill now passes the agent's name on those commands too.
   (issue #22; done in [ADR 0011](0011-skills-install.md)).
 - Slimming `AGENTS.md` / `CLAUDE.md` to point at the skills (issue #23; done
   in [ADR 0012](0012-slim-templates.md)).
+- Dropping `AGENTS.md` / `CLAUDE.md` from boards so the skills are the only
+  agent instructions (issue #31; done in
+  [ADR 0014](0014-skills-only-agent-instructions.md)).

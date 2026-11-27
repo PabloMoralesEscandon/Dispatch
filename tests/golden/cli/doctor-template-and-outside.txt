@@ -1,0 +1,25 @@
+Dispatch doctor
+[ok] board loaded
+[ok] configured repository is a git repository
+[info] AGENTS.md contains only the Dispatch template; the agent skills replace it and it can be removed
+       fix: remove AGENTS.md once the agent skills are installed
+[info] CLAUDE.md contains only the Dispatch template; the agent skills replace it and it can be removed
+       fix: remove CLAUDE.md once the agent skills are installed
+[ok] dispatch found on PATH
+[ok] workflow dispatch entry is a symlink
+[ok] fish completion installed at <tmp>/home/.config/fish/completions/dispatch.fish
+[ok] bash completion installed at <tmp>/home/.local/share/bash-completion/completions/dispatch
+[ok] zsh completion installed at <tmp>/home/.local/share/zsh/site-functions/_dispatch
+[ok] skill dispatch-board installed (3 copies)
+[ok] skill dispatch-plan installed (3 copies)
+[ok] skill dispatch-work installed (3 copies)
+[warn] agent skills are installed only in project scope, but workspace DE-02 lives outside the workflow directory
+       fix: dispatch skills install --global
+[ok] agent worker prompt exists
+[ok] workspace DE-01 path exists
+[ok] workspace DE-02 path exists
+[ok] no orphaned workspaces
+[ok] all done tasks have recorded commits
+[ok] no dependency anomalies
+[ok] no assignment invariant violations
+Summary: 1 warning

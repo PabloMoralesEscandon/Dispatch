@@ -18,5 +18,6 @@ the old one.
 | [0009](0009-json-errors-warnings-and-remaining-mutations.md) | JSON errors on reads, non-fatal warnings, and remaining mutations | Accepted |
 | [0010](0010-agent-skills.md) | Agent skills for planning, working and the board | Accepted |
 | [0011](0011-skills-install.md) | Ship the agent skills in the binary and install them per runner | Accepted |
-| [0012](0012-slim-templates.md) | Slim AGENTS.md / CLAUDE.md and agent prompts down to the skills | Accepted |
+| [0012](0012-slim-templates.md) | Slim AGENTS.md / CLAUDE.md and agent prompts down to the skills | Superseded by 0014 |
 | [0013](0013-shared-issue-links.md) | Several tasks may share a GitHub issue | Accepted |
+| [0014](0014-skills-only-agent-instructions.md) | Drop AGENTS.md and CLAUDE.md: make the skills the only agent instructions | Accepted |

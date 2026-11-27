@@ -8,12 +8,13 @@ static void print_completion_candidate_kinds(void) {
     puts("agents");
     puts("workspaces");
     puts("runners");
+    puts("skills");
 }
 
 static void print_completion_usage(void) {
     fprintf(stderr,
             "Usage: dispatch completion candidates "
-            "commands|candidate-kinds|tasks|groups|agents|workspaces|runners\n");
+            "commands|candidate-kinds|tasks|groups|agents|workspaces|runners|skills\n");
     fprintf(stderr, "       dispatch completion bash\n");
     fprintf(stderr, "       dispatch completion fish\n");
     fprintf(stderr, "       dispatch completion zsh\n");
@@ -38,13 +39,21 @@ static int cmd_completion_candidates(int argc, char **argv) {
         return 0;
     }
 
-    /* Runner names come from the agent runner table, not the board, so they
+    /* Runner and skill names come from built-in tables, not the board, so they
      * complete outside a workflow directory too. */
     if (strcmp(kind, "runners") == 0) {
         size_t count = 0;
         const char *const *runners = dispatch_agent_runners(&count);
         for (size_t i = 0; i < count; i++)
             puts(runners[i]);
+        return 0;
+    }
+
+    if (strcmp(kind, "skills") == 0) {
+        const char **names = NULL;
+        size_t count = skills_bundled_names(&names);
+        for (size_t i = 0; i < count; i++)
+            puts(names[i]);
         return 0;
     }
 
@@ -117,12 +126,17 @@ static int cmd_completion_zsh(int argc, char **argv) {
         "  if (( CURRENT > 3 )) && [[ ${words[CURRENT]} == --* ]]; then\n"
         "    case ${words[3]} in\n"
         "      list) compadd -- --project --global --runner --json ;;\n"
+        "      show) compadd -- --json ;;\n"
         "      install|update) compadd -- --project --global --runner --force "
         "--json ;;\n"
         "    esac\n"
         "    return\n"
         "  fi\n"
-        "  (( CURRENT == 3 )) && compadd -- list install update\n"
+        "  if (( CURRENT == 3 )); then\n"
+        "    compadd -- list show install update\n"
+        "  elif [[ ${words[3]} == show && CURRENT == 4 ]]; then\n"
+        "    _dispatch_compadd_candidates skills\n"
+        "  fi\n"
         "}\n"
         "\n"
         "_dispatch_repo_command() {\n"
@@ -481,6 +495,7 @@ static int cmd_completion_bash(int argc, char **argv) {
         "        case \"$sub\" in\n"
         "          list) _dispatch_complete_words \"--project --global --runner "
         "--json\" ;;\n"
+        "          show) _dispatch_complete_words \"--json\" ;;\n"
         "          install|update) _dispatch_complete_words \"--project --global "
         "--runner --force --json\" ;;\n"
         "        esac\n"
@@ -491,8 +506,11 @@ static int cmd_completion_bash(int argc, char **argv) {
         "\n"
         "  case \"$cmd\" in\n"
         "    skills)\n"
-        "      (( COMP_CWORD == 2 )) && _dispatch_complete_words \"list install "
-        "update\"\n"
+        "      if (( COMP_CWORD == 2 )); then\n"
+        "        _dispatch_complete_words \"list show install update\"\n"
+        "      elif [[ $sub == show && $COMP_CWORD -eq 3 ]]; then\n"
+        "        _dispatch_complete_candidates skills\n"
+        "      fi\n"
         "      ;;\n"
         "    completion)\n"
         "      if (( COMP_CWORD == 2 )); then\n"
@@ -610,8 +628,10 @@ static int cmd_completion_fish(int argc, char **argv) {
         "and __fish_seen_subcommand_from install' -a 'fish bash zsh'\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from skills; "
-        "and not __fish_seen_subcommand_from list install update' -a "
-        "'list install update'\n"
+        "and not __fish_seen_subcommand_from list show install update' -a "
+        "'list show install update'\n"
+        "complete -c dispatch -f -n '__fish_seen_subcommand_from skills; "
+        "and __fish_seen_subcommand_from show' -a '(__dispatch_candidates skills)'\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from skills; "
         "and __fish_seen_subcommand_from list install update' -l project\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from skills; "
@@ -622,7 +642,7 @@ static int cmd_completion_fish(int argc, char **argv) {
         "complete -c dispatch -f -n '__fish_seen_subcommand_from skills; "
         "and __fish_seen_subcommand_from install update' -l force\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from skills; "
-        "and __fish_seen_subcommand_from list install update' -l json\n"
+        "and __fish_seen_subcommand_from list show install update' -l json\n"
         "\n"
         "complete -c dispatch -f -n '__fish_seen_subcommand_from show start "
         "finish review unassign ready' -a '(__dispatch_candidates tasks)'\n"

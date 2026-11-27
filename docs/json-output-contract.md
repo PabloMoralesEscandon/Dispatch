@@ -12,7 +12,7 @@ This document defines version 1 of the machine-readable output produced when
   `commit add`, `agent create|archive|restore|session|command|resume`, and
   `workspace create|adopt|remove|repair|prune`, described in
   [Mutation results](#mutation-results);
-- the agent skills commands `skills list`, `skills install`, and
+- the agent skills commands `skills list`, `skills show`, `skills install`, and
   `skills update`, described in [Skills responses](#skills-responses).
 
 ## General rules
@@ -284,8 +284,7 @@ text to stderr:
 
 - `log_append_failed` when appending to `dispatch.log` fails after the board
   has been saved.
-- `scaffold_failed` when `init` cannot create `.dispatch` directories or
-  workflow instruction files (`AGENTS.md`, `CLAUDE.md`).
+- `scaffold_failed` when `init` cannot create `.dispatch` directories.
 - `repo_not_git` when `repo set` points at a directory that is not a Git
   repository.
 - `skill_modified`, `skill_unmanaged`, and `skill_newer` when `init` (or
@@ -566,17 +565,20 @@ stderr as `Warning: ...` lines and the exit status is still 0.
 }
 ```
 
-Every check has `status` (`ok` or `warn`), `message`, and — for warnings —
-a machine-stable `kind`, an optional `subject` (the task ID, agent name,
-workspace ID, or shell the warning refers to), and a `fix` hint. `ok` checks
-carry `null` for `kind`, `subject`, and `fix`. If the board itself cannot be
+Every check has `status` (`ok`, `info`, or `warn`), `message`, and — for
+`info` and `warn` checks — a machine-stable `kind`, an optional `subject` (the
+task ID, agent name, workspace ID, file name, or shell the check refers to),
+and a `fix` hint. `ok` checks carry `null` for `kind`, `subject`, and `fix`.
+`info` checks are informational notes (added in a compatible release,
+[ADR 0014](adr/0014-skills-only-agent-instructions.md)) and do not increment
+`summary.warnings`. If the board itself cannot be
 loaded, `board` is `null` and the single `board_load_failed` warning is
 emitted on stdout with exit status 1 and empty stderr. Usage errors (such as
 extra arguments or a repeated `--json`) emit a JSON error document on stderr
 like other read commands.
 
 The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
-`agents_md_missing`, `dispatch_not_on_path`, `workflow_entry_missing`,
+`dispatch_not_on_path`, `workflow_entry_missing`,
 `workflow_entry_unexpected_type`, `completion_home_unset`,
 `completion_missing`, `agent_prompt_missing`, `agent_prompt_outdated`,
 `agent_run_script_not_executable`, `missing_current_task`,
@@ -584,7 +586,10 @@ The version 1 doctor warning kinds are `board_load_failed`, `repo_not_git`,
 `workspace_branch_mismatch`, `orphaned_workspace`, `missing_commits`,
 `dep_self`, `dep_missing_reference`, `dep_duplicate`,
 `assignment_state_mismatch`, `start_provenance_mismatch`, `skills_missing`,
-`skills_outdated`, and `instructions_outdated`. Kinds shared
+`skills_outdated`, and `skills_project_only`. The version 1 informational
+(`info`) check kind is `instructions_redundant`. (Earlier releases emitted
+`agents_md_missing` and `instructions_outdated`, both retired by
+[ADR 0014](adr/0014-skills-only-agent-instructions.md).) Kinds shared
 with status warnings (`missing_commits`, `missing_current_task`,
 `assignment_state_mismatch`) describe the same conditions.
 `workspace_not_a_worktree` fires when an adopted workspace path exists on disk
@@ -597,18 +602,22 @@ fires when a bundled agent skill is installed for no runner, neither in the
 workflow directory nor globally. `skills_outdated` (subject: the skill name,
 fix `dispatch skills update`, or `dispatch skills update --global` for a
 global copy) fires once per installed copy that an older Dispatch installed
-and nobody edited since. Copies the user edited are not reported. Both were
-added in a compatible release.
-`instructions_outdated` (subject: `AGENTS.md` or `CLAUDE.md`, fix
-`dispatch skills install, then shorten <file> to the slim template (README:
-Upgrading Older Boards)`) fires when a workflow instruction file still carries
-the old long Dispatch instructions, detected by their
-`## Task Execution Protocol` heading; doctor never rewrites the file.
+and nobody edited since. Copies the user edited are not reported.
+`skills_project_only` (`warn`, subject: `null`, fix
+`dispatch skills install --global`) fires once when at least one bundled skill
+is installed only in project scope (no global copy for any runner) while at
+least one active workspace lives outside the workflow directory.
+`instructions_redundant` (`info`, subject: `AGENTS.md` or `CLAUDE.md`, fix
+`remove <file> once the agent skills are installed`) fires only when an
+existing workflow instruction file holds only a Dispatch template (old long or
+ADR 0012 slim); custom files and templates with local additions are left alone
+silently, and doctor never deletes or rewrites the file.
 `agent_prompt_outdated` (subject: the agent name, fix
 `run dispatch normalize`) fires when an agent's generated prompt predates the
-`## Dispatch Skills` section or still embeds the repository instructions;
-`normalize` regenerates it. Both were added in a compatible release
-([ADR 0012](adr/0012-slim-templates.md)).
+`## Dispatch Skills` section, embeds the old repository instructions, or still
+points at `AGENTS.md` / `CLAUDE.md`; `normalize` regenerates it
+([ADR 0012](adr/0012-slim-templates.md),
+[ADR 0014](adr/0014-skills-only-agent-instructions.md)).
 
 ## Mutation results
 
@@ -842,6 +851,7 @@ The version 1 error codes are:
 | `group_not_found` | A named group does not exist |
 | `agent_not_found` | A named agent does not exist |
 | `workspace_not_found` | No workspace matches the task or workspace ID |
+| `skill_not_found` | `skills show` named a skill not bundled in this Dispatch binary |
 | `group_exists` | A group with that name or prefix already exists |
 | `agent_exists` | An agent with that name already exists |
 | `invalid_state` | The task's state does not allow the transition |
@@ -870,9 +880,9 @@ generic failure.
 
 ## Skills responses
 
-`skills list`, `skills install`, and `skills update` work without a board
-(only project installs need one), so they use their own envelope with no
-`board` or `summary`:
+`skills list`, `skills show`, `skills install`, and `skills update` work
+without a board (only project installs need one), so they use their own
+envelope with no `board` or `summary`:
 
 ```json
 {
@@ -941,3 +951,24 @@ array with one entry per bundled skill: `name`, `version` (the Dispatch
 version that bundles it), `files` (paths inside the skill folder), and
 `installations` (the locations above, without `action`). When `HOME` is unset,
 `list` reports only project locations and adds a `home_unset` warning.
+
+`skills show <name> --json` returns the bundled skill's metadata and `SKILL.md`
+contents ([ADR 0014](adr/0014-skills-only-agent-instructions.md)):
+
+```json
+{
+  "schema_version": 1,
+  "command": "skills show",
+  "dispatch_version": "0.1.0",
+  "skill": {
+    "name": "dispatch-board",
+    "version": "0.1.0",
+    "files": ["SKILL.md", "references/commands.md"],
+    "content": "---\nname: dispatch-board\n..."
+  },
+  "warnings": []
+}
+```
+
+An unknown skill name fails with exit status `1` and error code
+`skill_not_found`.

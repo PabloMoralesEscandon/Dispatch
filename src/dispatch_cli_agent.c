@@ -252,7 +252,7 @@ int write_agent_prompt(const char *path, const char *name,
     }
 
     fprintf(file, "# Dispatch Agent: %s\n\n", name);
-    fprintf(file, "You are the Dispatch agent `%s`. This file gives your identity; how to plan, work and review comes from the Dispatch agent skills, and the rules every session follows are in `AGENTS.md` / `CLAUDE.md` in the workflow directory.\n\n", name);
+    fprintf(file, "You are the Dispatch agent `%s`. This file gives your identity; the Dispatch rules and workflow (planning, doing work and tending the board) come from the Dispatch agent skills.\n\n", name);
     fprintf(file, "## Agent ID\n\n");
     fprintf(file, "- Agent name: `%s`\n", name);
     fprintf(file, "- Runner: `%s`\n", runner);
@@ -267,7 +267,7 @@ int write_agent_prompt(const char *path, const char *name,
     fprintf(file, "- `dispatch-work`: start, continue or finish a task (session startup, workspaces, one commit per task, review gates, failure handling). This is your main skill.\n");
     fprintf(file, "- `dispatch-plan`: plan or break down work into groups, tasks and dependencies when the user asks for a plan.\n");
     fprintf(file, "- `dispatch-board`: report on, ready, review or tidy the board when the user asks.\n\n");
-    fprintf(file, "If your runner does not offer these skills, run `dispatch skills install` from the workflow directory (`dispatch skills list` shows where they are installed), or ask the user. Do not work from memory.\n\n");
+    fprintf(file, "If your runner does not offer these skills, run `dispatch skills install` from the workflow directory (or `dispatch skills install --global` for sessions started outside it; `dispatch skills list` shows where they are installed), print one with `dispatch skills show <name>`, or ask the user. Do not work from memory.\n\n");
 
     fprintf(file, "## Actor Usage\n\n");
     fprintf(file, "Always identify as `%s` when a Dispatch command records your own action:\n\n", name);

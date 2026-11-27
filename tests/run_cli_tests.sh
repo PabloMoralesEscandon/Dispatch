@@ -336,13 +336,18 @@ assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch worksp
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch agent session codex-a --session-id <SESSION-ID>"
 assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "# Dispatch Agent Instructions"
 assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "Never read dispatch.json directly."
-# GH-23: the prompt names the agent skills and the agent's actor id, and
-# records approvals as the user's (ADR 0012).
+# GH-23 / GH-31: the prompt names the agent skills and the agent's actor id,
+# records approvals as the user's, and never references AGENTS.md / CLAUDE.md
+# (ADR 0012, ADR 0014).
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "## Dispatch Skills"
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch-work\`"
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch-plan\`"
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch-board\`"
 assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "run \`dispatch skills install\` from the workflow directory"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch skills install --global\`"
+assert_file_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "\`dispatch skills show <name>\`"
+assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "AGENTS.md"
+assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "CLAUDE.md"
 assert_file_not_contains .dispatch/agents/codex-a/codex-a-PROMPT.md "dispatch review <TASK-ID> --actor codex-a"
 assert_golden agent-prompt-codex.md .dispatch/agents/codex-a/codex-a-PROMPT.md
 if [ ! -d .dispatch/agents/codex-a/scratch ]; then
@@ -2834,6 +2839,7 @@ assert_line "groups"
 assert_line "agents"
 assert_line "workspaces"
 assert_line "runners"
+assert_line "skills"
 
 expect_ok "$BIN" completion candidates tasks
 assert_line "DE-01"
@@ -3750,43 +3756,27 @@ assert_contains "Agent name must be 1-24 characters"
 expect_fail "$BIN" group add "ThisGroupNameIsFarTooLongToFitInTheBoardHeaderBand" --prefix LG
 assert_contains "Could not add group"
 
-# FX-04: a fresh init scaffolds the .dispatch/ tree and the instruction
-# files from embedded templates, never overwrites existing files, and does
-# not scaffold when dispatch.json already exists.
+# FX-04 / GH-31: a fresh init scaffolds the .dispatch/ tree and installs the
+# bundled agent skills (ADR 0014); it writes no AGENTS.md or CLAUDE.md and
+# never touches existing custom instruction files.
 case_dir="$(make_case_dir init-scaffold)"
 cd "$case_dir"
 mkdir repo
 expect_ok "$BIN" init repo
-assert_contains "Created AGENTS.md"
-assert_contains "Created CLAUDE.md"
+assert_not_contains "Created AGENTS.md"
+assert_not_contains "Created CLAUDE.md"
+assert_contains "Installed agent skills for claude, codex and opencode in .claude/skills, .agents/skills and .opencode/skills"
+assert_contains "Hint: run dispatch skills install --global for sessions started outside the workflow directory"
 if [ ! -d .dispatch/agents ]; then
     fail "dispatch init did not create .dispatch/agents"
 fi
-# GH-23: the scaffolded files are the slim templates (ADR 0012): the
-# critical rules, how to find the workflow directory, and the skills to use.
-assert_golden init-AGENTS.md AGENTS.md
-assert_golden init-CLAUDE.md CLAUDE.md
 for file in AGENTS.md CLAUDE.md; do
-    if ! cmp -s "$ROOT/$file" "$file"; then
-        fail "init did not scaffold $file from the template"
-    fi
-    assert_file_contains "$file" "# Dispatch Agent Rules"
-    assert_file_contains "$file" "## Critical Rules"
-    assert_file_contains "$file" "Never read \`dispatch.json\` directly."
-    assert_file_contains "$file" "## Find The Workflow Directory"
-    assert_file_contains "$file" "\`dispatch-plan\`"
-    assert_file_contains "$file" "\`dispatch-work\`"
-    assert_file_contains "$file" "\`dispatch-board\`"
-    assert_file_contains "$file" "\`dispatch skills install\`"
-    assert_file_contains "$file" "\`dispatch skills install --global\`"
-    assert_file_not_contains "$file" "## Task Execution Protocol"
-    assert_file_not_contains "$file" "## Core Commands"
-    if [ "$(line_count "$file")" -gt 100 ]; then
-        fail "$file template is longer than 100 lines"
+    if [ -e "$file" ]; then
+        fail "init must not create $file"
     fi
 done
-# GH-1 / GH-5 and the command list moved from the templates into the skills
-# that init installs next to them.
+# GH-1 / GH-5 and the command list live in the bundled skills that init
+# installs for every runner.
 for dir in .claude/skills .agents/skills .opencode/skills; do
     commands="$dir/dispatch-board/references/commands.md"
     assert_file_contains "$commands" "[--no-review] [--issue <ref>]"
@@ -3794,27 +3784,31 @@ for dir in .claude/skills .agents/skills .opencode/skills; do
     assert_file_contains "$commands" "[--issue <ref>|--clear-issue]"
     assert_file_contains "$commands" "dispatch repo set <path>"
     assert_file_contains "$commands" "dispatch task priority <TASK-ID> <value>"
+    assert_file_contains "$commands" "dispatch skills show <name> [--json]"
     assert_file_contains "$dir/dispatch-plan/SKILL.md" "dispatch task add DE --from-issue 42"
     assert_file_contains "$dir/dispatch-work/SKILL.md" "## Task Execution Protocol"
 done
 expect_ok "$BIN" doctor
-assert_contains "AGENTS.md found in workflow directory"
-# Re-init with an existing board must not scaffold or recreate files.
-rm AGENTS.md
+assert_not_contains "AGENTS.md missing"
+assert_not_contains "AGENTS.md found"
+# Re-init with an existing board leaves no instruction files behind.
 expect_ok "$BIN" init repo
 assert_contains "dispatch.json already exists"
 assert_not_contains "Created AGENTS.md"
-if [ -e AGENTS.md ]; then
-    fail "re-init recreated AGENTS.md"
+if [ -e AGENTS.md ] || [ -e CLAUDE.md ]; then
+    fail "re-init created AGENTS.md or CLAUDE.md"
 fi
-# A fresh init never overwrites existing instruction files.
-rm dispatch.json CLAUDE.md
+# A fresh init never touches pre-existing custom instruction files.
+rm dispatch.json
 printf 'custom instructions\n' > AGENTS.md
 expect_ok "$BIN" init repo
-assert_contains "Created CLAUDE.md"
+assert_not_contains "Created CLAUDE.md"
 assert_not_contains "Created AGENTS.md"
 assert_file_contains AGENTS.md "custom instructions"
 assert_file_not_contains AGENTS.md "# Dispatch Agent Rules"
+if [ -e CLAUDE.md ]; then
+    fail "fresh init must not create CLAUDE.md"
+fi
 
 # FX-09: the task inspector shows the full description: wrapped across rows,
 # paragraph breaks preserved, and every line reachable by scrolling.
@@ -5650,7 +5644,7 @@ set_manifest() { # skill-dir version bundle-hash
 expect_ok "$BIN" --version
 assert_line "dispatch 0.1.0"
 expect_ok "$BIN" --help
-assert_contains "skills list/install/update"
+assert_contains "skills list/show/install/update"
 
 # Project install needs the workflow directory.
 expect_fail "${sk[@]}" "$BIN" skills install
@@ -5659,10 +5653,16 @@ expect_json_error board_missing "${sk[@]}" "$BIN" skills install --json
 assert_json command string "skills install"
 expect_json_error board_missing "${sk[@]}" "$BIN" skills update --project --json
 
-# init installs the project skills for every runner, and nothing global.
+# init installs the project skills for every runner, writes no AGENTS.md /
+# CLAUDE.md, hints about --global, and installs nothing global.
 expect_ok "${sk[@]}" "$BIN" init repo
-assert_contains "Created CLAUDE.md"
+assert_not_contains "Created AGENTS.md"
+assert_not_contains "Created CLAUDE.md"
 assert_contains "Installed agent skills for claude, codex and opencode in .claude/skills, .agents/skills and .opencode/skills"
+assert_contains "Hint: run dispatch skills install --global for sessions started outside the workflow directory"
+if [ -e AGENTS.md ] || [ -e CLAUDE.md ]; then
+    fail "init must not write AGENTS.md or CLAUDE.md"
+fi
 for dir in $project_skill_dirs; do
     for skill in $bundled_skills; do
         if ! cmp -s "$ROOT/skills/$skill/SKILL.md" "$dir/$skill/SKILL.md"; then
@@ -5828,98 +5828,265 @@ expect_json_error usage "${sk[@]}" "$BIN" skills install --json --json
 expect_fail "${sk[@]}" "$BIN" skills frob
 assert_contains "Unknown skills command: frob"
 expect_fail "${sk[@]}" "$BIN" skills
-assert_contains "Usage: dispatch skills list|install|update"
+assert_contains "Usage: dispatch skills list|show|install|update"
 
-# Shell completion covers the skills subcommands and options.
+# GH-31: dispatch skills show <name> prints a bundled skill's SKILL.md to
+# stdout (works without a board too) and accepts --json (ADR 0014).
+cd "$case_dir"
+for skill in $bundled_skills; do
+    "$BIN" skills show "$skill" > "$case_dir/shown-$skill.md"
+    if ! cmp -s "$ROOT/skills/$skill/SKILL.md" "$case_dir/shown-$skill.md"; then
+        fail "skills show $skill did not match bundled skills/$skill/SKILL.md"
+    fi
+done
+expect_json_ok "$BIN" skills show dispatch-board --json
+assert_json \
+    schema_version integer 1 \
+    command string "skills show" \
+    dispatch_version string 0.1.0 \
+    skill.name string dispatch-board \
+    skill.version string 0.1.0 \
+    skill.files array_length 2 \
+    skill.files.0 string SKILL.md \
+    skill.files.1 string references/commands.md \
+    skill.content string "*" \
+    warnings array_length 0
+assert_contains "name: dispatch-board"
+expect_json_ok "$BIN" skills show --json dispatch-work
+assert_json \
+    command string "skills show" \
+    skill.name string dispatch-work \
+    skill.files array_length 1 \
+    skill.files.0 string SKILL.md
+expect_fail "$BIN" skills show
+assert_contains "Usage: dispatch skills show <name> [--json]"
+expect_fail "$BIN" skills show dispatch-plan extra
+assert_contains "Usage: dispatch skills show <name> [--json]"
+expect_fail "$BIN" skills show nonexistent
+assert_contains "Unknown skill nonexistent; bundled skills: dispatch-board, dispatch-plan, dispatch-work"
+expect_json_error skill_not_found "$BIN" skills show nonexistent --json
+assert_json command string "skills show" error.task_id null -
+expect_json_error usage "$BIN" skills show --json
+assert_json command string "skills show"
+expect_json_error usage "$BIN" skills show dispatch-plan --json --json
+assert_json command string "skills show"
+expect_ok "$BIN" completion candidates skills
+assert_line "dispatch-board"
+assert_line "dispatch-plan"
+assert_line "dispatch-work"
+cd "$case_dir/work"
+
+# Shell completion covers the skills subcommands, show candidates and options.
 expect_ok "$BIN" completion zsh
 assert_contains "_dispatch_skills_command"
+assert_contains "compadd -- list show install update"
+assert_contains "_dispatch_compadd_candidates skills"
+assert_contains "show) compadd -- --json ;;"
 assert_contains "compadd -- --project --global --runner --force --json"
 expect_ok "$BIN" completion fish
+assert_contains "and not __fish_seen_subcommand_from list show install update' -a 'list show install update'"
+assert_contains "and __fish_seen_subcommand_from show' -a '(__dispatch_candidates skills)'"
 assert_contains "__fish_seen_subcommand_from skills; and __fish_seen_subcommand_from install update' -l force"
 "$BIN" completion bash > "$TMP_ROOT/dispatch-skills-completion.bash"
 # shellcheck disable=SC2016
-expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
     bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills ""
+assert_line "show"
 assert_line "install"
 assert_line "update"
 # shellcheck disable=SC2016
-expect_ok bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills show ""
+assert_line "dispatch-board"
+assert_line "dispatch-plan"
+assert_line "dispatch-work"
+# shellcheck disable=SC2016
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
+    bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills show --
+assert_line "--json"
+assert_not_contains "--force"
+# shellcheck disable=SC2016
+expect_ok env PATH="$ROOT/build:$PATH" bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _dispatch_complete; printf "%s\n" "${COMPREPLY[@]}"' \
     bash "$TMP_ROOT/dispatch-skills-completion.bash" dispatch skills update --runner ""
 assert_line "opencode"
 
-# GH-23: slim templates and agent prompts that point at the skills (ADR 0012).
-# A fresh board gives a session everything it needs: the short instruction
-# files, every skill they name installed for every runner, and a quiet doctor.
-case_dir="$(make_case_dir slim-templates)"
-slim_home="$case_dir/home"
-mkdir -p "$slim_home" "$case_dir/work/repo"
+# GH-31: skills-only agent instructions, doctor info notes, outside-workspace
+# warnings, and updated agent prompts (ADR 0014, superseding ADR 0012).
+case_dir="$(make_case_dir skills-only)"
+so_home="$case_dir/home"
+mkdir -p "$so_home" "$case_dir/work/repo" "$case_dir/json-work/repo"
 git -C "$case_dir/work/repo" init -q
+git -C "$case_dir/work/repo" -c user.name=Dispatch -c user.email=dispatch@example.invalid commit -q --allow-empty -m init
+git -C "$case_dir/json-work/repo" init -q
 cd "$case_dir/work"
-sl=(env HOME="$slim_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH="$ROOT:$PATH")
+sl=(env HOME="$so_home" XDG_CONFIG_HOME= XDG_DATA_HOME= PATH="$ROOT:$PATH")
 ln -s "$BIN" dispatch
 for shell in fish bash zsh; do
     expect_ok "${sl[@]}" "$BIN" completion install "$shell"
 done
+
+# Fresh init writes no AGENTS.md / CLAUDE.md, installs project skills, and
+# hints about --global (golden checked with portable <tmp> path).
 expect_ok "${sl[@]}" "$BIN" init repo
-assert_contains "Created AGENTS.md"
-assert_contains "Created CLAUDE.md"
-assert_contains "Installed agent skills"
+printf '%s\n' "$RUN_OUTPUT" | sed "s|$case_dir|<tmp>|g" > "$case_dir/init-actual.txt"
+assert_golden init.txt "$case_dir/init-actual.txt"
+if [ -e AGENTS.md ] || [ -e CLAUDE.md ]; then
+    fail "init must not write AGENTS.md or CLAUDE.md"
+fi
 expect_json_ok "${sl[@]}" "$BIN" skills install --json
 assert_json result.installed integer 0 result.unchanged integer 9
-for file in AGENTS.md CLAUDE.md; do
-    # Every skill the template names is installed for every runner.
-    for skill in $(grep -o '`dispatch-[a-z]*`' "$file" | tr -d '`' | sort -u); do
-        for dir in .claude/skills .agents/skills .opencode/skills; do
-            if [ ! -f "$dir/$skill/SKILL.md" ]; then
-                fail "$file names $skill, but $dir/$skill/SKILL.md is missing"
-            fi
-        done
-    done
-done
+
+# Fresh init --json creates no AGENTS.md / CLAUDE.md and reports 9 skills installed.
+cd "$case_dir/json-work"
+expect_json_ok "${sl[@]}" "$BIN" init repo --json
+assert_json \
+    command string init \
+    result.created boolean true \
+    result.changed boolean true \
+    result.skills_installed integer 9 \
+    result.skills_skipped integer 0 \
+    warnings array_length 0
+if [ -e AGENTS.md ] || [ -e CLAUDE.md ]; then
+    fail "init --json must not write AGENTS.md or CLAUDE.md"
+fi
+cd "$case_dir/work"
+
+# Agent prompts name the skills and actor id, with no reference to AGENTS.md / CLAUDE.md.
 expect_ok "${sl[@]}" "$BIN" agent create --name worker --runner claude --no-run-script
+assert_file_not_contains .dispatch/agents/worker/worker-PROMPT.md "AGENTS.md"
+assert_file_not_contains .dispatch/agents/worker/worker-PROMPT.md "CLAUDE.md"
 for skill in $(grep -o '`dispatch-[a-z]*`' .dispatch/agents/worker/worker-PROMPT.md | tr -d '`' | sort -u); do
     if [ ! -f ".claude/skills/$skill/SKILL.md" ]; then
         fail "the agent prompt names $skill, but it is not installed"
     fi
 done
-expect_ok "${sl[@]}" "$BIN" doctor
-assert_contains "[ok] skill dispatch-work installed (3 copies)"
-assert_contains "[ok] agent worker prompt exists"
-assert_not_contains "old long Dispatch instructions"
-assert_not_contains "skills_missing"
 
-# Doctor notices the old long templates on an existing board, suggests
-# dispatch skills install, and never rewrites the files.
-# tests/fixtures/legacy-AGENTS.md is the AGENTS.md that init wrote before
-# ADR 0012.
-cp "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md
+# Clean board with no instruction files has zero doctor warnings (golden + JSON).
 expect_ok "${sl[@]}" "$BIN" doctor
-assert_contains "[warn] AGENTS.md carries the old long Dispatch instructions; the agent skills now hold them"
-assert_contains "fix: dispatch skills install, then shorten AGENTS.md to the slim template (README: Upgrading Older Boards)"
-assert_not_contains "CLAUDE.md carries the old"
-if ! cmp -s "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md; then
-    fail "doctor must not rewrite AGENTS.md"
-fi
-printf '# Our rules\n\n## Task Execution Protocol\n\nLocal text.\n' > CLAUDE.md
+printf '%s\n' "$RUN_OUTPUT" | sed "s|$case_dir|<tmp>|g" > "$case_dir/doctor-clean-actual.txt"
+assert_golden doctor-clean.txt "$case_dir/doctor-clean-actual.txt"
 expect_ok "${sl[@]}" "$BIN" doctor --json
-assert_json command string doctor summary.warnings integer 2
-assert_contains '"kind": "instructions_outdated"'
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "agents_md_missing"
+assert_not_contains "instructions_outdated"
+assert_not_contains "instructions_redundant"
+assert_not_contains "skills_project_only"
+
+# Template-only AGENTS.md (old long) and CLAUDE.md (ADR 0012 slim) get [info]
+# notes (not warnings) that they can be removed, and are never modified.
+cp "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md
+cp "$ROOT/tests/fixtures/slim-AGENTS.md" CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor
+assert_contains "[info] AGENTS.md contains only the Dispatch template; the agent skills replace it and it can be removed"
+assert_contains "fix: remove AGENTS.md once the agent skills are installed"
+assert_contains "[info] CLAUDE.md contains only the Dispatch template; the agent skills replace it and it can be removed"
+assert_contains "fix: remove CLAUDE.md once the agent skills are installed"
+assert_contains "Summary: 0 warnings"
+if ! cmp -s "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md; then
+    fail "doctor must not modify or remove AGENTS.md"
+fi
+if ! cmp -s "$ROOT/tests/fixtures/slim-AGENTS.md" CLAUDE.md; then
+    fail "doctor must not modify or remove CLAUDE.md"
+fi
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_contains '"status": "info"'
+assert_contains '"kind": "instructions_redundant"'
 assert_contains '"subject": "AGENTS.md"'
 assert_contains '"subject": "CLAUDE.md"'
-assert_contains '"fix": "dispatch skills install, then shorten CLAUDE.md to the slim template (README: Upgrading Older Boards)"'
-cp "$ROOT/AGENTS.md" AGENTS.md
-cp "$ROOT/CLAUDE.md" CLAUDE.md
-expect_ok "${sl[@]}" "$BIN" doctor --json
-assert_json summary.warnings integer 0
-assert_not_contains "instructions_outdated"
+assert_contains '"fix": "remove AGENTS.md once the agent skills are installed"'
+assert_contains '"fix": "remove CLAUDE.md once the agent skills are installed"'
 
-# Prompts written by an older Dispatch (no skills section, or the repository
-# instructions copied in) are flagged by doctor and regenerated by normalize.
+# Custom instruction files — including unrelated files with a Dispatch heading,
+# and templates with local additions — are left alone silently.
+printf '# Project Rules\n\nUse tabs everywhere.\n' > AGENTS.md
+printf '# Our rules\n\n## Task Execution Protocol\n\nLocal text.\n' > CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "instructions_redundant"
+assert_not_contains "instructions_outdated"
+assert_not_contains '"status": "info"'
+assert_file_contains AGENTS.md "Use tabs everywhere."
+assert_file_contains CLAUDE.md "Local text."
+
+# Appending local additions to an old long or slim template also keeps doctor silent.
+cp "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md
+printf '\n## Local Rules\n\nAlways run make check.\n' >> AGENTS.md
+cp "$ROOT/tests/fixtures/slim-AGENTS.md" CLAUDE.md
+printf '\nRemember our release checklist.\n' >> CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "instructions_redundant"
+assert_file_contains AGENTS.md "Always run make check."
+assert_file_contains CLAUDE.md "Remember our release checklist."
+
+# Editing inside the slim template (without adding a heading) also keeps doctor silent.
+sed 's/Never read `dispatch.json` directly./Never read `dispatch.json` directly or commit secrets./' \
+    "$ROOT/tests/fixtures/slim-AGENTS.md" > CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "instructions_redundant"
+rm -f AGENTS.md CLAUDE.md
+
+# Project-only skills + workspace INSIDE the workflow directory: no warning.
+expect_ok "${sl[@]}" "$BIN" group add Development --prefix DE
+expect_ok "${sl[@]}" "$BIN" task add DE InsideTask --no-review
+expect_ok "${sl[@]}" "$BIN" task add DE OutsideCreated --no-review
+expect_ok "${sl[@]}" "$BIN" task add DE OutsideAdopted --no-review
+expect_ok "${sl[@]}" "$BIN" ready DE-01 DE-02 DE-03 --actor user --no-review
+expect_ok "${sl[@]}" "$BIN" workspace create DE-01 --actor worker
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "skills_project_only"
+
+# Workspace OUTSIDE the workflow directory with project-only skills triggers
+# skills_project_only (golden with template info notes + outside warning).
+expect_ok "${sl[@]}" "$BIN" workspace create DE-02 --actor worker --dir "$case_dir/outside-ws"
+cp "$ROOT/tests/fixtures/legacy-AGENTS.md" AGENTS.md
+cp "$ROOT/tests/fixtures/slim-AGENTS.md" CLAUDE.md
+expect_ok "${sl[@]}" "$BIN" doctor
+printf '%s\n' "$RUN_OUTPUT" | sed "s|$case_dir|<tmp>|g" > "$case_dir/doctor-template-and-outside-actual.txt"
+assert_golden doctor-template-and-outside.txt "$case_dir/doctor-template-and-outside-actual.txt"
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 1
+assert_contains '"kind": "skills_project_only"'
+assert_contains '"fix": "dispatch skills install --global"'
+assert_contains '"kind": "instructions_redundant"'
+rm -f AGENTS.md CLAUDE.md
+
+# Multiple outside workspaces (including adopted worktrees) emit one plural warning.
+expect_ok git -C repo worktree add -q -b orca/outside "$case_dir/orca-outside" HEAD
+expect_ok "${sl[@]}" "$BIN" workspace adopt DE-03 --actor worker --path "$case_dir/orca-outside" --external orca:ws-out
+expect_ok "${sl[@]}" "$BIN" doctor
+assert_contains "[warn] agent skills are installed only in project scope, but 2 workspaces live outside the workflow directory"
+assert_contains "fix: dispatch skills install --global"
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 1
+assert_contains '"kind": "skills_project_only"'
+
+# Installing global skills (even for one runner) clears skills_project_only.
+expect_ok "${sl[@]}" "$BIN" skills install --global --runner claude
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "skills_project_only"
+
+# Removing global skills and removing outside workspaces also clears it.
+rm -rf "$so_home/.claude"
+expect_ok "${sl[@]}" "$BIN" workspace remove DE-02 --force
+expect_ok "${sl[@]}" "$BIN" workspace remove DE-03
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_json command string doctor summary.warnings integer 0
+assert_not_contains "skills_project_only"
+expect_ok "${sl[@]}" "$BIN" workspace remove DE-01 --force
+
+# Prompts written by an older Dispatch (no skills section, embedded AGENTS.md,
+# or ADR 0012 prompt pointing at AGENTS.md / CLAUDE.md) are flagged by doctor
+# and regenerated by normalize.
 prompt=.dispatch/agents/worker/worker-PROMPT.md
 expected_prompt="$(cat "$prompt")"
 printf '# Dispatch Agent: worker\n\n## Agent ID\n\n- Agent name: `worker`\n' > "$prompt"
 expect_ok "${sl[@]}" "$BIN" doctor
-assert_contains "[warn] agent worker prompt predates the Dispatch skills"
+assert_contains "[warn] agent worker prompt is outdated"
 assert_contains "fix: run dispatch normalize"
 expect_ok "${sl[@]}" "$BIN" doctor --json
 assert_contains '"kind": "agent_prompt_outdated"'
@@ -5931,9 +6098,18 @@ fi
 printf '# Dispatch Agent: worker\n\n## Agent ID\n\n## Dispatch Skills\n\n## Repository Instructions From AGENTS.md\n\nOld copy.\n' > "$prompt"
 expect_ok "${sl[@]}" "$BIN" normalize
 assert_file_not_contains "$prompt" "## Repository Instructions From AGENTS.md"
+# An ADR 0012 prompt that still points at AGENTS.md / CLAUDE.md is refreshed too.
+printf '# Dispatch Agent: worker\n\nYou are the Dispatch agent `worker`. This file gives your identity; how to plan, work and review comes from the Dispatch agent skills, and the rules every session follows are in `AGENTS.md` / `CLAUDE.md` in the workflow directory.\n\n## Agent ID\n\n## Dispatch Skills\n' > "$prompt"
+expect_ok "${sl[@]}" "$BIN" doctor --json
+assert_contains '"kind": "agent_prompt_outdated"'
+assert_contains '"subject": "worker"'
+expect_ok "${sl[@]}" "$BIN" normalize
+if [ "$(cat "$prompt")" != "$expected_prompt" ]; then
+    fail "normalize did not refresh ADR 0012 prompt referencing AGENTS.md"
+fi
 expect_ok "${sl[@]}" "$BIN" doctor
 assert_contains "[ok] agent worker prompt exists"
-assert_not_contains "predates the Dispatch skills"
+assert_not_contains "prompt is outdated"
 
 cd "$ROOT"
 

@@ -11,9 +11,9 @@
 #    skills (fenced blocks and inline code spans) is a real command according to
 #    `dispatch --help`, and every top-level command listed there is mentioned by
 #    at least one skill, apart from the commented exclusions below.
-# 3. Templates: every `dispatch <command> [<subcommand>]` in code in the slim
-#    AGENTS.md / CLAUDE.md templates (ADR 0012) is a real command too, and the
-#    templates name every expected skill. They do not count towards coverage.
+# 3. Repository dev instructions: every `dispatch <command> [<subcommand>]` in
+#    code in this repository's AGENTS.md / CLAUDE.md is a real command too, and
+#    they name every expected skill. They do not count towards coverage.
 #
 # The binary is $DISPATCH_BIN, defaulting to the freshly built ./dispatch of
 # this checkout, never one found on PATH.
@@ -24,7 +24,8 @@ SKILLS_DIR="${1:-$ROOT/skills}"
 BIN="${DISPATCH_BIN:-$ROOT/dispatch}"
 
 EXPECTED_SKILLS="dispatch-plan dispatch-work dispatch-board"
-# The slim instruction templates that dispatch init scaffolds (ADR 0012).
+# This repository's own AGENTS.md / CLAUDE.md (dev rules for Dispatch itself;
+# `dispatch init` no longer scaffolds them into boards, ADR 0014).
 TEMPLATE_FILES="${DISPATCH_TEMPLATES:-$ROOT/AGENTS.md $ROOT/CLAUDE.md}"
 
 # Top-level commands that no skill needs to mention. Keep each one commented.
