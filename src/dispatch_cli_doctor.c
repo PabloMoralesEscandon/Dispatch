@@ -2,6 +2,8 @@
 
 #include <jansson.h>
 
+#include "dispatch_sha256.h"
+
 /* When non-NULL, doctor checks are collected here as JSON objects instead
  * of being printed (doctor --json). */
 static json_t *doctor_json_checks = NULL;
@@ -18,6 +20,25 @@ static void doctor_ok(const char *message) {
         return;
     }
     printf("[ok] %s\n", message);
+}
+
+static void doctor_info(const char *kind, const char *subject,
+                        const char *message, const char *fix) {
+    if (doctor_json_checks) {
+        json_t *object = json_object();
+        json_object_set_new(object, "status", json_string("info"));
+        json_object_set_new(object, "kind", json_string(kind));
+        json_object_set_new(object, "subject",
+                            subject ? json_string(subject) : json_null());
+        json_object_set_new(object, "message", json_string(message));
+        json_object_set_new(object, "fix",
+                            fix && fix[0] ? json_string(fix) : json_null());
+        json_array_append_new(doctor_json_checks, object);
+        return;
+    }
+    printf("[info] %s\n", message);
+    if (fix && fix[0])
+        printf("       fix: %s\n", fix);
 }
 
 static void doctor_warn(size_t *warnings, const char *kind,
@@ -103,24 +124,82 @@ static void doctor_check_completion(size_t *warnings, const char *shell_name) {
     free(path);
 }
 
-/* Agent skills (ADR 0011): each bundled skill should be installed for at
- * least one runner, in the workflow directory or globally, and no
+static int path_is_within_dir(const char *dir, const char *path) {
+    if (!dir || !dir[0] || !path || !path[0])
+        return 0;
+    size_t dir_len = strlen(dir);
+    while (dir_len > 1 && dir[dir_len - 1] == '/')
+        dir_len--;
+    if (dir_len == 1 && dir[0] == '/')
+        return path[0] == '/';
+    return strncmp(path, dir, dir_len) == 0 &&
+           (path[dir_len] == '/' || path[dir_len] == '\0');
+}
+
+/* Count live workspaces whose path lives outside the workflow directory.
+ * Project-scoped skills are only found inside the workflow directory, so
+ * outside workspaces (such as Orca worktrees or `workspace create --dir`)
+ * need `--global` skills (ADR 0014). */
+static size_t count_outside_workspaces(const DispatchBoard *board,
+                                       const char **first_id_out) {
+    if (first_id_out)
+        *first_id_out = NULL;
+    char *workflow_dir = dispatch_resolve_path(".", ".");
+    if (!workflow_dir)
+        return 0;
+
+    size_t outside = 0;
+    for (size_t i = 0; i < board->workspaces.count; i++) {
+        const DispatchWorkspace *workspace = &board->workspaces.items[i];
+        if (workspace->state == DISPATCH_WORKSPACE_REMOVED)
+            continue;
+        char *resolved = dispatch_resolve_path(".", workspace->path);
+        int inside = 0;
+        if (resolved) {
+            inside = path_is_within_dir(workflow_dir, resolved);
+            free(resolved);
+        } else if (workspace->path && workspace->path[0] == '/') {
+            inside = path_is_within_dir(workflow_dir, workspace->path);
+        } else if (workspace->path && workspace->path[0] != '\0') {
+            inside = strcmp(workspace->path, "..") != 0 &&
+                     strncmp(workspace->path, "../", 3) != 0;
+        }
+        if (!inside) {
+            if (outside == 0 && first_id_out)
+                *first_id_out = workspace->id;
+            outside++;
+        }
+    }
+    free(workflow_dir);
+    return outside;
+}
+
+/* Agent skills (ADR 0011, ADR 0014): each bundled skill should be installed
+ * for at least one runner, in the workflow directory or globally, and no
  * Dispatch-installed copy should be older than this binary. Copies the user
- * edited are theirs and are not reported. */
-static void doctor_check_skills(size_t *warnings) {
+ * edited are theirs and are not reported. When skills exist only in project
+ * scope while workspaces live outside the workflow directory, warn so the
+ * user knows sessions there will not find them. */
+static void doctor_check_skills(size_t *warnings, const DispatchBoard *board) {
     const char *home = getenv("HOME");
     SkillTargets targets;
     skills_collect_targets(1, home && home[0], "all", &targets);
     const char **names;
     size_t name_count = skills_bundled_names(&names);
+    size_t project_only_skills = 0;
     for (size_t s = 0; s < name_count; s++) {
-        size_t installed = 0, outdated = 0;
+        size_t installed = 0, project_installed = 0, global_installed = 0;
+        size_t outdated = 0;
         for (size_t i = 0; i < targets.count; i++) {
             const SkillTarget *target = &targets.items[i];
             if (strcmp(target->skill, names[s]) != 0 ||
                 target->status == SKILL_MISSING)
                 continue;
             installed++;
+            if (strcmp(target->scope, "global") == 0)
+                global_installed++;
+            else
+                project_installed++;
             if (target->status != SKILL_OUTDATED)
                 continue;
             outdated++;
@@ -136,6 +215,8 @@ static void doctor_check_skills(size_t *warnings) {
                             ? "dispatch skills update --global"
                             : "dispatch skills update");
         }
+        if (project_installed > 0 && global_installed == 0)
+            project_only_skills++;
         char message[512];
         if (installed == 0) {
             snprintf(message, sizeof(message),
@@ -146,6 +227,28 @@ static void doctor_check_skills(size_t *warnings) {
             snprintf(message, sizeof(message), "skill %s installed (%zu %s)",
                      names[s], installed, installed == 1 ? "copy" : "copies");
             doctor_ok(message);
+        }
+    }
+    if (project_only_skills > 0) {
+        const char *first_outside = NULL;
+        size_t outside = count_outside_workspaces(board, &first_outside);
+        if (outside > 0) {
+            char message[512];
+            if (outside == 1) {
+                snprintf(message, sizeof(message),
+                         "agent skills are installed only in project scope, "
+                         "but workspace %s lives outside the workflow "
+                         "directory",
+                         first_outside);
+            } else {
+                snprintf(message, sizeof(message),
+                         "agent skills are installed only in project scope, "
+                         "but %zu workspaces live outside the workflow "
+                         "directory",
+                         outside);
+            }
+            doctor_warn(warnings, "skills_project_only", NULL, message,
+                        "dispatch skills install --global");
         }
     }
     skills_targets_free(&targets);
@@ -177,31 +280,189 @@ static int file_contains_text(const char *path, const char *needle) {
 
 /* A generated prompt is stale when it predates the agent ID section, still
  * embeds the repository instructions (the oldest prompts copied AGENTS.md in
- * under this heading), or predates the skills section (ADR 0012). */
+ * under this heading), predates the skills section (ADR 0012), or still
+ * points at AGENTS.md / CLAUDE.md (ADR 0014). */
 static int agent_prompt_needs_refresh(const char *path) {
     return !file_contains_text(path, "## Agent ID") ||
            !file_contains_text(path, AGENT_PROMPT_SKILLS_HEADING) ||
-           file_contains_text(path, "## Repository Instructions From AGENTS.md");
+           file_contains_text(path, "## Repository Instructions From AGENTS.md") ||
+           file_contains_text(path, AGENT_PROMPT_LEGACY_FILES_MARKER);
 }
 
-/* The workflow instruction files used to carry the whole workflow (about 450
- * lines); now the agent skills do and the files are short (ADR 0012). Doctor
- * only reports an old copy: the file may hold the person's own additions, so
- * it is never rewritten. */
-static void doctor_check_instruction_file(size_t *warnings, const char *path) {
-    char message[256];
-    if (!file_contains_text(path, LEGACY_TEMPLATE_MARKER))
+/* SHA-256 of the ADR 0012 slim AGENTS.md / CLAUDE.md template (LF line
+ * endings). Only one slim template was ever scaffolded by `dispatch init`,
+ * so an exact match ensures any local edit leaves the file untouched. */
+#define SLIM_TEMPLATE_SHA256 \
+    "7060e35a67192a2cbf2891e4fd21135ff3a965af0cb09e8e805b0d1986e0b1c2"
+
+static int is_known_long_template_heading(const char *line) {
+    static const char *const headings[] = {
+        "## Critical Rules",
+        "## Instruction Visibility",
+        "## Core Commands",
+        "## How Dispatch Works",
+        "## Session Startup",
+        "## Selecting Work",
+        "## Task Execution Protocol",
+        "## Commit Discipline",
+        "## Parallel Agent Safety",
+        "## Workspaces And Parallel Agent Safety",
+        "## Planning Work",
+        "## Agent Identity And Workspace Setup",
+        "## Running A Task Sequence In One Workspace",
+        "## Executing A User-Named Task",
+        "## Failure Handling",
+    };
+    for (size_t i = 0; i < sizeof(headings) / sizeof(headings[0]); i++) {
+        if (strcmp(line, headings[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int line_is_blank(const char *line) {
+    for (const char *p = line; *p; p++) {
+        if (!isspace((unsigned char)*p))
+            return 0;
+    }
+    return 1;
+}
+
+/* Read one line from file into *buf (growing as needed), stripping trailing
+ * CR/LF. Returns 1 when a line was read, 0 on EOF, -1 on read error. */
+static int read_line_stripped(FILE *file, char **buf, size_t *cap,
+                              size_t *len_out) {
+    size_t len = 0;
+    int ch;
+    while ((ch = fgetc(file)) != EOF) {
+        if (len + 2 > *cap) {
+            size_t next = *cap == 0 ? 256 : *cap * 2;
+            *buf = cli_realloc_array(*buf, next, 1);
+            *cap = next;
+        }
+        if (ch == '\n')
+            break;
+        (*buf)[len++] = (char)ch;
+    }
+    if (ferror(file))
+        return -1;
+    if (ch == EOF && len == 0)
+        return 0;
+    while (len > 0 && (*buf)[len - 1] == '\r')
+        len--;
+    if (!*buf) {
+        *buf = cli_realloc_array(NULL, 16, 1);
+        *cap = 16;
+    }
+    (*buf)[len] = '\0';
+    *len_out = len;
+    return 1;
+}
+
+/* Returns 1 when path is a regular file containing only a Dispatch template
+ * (either the ADR 0012 slim template, or any historical old long template
+ * scaffolded before ADR 0012). Custom files and templates with user additions
+ * return 0 so doctor stays silent about them (ADR 0014). */
+static int file_is_dispatch_template(const char *path) {
+    struct stat info;
+    if (!path || stat(path, &info) != 0 || !S_ISREG(info.st_mode))
+        return 0;
+    FILE *file = fopen(path, "rb");
+    if (!file)
+        return 0;
+
+    DispatchSha256 sha;
+    dispatch_sha256_init(&sha);
+
+    char *line = NULL;
+    size_t cap = 0;
+    size_t len = 0;
+    char *last_nonempty = NULL;
+
+    int has_first = 0;
+    int long_ok = 1;
+    int in_fence = 0;
+    int h1_count = 0;
+    int has_critical = 0;
+    int has_protocol = 0;
+    int has_failure = 0;
+
+    int status;
+    while ((status = read_line_stripped(file, &line, &cap, &len)) == 1) {
+        dispatch_sha256_update(&sha, line, len);
+        dispatch_sha256_update(&sha, "\n", 1);
+
+        if (!line_is_blank(line)) {
+            if (!has_first) {
+                has_first = 1;
+                if (strcmp(line, "# Dispatch Agent Instructions") != 0)
+                    long_ok = 0;
+            }
+            free(last_nonempty);
+            last_nonempty = cli_strdup(line);
+        }
+
+        if (strncmp(line, "```", 3) == 0) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if (in_fence || !long_ok)
+            continue;
+
+        if (strncmp(line, "# ", 2) == 0) {
+            h1_count++;
+            if (h1_count > 1)
+                long_ok = 0;
+        } else if (strncmp(line, "###", 3) == 0) {
+            long_ok = 0;
+        } else if (strncmp(line, "## ", 3) == 0) {
+            if (!is_known_long_template_heading(line)) {
+                long_ok = 0;
+            } else if (strcmp(line, "## Critical Rules") == 0) {
+                has_critical = 1;
+            } else if (strcmp(line, "## Task Execution Protocol") == 0) {
+                has_protocol = 1;
+            } else if (strcmp(line, "## Failure Handling") == 0) {
+                has_failure = 1;
+            }
+        }
+    }
+    fclose(file);
+    free(line);
+
+    int matched = 0;
+    if (status == 0) {
+        char hex[65];
+        dispatch_sha256_final_hex(&sha, hex);
+        if (strcmp(hex, SLIM_TEMPLATE_SHA256) == 0) {
+            matched = 1;
+        } else if (long_ok && has_first && !in_fence && has_critical &&
+                   has_protocol && has_failure && last_nonempty &&
+                   strcmp(last_nonempty,
+                          "explicitly assigned you as the reviewer.") == 0) {
+            matched = 1;
+        }
+    }
+    free(last_nonempty);
+    return matched;
+}
+
+/* Dispatch no longer writes or depends on AGENTS.md / CLAUDE.md (ADR 0014).
+ * An existing file matching only a Dispatch template (old long or slim) gets
+ * an informational note that it can be removed; files with custom content are
+ * left alone silently, and doctor never deletes or rewrites any file. */
+static void doctor_check_instruction_file(const char *path) {
+    if (!file_is_dispatch_template(path))
         return;
+    char message[256];
     snprintf(message, sizeof(message),
-             "%s carries the old long Dispatch instructions; the agent "
-             "skills now hold them",
+             "%s contains only the Dispatch template; the agent skills "
+             "replace it and it can be removed",
              path);
     char fix[256];
     snprintf(fix, sizeof(fix),
-             "dispatch skills install, then shorten %s to the slim template "
-             "(README: Upgrading Older Boards)",
-             path);
-    doctor_warn(warnings, "instructions_outdated", path, message, fix);
+             "remove %s once the agent skills are installed", path);
+    doctor_info("instructions_redundant", path, message, fix);
 }
 
 
@@ -246,14 +507,8 @@ int cmd_doctor(int argc, char **argv) {
                     "run dispatch init <repo-path> from the workflow directory");
     }
 
-    if (path_exists("AGENTS.md"))
-        doctor_ok("AGENTS.md found in workflow directory");
-    else
-        doctor_warn(&warnings, "agents_md_missing", NULL,
-                    "AGENTS.md missing in workflow directory",
-                    "add repository workflow instructions for agents");
-    doctor_check_instruction_file(&warnings, "AGENTS.md");
-    doctor_check_instruction_file(&warnings, "CLAUDE.md");
+    doctor_check_instruction_file("AGENTS.md");
+    doctor_check_instruction_file("CLAUDE.md");
 
     if (command_exists_on_path("dispatch"))
         doctor_ok("dispatch found on PATH");
@@ -281,7 +536,7 @@ int cmd_doctor(int argc, char **argv) {
     doctor_check_completion(&warnings, "fish");
     doctor_check_completion(&warnings, "bash");
     doctor_check_completion(&warnings, "zsh");
-    doctor_check_skills(&warnings);
+    doctor_check_skills(&warnings, &board);
 
     char *current_repo_path = dispatch_resolve_path(".", board.repo_path);
 
@@ -295,7 +550,7 @@ int cmd_doctor(int argc, char **argv) {
                         message, "run dispatch normalize");
         } else if (agent_prompt_needs_refresh(agent->prompt_path)) {
             snprintf(message, sizeof(message),
-                     "agent %s prompt predates the Dispatch skills",
+                     "agent %s prompt is outdated",
                      agent->name);
             doctor_warn(&warnings, "agent_prompt_outdated", agent->name,
                         message, "run dispatch normalize");
